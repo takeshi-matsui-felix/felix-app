@@ -58,25 +58,19 @@ def process_photo(upload_file):
     return f"data:{upload_file.type};base64,{b64}"
 
 # ==========================================
-# 2. UI設定: スマホ完全最適化
+# 2. UI設定
 # ==========================================
 st.set_page_config(page_title="Felix検査App", layout="wide")
 
 st.markdown("""
 <style>
-    /* 画面全体 */
     .stApp { background-color: #121212; color: #FFFFFF !important; }
     
-    /* 【重点修正1】サイドバー（メニュー）背景を黒、文字を白に強制 */
-    [data-testid="stSidebar"] {
-        background-color: #121212 !important;
-        border-right: 1px solid #333;
-    }
-    [data-testid="stSidebar"] * {
-        color: #FFFFFF !important;
-    }
+    /* サイドバー背景を黒、文字を白 */
+    [data-testid="stSidebar"] { background-color: #121212 !important; border-right: 1px solid #333; }
+    [data-testid="stSidebar"] * { color: #FFFFFF !important; }
 
-    /* カメラボタンの視認性 */
+    /* カメラボタン視認性 */
     [data-testid="stFileUploadDropzone"] {
         background-color: #262730 !important;
         border: 2px dashed #555 !important;
@@ -87,22 +81,28 @@ st.markdown("""
         font-weight: bold !important;
     }
     
-    /* 報告書エリア（白背景） */
+    /* 報告書エリア（白背景）内の文字を黒に固定 */
     #print-report-wrapper, #print-report-wrapper * {
         color: #000000 !important;
     }
     
-    /* 全体ボタン */
+    /* 全体ボタンのデザイン */
     div.stButton > button {
         background-color: #1E1E1E; color: #00E5FF !important; border: 1px solid #00E5FF;
-        border-radius: 6px; height: 50px; font-weight: bold; width: 100%;
+        border-radius: 6px; height: 50px; font-weight: bold; width: 100%; margin-bottom: 10px;
     }
     
+    /* 完了分一覧の物件枠（Expander）を少し目立たせる */
+    div[data-testid="stExpander"] {
+        background-color: #1E1E1E !important;
+        border: 1px solid #333 !important;
+    }
+
     footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
-# --- セッションステート管理 ---
+# セッション管理
 if "role" not in st.session_state: st.session_state.role = None
 if "current_box" not in st.session_state: st.session_state.current_box = None
 if "issue_saved" not in st.session_state: st.session_state.issue_saved = False
@@ -123,34 +123,27 @@ WORK_OPTS = [DEF_SEL, "FM","造作","内装","電気","設備","ガス","清掃"
 INSP_OPTS = [DEF_SEL, "配筋検査","躯体検査","断熱検査","中間検査","社内検査(設計)","社内検査(建設)","社内検査(マーケ)","社内検査(不動産)"]
 
 # ==========================================
-# 3. アプリケーション本体
+# 3. メインロジック
 # ==========================================
 def main():
     if st.session_state.role is None:
         st.markdown("<h1 style='text-align: center;'>Felix検査App</h1>", unsafe_allow_html=True)
         if st.button("管理者としてログイン"):
-            st.session_state.role = "admin"
-            st.session_state.active_menu = "物件登録（管理者）"
-            st.rerun()
+            st.session_state.role = "admin"; st.session_state.active_menu = "物件登録（管理者）"; st.rerun()
         if st.button("協力業者としてログイン"):
-            st.session_state.role = "partner"
-            st.session_state.active_menu = "是正実施（協力業者）"
-            st.rerun()
+            st.session_state.role = "partner"; st.session_state.active_menu = "是正実施（協力業者）"; st.rerun()
         return
 
-    # サイドバー
     st.sidebar.markdown(f"ユーザー: {st.session_state.role}")
     if st.sidebar.button("ログアウト"):
         for key in list(st.session_state.keys()): del st.session_state[key]
         st.rerun()
 
-    menu_options = ["物件登録（管理者）", "検査実施（管理者）", "是正実施（協力業者）", "是正確認（管理者）", "完了分一覧（共通）"] if st.session_state.role == "admin" else ["<td>是正実施（協力業者）</td>", "完了分一覧（共通）"]
-    selected_menu = st.sidebar.radio("機能メニュー", menu_options, index=menu_options.index(st.session_state.active_menu) if st.session_state.active_menu in menu_options else 0)
+    menu_opts = ["物件登録（管理者）", "検査実施（管理者）", "是正実施（協力業者）", "是正確認（管理者）", "完了分一覧（共通）"] if st.session_state.role == "admin" else ["是正実施（協力業者）", "完了分一覧（共通）"]
+    selected_menu = st.sidebar.radio("機能メニュー", menu_opts, index=menu_opts.index(st.session_state.active_menu) if st.session_state.active_menu in menu_opts else 0)
 
     if selected_menu != st.session_state.active_menu:
-        st.session_state.active_menu = selected_menu
-        st.session_state.drill_insp_id = None
-        st.rerun()
+        st.session_state.active_menu = selected_menu; st.session_state.drill_insp_id = None; st.rerun()
 
     # 1. 物件登録
     if st.session_state.active_menu == "物件登録（管理者）":
@@ -158,7 +151,6 @@ def main():
         name = st.text_input("物件名")
         if st.button("新規登録"):
             if name: db_post("properties", {"property_id": str(uuid.uuid4()), "property_name": name}); st.success("登録完了")
-        
         props = db_get("properties", "select=*")
         for p in props:
             c1, c2 = st.columns([8, 2])
@@ -180,8 +172,7 @@ def main():
         else:
             st.subheader(st.session_state.current_box['name'])
             f = st.selectbox("階層", FLOOR_OPTS); a = st.selectbox("部位", AREA_OPTS); w = st.selectbox("工種", WORK_OPTS)
-            desc = st.text_area("内容")
-            photo = st.file_uploader("撮影")
+            desc = st.text_area("内容"); photo = st.file_uploader("撮影")
             if photo: st.image(photo)
             if st.button("保存"):
                 db_post("inspection_records", {"record_id": str(uuid.uuid4()), "inspection_id": st.session_state.current_box['id'], "property_id": st.session_state.current_box['property_id'], "floor_level": f, "area": a, "work_type": w, "issue_detail": desc, "issue_photo_url": process_photo(photo), "progress_status": "是正待ち"})
@@ -195,15 +186,17 @@ def main():
             recs = db_get("inspection_records", "progress_status=eq.是正待ち&select=inspection_id")
             ids = list(set([r['inspection_id'] for r in recs]))
             for iid in ids:
-                ins = db_get("inspections", f"inspection_id=eq.{iid}")[0]
-                if st.button(f"{ins['property_name']} / {ins['inspection_type']}", key=f"f_{iid}"): st.session_state.drill_insp_id = iid; st.rerun()
+                ins_list = db_get("inspections", f"inspection_id=eq.{iid}")
+                if ins_list:
+                    ins = ins_list[0]
+                    if st.button(f"{ins['property_name']} / {ins['inspection_type']}", key=f"f_{iid}"): st.session_state.drill_insp_id = iid; st.rerun()
         else:
             if st.button("＜ 戻る"): st.session_state.drill_insp_id = None; st.rerun()
             recs = db_get("inspection_records", f"inspection_id=eq.{st.session_state.drill_insp_id}&progress_status=eq.是正待ち")
             for r in recs:
                 with st.expander(f"{r['floor_level']} {r['area']}"):
                     st.write(r['issue_detail'])
-                    if r['issue_photo_url']: st.image(r['issue_photo_url'])
+                    if r.get('issue_photo_url'): st.image(r['issue_photo_url'])
                     fix = st.file_uploader("是正後", key=f"up_{r['record_id']}")
                     if fix: st.image(fix)
                     if st.button("報告", key=f"s_{r['record_id']}"):
@@ -211,62 +204,84 @@ def main():
                         st.rerun()
 
     # 4. 是正確認
-    elif st.session_state.active_menu == "是正確認（管理者）":
+    elif st.session_state.active_menu == "<td>是正確認（管理者）</td>":
         st.header("是正確認")
         if st.session_state.drill_insp_id is None:
             recs = db_get("inspection_records", "progress_status=eq.是正確認中&select=inspection_id")
             ids = list(set([r['inspection_id'] for r in recs]))
             for iid in ids:
-                ins = db_get("inspections", f"inspection_id=eq.{iid}")[0]
-                if st.button(f"{ins['property_name']} / {ins['inspection_type']}", key=f"c_{iid}"): st.session_state.drill_insp_id = iid; st.rerun()
+                ins_list = db_get("inspections", f"inspection_id=eq.{iid}")
+                if ins_list:
+                    ins = ins_list[0]
+                    if st.button(f"{ins['property_name']} / {ins['inspection_type']}", key=f"c_{iid}"): st.session_state.drill_insp_id = iid; st.rerun()
         else:
             if st.button("＜ 戻る"): st.session_state.drill_insp_id = None; st.rerun()
             recs = db_get("inspection_records", f"inspection_id=eq.{st.session_state.drill_insp_id}&progress_status=eq.是正確認中")
             for r in recs:
                 with st.expander(f"{r['floor_level']} {r['area']}"):
                     c1, c2 = st.columns(2)
-                    c1.image(r['issue_photo_url'], caption="Before"); c2.image(r['fix_photo_url'], caption="After")
+                    if r.get('issue_photo_url'): c1.image(r['issue_photo_url'], caption="Before")
+                    if r.get('fix_photo_url'): c2.image(r['fix_photo_url'], caption="After")
                     if st.button("承認", key=f"ok_{r['record_id']}"): db_patch("inspection_records", r['record_id'], {"progress_status": "完了"}); st.rerun()
                     if st.button("否認", key=f"ng_{r['record_id']}"): db_patch("inspection_records", r['record_id'], {"progress_status": "是正待ち"}); st.rerun()
 
-    # 【重点修正2】完了分一覧 (写真表示の確実な実装)
+    # 5. 完了分一覧 (物件ごとにタブ分け)
     elif st.session_state.active_menu == "完了分一覧（共通）":
         if st.session_state.drill_insp_id is None:
             st.header("完了分一覧")
-            inspections = db_get("inspections", "select=*")
-            for ins in inspections:
-                if st.button(f"{ins['property_name']} / {ins['inspection_type']}", key=f"done_{ins['inspection_id']}"):
-                    st.session_state.drill_insp_id = ins['inspection_id']; st.rerun()
+            ins_list = db_get("inspections", "select=*")
+            
+            # 物件名でグルーピング
+            grouped = {}
+            for i in ins_list:
+                p_name = i.get('property_name', '不明物件')
+                if p_name not in grouped: grouped[p_name] = []
+                grouped[p_name].append(i)
+            
+            # 物件ごとの折り畳み（Expander）を表示
+            for p_name, inspections in grouped.items():
+                with st.expander(f"🏢 {p_name}"):
+                    for ins in inspections:
+                        if st.button(f"📄 {ins['inspection_type']}", key=f"done_{ins['inspection_id']}"):
+                            st.session_state.drill_insp_id = ins['inspection_id']; st.rerun()
         else:
             if st.button("＜ 戻る"): st.session_state.drill_insp_id = None; st.rerun()
-            ins = db_get("inspections", f"inspection_id=eq.{st.session_state.drill_insp_id}")[0]
+            
+            ins_data = db_get("inspections", f"inspection_id=eq.{st.session_state.drill_insp_id}")
+            if not ins_data: return
+            ins = ins_data[0]
             recs = db_get("inspection_records", f"inspection_id=eq.{st.session_state.drill_insp_id}&progress_status=eq.完了")
 
+            # レポート表示 (写真表示を確実に修正)
             html = f"""
-            <div id="print-report-wrapper" style="background-color: white; padding: 20px; border-radius: 8px;">
-                <h2 style="text-align: center;">{ins['property_name']}</h2><h3 style="text-align: center;">{ins['inspection_type']}報告書</h3>
-                <table style="width:100%; border-collapse: collapse; border: 2px solid black;">
+            <div id="print-report-wrapper" style="background-color: white; padding: 20px; border-radius: 8px; font-family: sans-serif;">
+                <h2 style="text-align: center; margin-bottom:0;">{ins['property_name']}</h2>
+                <h3 style="text-align: center; margin-top:5px;">{ins['inspection_type']}報告書</h3>
+                <table style="width:100%; border-collapse: collapse; margin-top:10px; border: 2px solid black;">
                     <tr style="background:#eee;">
-                        <th style="border:1px solid black; padding:5px;">検査日</th><td style="border:1px solid black; padding:5px;">{ins['inspection_date']}</td>
-                        <th style="border:1px solid black; padding:5px;">検査員</th><td style="border:1px solid black; padding:5px;">{ins['inspector']}</td>
+                        <th style="border:1px solid black; padding:8px; width:20%;">検査日</th><td style="border:1px solid black; padding:8px;">{ins['inspection_date']}</td>
+                        <th style="border:1px solid black; padding:8px; width:20%;">検査員</th><td style="border:1px solid black; padding:8px;">{ins['inspector']}</td>
                     </tr>
                 </table>
-                <table style="width:100%; border-collapse: collapse; margin-top:20px; border: 2px solid black; font-size:12px;">
+                <table style="width:100%; border-collapse: collapse; margin-top:20px; border: 2px solid black; font-size:12px; text-align:center;">
                     <tr style="background:#eee;">
-                        <th style="border:1px solid black; padding:5px;">No.</th><th style="border:1px solid black; padding:5px;">場所</th>
-                        <th style="border:1px solid black; padding:5px;">Before</th><th style="border:1px solid black; padding:5px;">詳細</th>
-                        <th style="border:1px solid black; padding:5px;">After</th>
+                        <th style="border:1px solid black; padding:8px; width:5%;">No.</th>
+                        <th style="border:1px solid black; padding:8px; width:15%;">場所</th>
+                        <th style="border:1px solid black; padding:8px; width:25%;">Before</th>
+                        <th style="border:1px solid black; padding:8px; width:30%;">詳細</th>
+                        <th style="border:1px solid black; padding:8px; width:25%;">After</th>
                     </tr>"""
             for idx, r in enumerate(recs):
-                img_b = f'<img src="{r.get("issue_photo_url")}" style="width:120px;">' if r.get("issue_photo_url") else "なし"
-                img_a = f'<img src="{r.get("fix_photo_url")}" style="width:120px;">' if r.get("fix_photo_url") else "なし"
+                # 写真データの取得
+                img_b = f'<img src="{r["issue_photo_url"]}" style="width:100%; max-width:150px; height:auto;">' if r.get("issue_photo_url") else "（なし）"
+                img_a = f'<img src="{r["fix_photo_url"]}" style="width:100%; max-width:150px; height:auto;">' if r.get("fix_photo_url") else "（なし）"
                 html += f"""
                     <tr>
-                        <td style="border:1px solid black; text-align:center; padding:5px;">{idx+1}</td>
-                        <td style="border:1px solid black; text-align:center; padding:5px;">{r.get('floor_level','')}<br>{r.get('area','')}</td>
-                        <td style="border:1px solid black; text-align:center; padding:5px;">{img_b}</td>
-                        <td style="border:1px solid black; padding:5px;">{r.get('issue_detail','')}</td>
-                        <td style="border:1px solid black; text-align:center; padding:5px;">{img_a}</td>
+                        <td style="border:1px solid black; padding:8px;">{idx+1}</td>
+                        <td style="border:1px solid black; padding:8px;">{r.get('floor_level','')}<br>{r.get('area','')}</td>
+                        <td style="border:1px solid black; padding:8px;">{img_b}</td>
+                        <td style="border:1px solid black; padding:8px; text-align:left;">{r.get('issue_detail','')}</td>
+                        <td style="border:1px solid black; padding:8px;">{img_a}</td>
                     </tr>"""
             html += "</table></div>"
             st.markdown(html, unsafe_allow_html=True)
