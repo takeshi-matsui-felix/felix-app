@@ -17,8 +17,8 @@ HEADERS = {
     "Prefer": "return=minimal"
 }
 
-# --- 管理者用パスワード設定 ---
-ADMIN_PASSWORD = "2011"  # ← ここを好きな番号に変えてください
+# 管理者パスワード
+ADMIN_PASSWORD = "1234"
 
 def db_get(table, params=""):
     url = f"{SUPABASE_URL}/rest/v1/{table}?{params}"
@@ -50,19 +50,32 @@ def process_photo(upload_file):
         return f"data:image/jpeg;base64,{base64.b64encode(upload_file.getvalue()).decode('utf-8')}"
 
 # ==========================================
-# 2. UI設定
+# 2. UI設定 (漆黒テーマ・文字色強制固定)
 # ==========================================
 st.set_page_config(page_title="Felix検査App", layout="wide")
 
 st.markdown("""
 <style>
-    .stApp { background-color: #121212; color: #FFFFFF !important; }
+    .stApp { background-color: #121212; color: #FFFFFF !important; font-family: sans-serif; }
     header[data-testid="stHeader"] { background-color: #121212 !important; }
+    
+    /* サイドバーの背景と文字色を完全に白に固定 */
     [data-testid="stSidebar"] { background-color: #121212 !important; border-right: 1px solid #333; }
+    [data-testid="stSidebar"] * { color: #FFFFFF !important; }
+    [data-testid="stSidebar"] .stRadio label { color: #FFFFFF !important; font-weight: bold !important; }
+
     div.stButton > button {
         background-color: #1E1E1E; color: #00E5FF !important; border: 1px solid #00E5FF;
-        border-radius: 6px; height: 50px; font-weight: bold; width: 100%;
+        border-radius: 6px; height: 50px; font-weight: bold; width: 100%; margin-bottom: 5px;
     }
+    
+    [data-testid="stFileUploadDropzone"] {
+        background-color: #262730 !important; border: 2px dashed #555 !important; border-radius: 10px !important;
+    }
+    [data-testid="stFileUploadDropzone"] p, [data-testid="stFileUploadDropzone"] span {
+        color: #FFFFFF !important; font-weight: bold !important;
+    }
+    
     div[data-testid="stExpander"] { background-color: #1E1E1E !important; border: 1px solid #444 !important; }
     #print-report-wrapper, #print-report-wrapper * { color: #000000 !important; }
     footer {visibility: hidden;}
@@ -71,17 +84,30 @@ st.markdown("""
 
 # --- セッションステート管理 ---
 if "role" not in st.session_state: st.session_state.role = None
-if "current_box" not in st.session_state: st.session_state.current_box = None
 if "active_menu" not in st.session_state: st.session_state.active_menu = None
 if "drill_target" not in st.session_state: st.session_state.drill_target = None
-if "pre_selected_prop" not in st.session_state: st.session_state.pre_selected_prop = None
+if "current_box" not in st.session_state: st.session_state.current_box = None
 if "issue_saved" not in st.session_state: st.session_state.issue_saved = False
 
-# URLパラメータのチェック (業者用URL対応)
-query_params = st.query_params
-if "mode" in query_params and query_params["mode"] == "partner" and st.session_state.role is None:
-    st.session_state.role = "partner"
-    st.session_state.active_menu = "是正実施（協力業者）"
+# 【絶対修正】どんなバージョンでも絶対にエラー落ちしない業者用URL判定
+if st.session_state.role is None:
+    partner_mode = False
+    try:
+        # 新バージョン用判定
+        if "mode" in st.query_params and st.query_params["mode"] == "partner":
+            partner_mode = True
+    except Exception:
+        try:
+            # 旧バージョン用判定
+            params = st.experimental_get_query_params()
+            if params.get("mode", [""])[0] == "partner":
+                partner_mode = True
+        except Exception:
+            pass
+
+    if partner_mode:
+        st.session_state.role = "partner"
+        st.session_state.active_menu = "是正実施（協力業者）"
 
 def jump_to_menu(menu_name, prop_id=None):
     st.session_state.active_menu = menu_name
@@ -95,64 +121,48 @@ AREA_OPTS = ["-- 選択 --", "LDK","洋室","SK","UB","WC","洗面","玄関","SC
 WORK_OPTS = ["-- 選択 --", "FM","造作","内装","電気","設備","ガス","清掃","SK","サッシ","外壁","外構","コーキング","その他"]
 INSP_OPTS = ["-- 選択 --", "配筋検査","躯体検査","断熱検査","中間検査","社内検査(設計)","社内検査(建設)","社内検査(マーケ)","社内検査(不動産)"]
 
-# ==========================================
-# 3. アプリケーション本体
-# ==========================================
 def main():
     # --- ログイン画面 ---
     if st.session_state.role is None:
         st.markdown("<h1 style='text-align: center;'>Felix検査App</h1>", unsafe_allow_html=True)
-        
-        tab1, tab2 = st.tabs(["管理者", "協力業者"])
-        
-        with tab1:
-            st.write("管理者用パスワードを入力してください")
+        t1, t2 = st.tabs(["管理者", "協力業者"])
+        with t1:
             pwd = st.text_input("Password", type="password")
             if st.button("管理者ログイン"):
                 if pwd == ADMIN_PASSWORD:
                     st.session_state.role = "admin"
                     st.session_state.active_menu = "物件登録（管理者）"
                     st.rerun()
-                else:
-                    st.error("パスワードが違います")
-        
-        with tab2:
-            st.write("協力業者の方は下のボタンを押してください")
+                else: st.error("パスワードが違います")
+        with t2:
             if st.button("協力業者としてログイン"):
                 st.session_state.role = "partner"
                 st.session_state.active_menu = "是正実施（協力業者）"
                 st.rerun()
         return
 
-    # --- サイドバー・メニュー ---
+    # --- メニュー ---
     st.sidebar.markdown(f"ユーザー: {st.session_state.role}")
     if st.sidebar.button("ログアウト"):
-        for key in list(st.session_state.keys()): del st.session_state[key]
+        for k in list(st.session_state.keys()): del st.session_state[k]
         st.rerun()
 
-    menu_opts = ["物件登録（管理者）", "検査実施（管理者）", "是正実施（協力業者）", "是正確認（管理者）", "完了分一覧（共通）"] if st.session_state.role == "admin" else ["決是正実施（協力業者）", "完了分一覧（共通）"]
+    # 【絶対修正】余計なタグ(<td>)を完全に排除したクリーンなリスト
+    menu_opts = ["物件登録（管理者）", "検査実施（管理者）", "是正実施（協力業者）", "是正確認（管理者）", "完了分一覧（共通）"] if st.session_state.role == "admin" else ["是正実施（協力業者）", "完了分一覧（共通）"]
     
-    # 業者モード時は「是正実施」がデフォルト
-    if st.session_state.active_menu is None:
+    if st.session_state.active_menu not in menu_opts:
         st.session_state.active_menu = menu_opts[0]
-
-    selected_menu = st.sidebar.radio("機能メニュー", menu_opts, index=menu_opts.index(st.session_state.active_menu) if st.session_state.active_menu in menu_opts else 0)
-
+        
+    selected_menu = st.sidebar.radio("MENU", menu_opts, index=menu_opts.index(st.session_state.active_menu))
     if selected_menu != st.session_state.active_menu:
-        st.session_state.active_menu = selected_menu
-        st.session_state.drill_target = None
-        st.session_state.issue_saved = False
-        st.rerun()
+        st.session_state.active_menu = selected_menu; st.session_state.drill_target = None; st.rerun()
 
-    # --- 各機能の実装 ---
-    
     # 1. 物件登録
     if st.session_state.active_menu == "物件登録（管理者）":
         st.header("物件登録")
         name = st.text_input("新規物件名")
-        if st.button("登録する"):
+        if st.button("登録"):
             if name: db_post("properties", {"property_id": str(uuid.uuid4()), "property_name": name}); st.success("登録完了")
-        st.markdown("<hr>", unsafe_allow_html=True)
         props = db_get("properties", "select=*")
         for p in props:
             c1, c2 = st.columns([8, 2])
@@ -161,15 +171,15 @@ def main():
 
     # 2. 検査実施
     elif st.session_state.active_menu == "検査実施（管理者）":
-        st.header("検査実施")
         if st.session_state.current_box is None:
+            st.header("検査開始")
             props = db_get("properties", "select=*")
-            prop_opts = [{"property_id": None, "property_name": "-- 選択 --"}] + props
-            prop_idx = 0
-            if st.session_state.pre_selected_prop:
-                for i, p in enumerate(prop_opts):
-                    if p['property_id'] == st.session_state.pre_selected_prop: prop_idx = i; break
-            target = st.selectbox("物件を選択", prop_opts, index=prop_idx, format_func=lambda x: x['property_name'])
+            opts = [{"property_id": None, "property_name": "-- 選択 --"}] + props
+            idx = 0
+            if "pre_selected_prop" in st.session_state:
+                for i, p in enumerate(opts):
+                    if p['property_id'] == st.session_state.pre_selected_prop: idx = i; break
+            target = st.selectbox("物件", opts, index=idx, format_func=lambda x: x['property_name'])
             ins_type = st.selectbox("検査種類", INSP_OPTS)
             if st.button("検査スタート"):
                 if target['property_name'] != "-- 選択 --" and ins_type != "-- 選択 --":
@@ -182,19 +192,21 @@ def main():
             st.subheader(f"{st.session_state.current_box['name']} / {st.session_state.current_box['type']}")
             if not st.session_state.issue_saved:
                 f = st.selectbox("階層", FLOOR_OPTS); a = st.selectbox("部位", AREA_OPTS); w = st.selectbox("工種", WORK_OPTS)
-                desc = st.text_area("指摘内容"); photo = st.file_uploader("撮影", type=['jpg','png','jpeg'])
+                desc = st.text_area("内容"); photo = st.file_uploader("撮影", type=['jpg','png','jpeg'])
+                if photo: st.image(photo)
                 if st.button("保存"):
-                    if f != "-- 選択 --" and a != "-- 選択 --" and w != "-- 選択 --":
+                    if "--" not in [f, a, w]:
                         db_post("inspection_records", {"record_id": str(uuid.uuid4()), "inspection_id": st.session_state.current_box['id'], "property_id": st.session_state.current_box['prop_id'], "floor_level": f, "area": a, "work_type": w, "issue_detail": desc, "issue_photo_url": process_photo(photo), "progress_status": "是正待ち"})
                         st.session_state.issue_saved = True; st.rerun()
+                    else: st.error("全て選択してください")
                 if st.button("終了"): st.session_state.current_box = None; st.rerun()
             else:
                 st.success("保存完了"); 
                 if st.button("次を登録"): st.session_state.issue_saved = False; st.rerun()
                 if st.button("終了"): st.session_state.current_box = None; st.session_state.issue_saved = False; st.rerun()
 
-    # 3. 是正実施
-    elif st.session_state.active_menu in ["是正実施（協力業者）", "決是正実施（協力業者）"]:
+    # 3. 是正実施 (写真必須化ロジック)
+    elif st.session_state.active_menu == "是正実施（協力業者）":
         st.header("是正実施")
         if st.session_state.drill_target is None:
             all_recs = db_get("inspection_records", "progress_status=eq.是正待ち")
@@ -207,7 +219,7 @@ def main():
                     p, t = ins['property_name'], ins['inspection_type']
                     if p not in tree: tree[p] = {}
                     tree[p][t] = tree[p].get(t, 0) + 1
-            if not tree: st.info("対応項目なし")
+            if not tree: st.info("現在、対応が必要な是正項目はありません。")
             for p_name, types in tree.items():
                 with st.expander(p_name):
                     for t_name, count in types.items():
@@ -218,15 +230,31 @@ def main():
             sel = st.session_state.drill_target
             t_ids = [i['inspection_id'] for i in db_get("inspections", f"property_name=eq.{sel['prop']}&inspection_type=eq.{sel['type']}")]
             recs = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})&progress_status=eq.是正待ち")
+            
+            w_groups = {}
             for r in recs:
-                with st.expander(f"{r.get('floor_level')} {r.get('area')} - {r.get('work_type')}"):
-                    if r.get('reject_reason'): st.error(f"否認理由: {r['reject_reason']}")
-                    st.write(r.get('issue_detail',''))
-                    if r.get('issue_photo_url'): st.image(r['issue_photo_url'])
-                    up = st.file_uploader("是正写真", key=f"up_{r['record_id']}")
-                    if st.button("報告する", key=f"s_{r['record_id']}"):
-                        db_patch("inspection_records", r['record_id'], {"progress_status": "是正確認中", "fix_photo_url": process_photo(up)})
-                        st.rerun()
+                w = r.get('work_type', 'その他')
+                if w not in w_groups: w_groups[w] = []
+                w_groups[w].append(r)
+            
+            for w_name, w_recs in w_groups.items():
+                st.subheader(f"■ 工種: {w_name}")
+                for r in w_recs:
+                    with st.expander(f"{r.get('floor_level')} {r.get('area')} - {r.get('issue_detail','')[:10]}..."):
+                        if r.get('reject_reason'): st.error(f"否認理由: {r['reject_reason']}")
+                        st.write("【指摘内容】", r.get('issue_detail',''))
+                        if r.get('issue_photo_url'): st.image(r['issue_photo_url'], caption="指摘時")
+                        
+                        up = st.file_uploader("是正写真をアップロード（必須）", key=f"up_{r['record_id']}", type=['jpg','png','jpeg'])
+                        if up: st.image(up, caption="プレビュー")
+                        
+                        # 【絶対修正】写真がないと保存させない
+                        if st.button("報告する", key=f"s_{r['record_id']}"):
+                            if up is not None:
+                                db_patch("inspection_records", r['record_id'], {"progress_status": "是正確認中", "fix_photo_url": process_photo(up)})
+                                st.rerun()
+                            else:
+                                st.error("エラー：是正写真を撮影または選択してください。写真がないと報告できません。")
 
     # 4. 是正確認
     elif st.session_state.active_menu == "是正確認（管理者）":
@@ -242,7 +270,7 @@ def main():
                     p, t = ins['property_name'], ins['inspection_type']
                     if p not in tree: tree[p] = {}
                     tree[p][t] = tree[p].get(t, 0) + 1
-            if not tree: st.info("確認待ちなし")
+            if not tree: st.info("確認待ちの項目はありません。")
             for p_name, types in tree.items():
                 with st.expander(p_name):
                     for t_name, count in types.items():
@@ -253,14 +281,26 @@ def main():
             sel = st.session_state.drill_target
             t_ids = [i['inspection_id'] for i in db_get("inspections", f"property_name=eq.{sel['prop']}&inspection_type=eq.{sel['type']}")]
             recs = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})&progress_status=eq.是正確認中")
+            
+            w_groups = {}
             for r in recs:
-                with st.expander(f"{r.get('floor_level')} {r.get('area')}"):
-                    c1, c2 = st.columns(2)
-                    if r.get('issue_photo_url'): c1.image(r['issue_photo_url'], caption="Before")
-                    if r.get('fix_photo_url'): c2.image(r['fix_photo_url'], caption="After")
-                    if st.button("承認", key=f"ok_{r['record_id']}"): db_patch("inspection_records", r['record_id'], {"progress_status": "完了"}); st.rerun()
-                    reason = st.text_input("否認理由", key=f"re_{r['record_id']}")
-                    if st.button("否認", key=f"ng_{r['record_id']}"): db_patch("inspection_records", r['record_id'], {"progress_status": "是正待ち", "reject_reason": reason}); st.rerun()
+                w = r.get('work_type', 'その他')
+                if w not in w_groups: w_groups[w] = []
+                w_groups[w].append(r)
+            
+            for w_name, w_recs in w_groups.items():
+                st.subheader(f"■ 工種: {w_name}")
+                for r in w_recs:
+                    with st.expander(f"{r.get('floor_level')} {r.get('area')} - {r.get('issue_detail','')[:10]}..."):
+                        st.write("【指摘内容】", r.get('issue_detail',''))
+                        c1, c2 = st.columns(2)
+                        if r.get('issue_photo_url'): c1.image(r['issue_photo_url'], caption="Before")
+                        if r.get('fix_photo_url'): c2.image(r['fix_photo_url'], caption="After")
+                        if st.button("承認（完了へ）", key=f"ok_{r['record_id']}"): 
+                            db_patch("inspection_records", r['record_id'], {"progress_status": "完了"}); st.rerun()
+                        reason = st.text_input("否認理由", key=f"re_{r['record_id']}")
+                        if st.button("否認（差し戻し）", key=f"ng_{r['record_id']}"): 
+                            db_patch("inspection_records", r['record_id'], {"progress_status": "是正待ち", "reject_reason": reason}); st.rerun()
 
     # 5. 完了分一覧
     elif st.session_state.active_menu == "完了分一覧（共通）":
@@ -276,6 +316,7 @@ def main():
                     p = ins['property_name']
                     if p not in tree: tree[p] = set()
                     tree[p].add(ins['inspection_type'])
+            if not tree: st.info("完了した報告書はありません。")
             for p_name, types in tree.items():
                 with st.expander(p_name):
                     for t_name in sorted(list(types)):
@@ -286,10 +327,25 @@ def main():
             sel = st.session_state.drill_target
             t_ids = [i['inspection_id'] for i in db_get("inspections", f"property_name=eq.{sel['prop']}&inspection_type=eq.{sel['type']}")]
             recs = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})&progress_status=eq.完了")
-            # --- 簡易報告書表示 ---
-            st.subheader(f"{sel['prop']} - {sel['type']}")
+            
+            html = f"""<div id="print-report-wrapper" style="background:white; padding:20px; border-radius:8px; font-family:sans-serif;">
+                <h2 style="text-align:center; margin-bottom:5px;">{sel['prop']}</h2><h3 style="text-align:center; margin-top:0;">{sel['type']}報告書</h3>"""
+            w_groups = {}
             for r in recs:
-                st.write(f"【{r.get('floor_level')} {r.get('area')}】 {r.get('issue_detail')}")
+                w = r.get('work_type', 'その他')
+                if w not in w_groups: w_groups[w] = []
+                w_groups[w].append(r)
+            for w_name, w_recs in w_groups.items():
+                html += f"<h4 style='margin-top:20px; border-bottom:1px solid #000;'>工種: {w_name}</h4>"
+                html += """<table style="width:100%; border-collapse:collapse; border:2px solid black; font-size:12px; text-align:center; margin-bottom:20px;">
+                    <tr style="background:#eee;"><th style="border:1px solid black; padding:8px; width:5%;">No</th><th style="border:1px solid black; padding:8px; width:15%;">場所</th><th style="border:1px solid black; padding:8px; width:25%;">Before</th><th style="border:1px solid black; padding:8px; width:30%;">詳細</th><th style="border:1px solid black; padding:8px; width:25%;">After</th></tr>"""
+                for idx, r in enumerate(w_recs):
+                    img_b = f'<img src="{r.get("issue_photo_url")}" style="width:100%; max-width:150px;">' if r.get("issue_photo_url") else ""
+                    img_a = f'<img src="{r.get("fix_photo_url")}" style="width:100%; max-width:150px;">' if r.get("fix_photo_url") else ""
+                    html += f"""<tr><td style="border:1px solid black; padding:8px;">{idx+1}</td><td style="border:1px solid black; padding:8px;">{r.get('floor_level','')}<br>{r.get('area','')}</td><td style="border:1px solid black; padding:8px;">{img_b}</td><td style="border:1px solid black; padding:8px; text-align:left;">{r.get('issue_detail','')}</td><td style="border:1px solid black; padding:8px;">{img_a}</td></tr>"""
+                html += "</table>"
+            html += "</div>"
+            st.markdown(html, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
