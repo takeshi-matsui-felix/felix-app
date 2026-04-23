@@ -150,14 +150,13 @@ def main():
             if c2.button("✕", key=f"d_{p['property_id']}"): db_delete_property(p['property_id']); st.rerun()
 
     # ------------------------------------------
-    # 2. 検査実施 (初期値の空選択化 修正版)
+    # 2. 検査実施
     # ------------------------------------------
     elif st.session_state.active_menu == "検査実施（管理者）":
         st.header("検査実施")
         if st.session_state.current_box is None:
             props = db_get("properties", "select=*")
             
-            # 物件リストの先頭に「-- 選択 --」を追加
             prop_opts = [{"property_id": None, "property_name": "-- 選択 --"}] + props
             
             prop_idx = 0
@@ -171,7 +170,6 @@ def main():
             ins_type = st.selectbox("検査種類", INSP_OPTS)
             
             if st.button("検査スタート"):
-                # 物件と検査種類が正しく選ばれているかチェック
                 if target['property_name'] != "-- 選択 --" and ins_type != "-- 選択 --":
                     nid = str(uuid.uuid4())
                     db_post("inspections", {"inspection_id": nid, "property_id": target['property_id'], "property_name": target['property_name'], "inspection_type": ins_type, "inspection_date": str(datetime.date.today()), "inspector": "管理者"})
@@ -183,7 +181,6 @@ def main():
         else:
             st.subheader(f"{st.session_state.current_box['name']} / {st.session_state.current_box['type']}")
             
-            # --- まだ保存していない時の入力画面 ---
             if not st.session_state.issue_saved:
                 col1, col2 = st.columns(2)
                 f = col1.selectbox("階層", FLOOR_OPTS)
@@ -205,8 +202,6 @@ def main():
                 if st.button("検査を終了する"): 
                     st.session_state.current_box = None
                     st.rerun()
-            
-            # --- 保存直後の「連続登録」案内画面 ---
             else:
                 st.success("保存完了！")
                 if st.button("続けて別の箇所を登録する"):
@@ -218,7 +213,7 @@ def main():
                     st.rerun()
 
     # ------------------------------------------
-    # 3. 是正実施
+    # 3. 是正実施 (物件フォルダ化)
     # ------------------------------------------
     elif st.session_state.active_menu == "是正実施（協力業者）":
         st.header("是正実施")
@@ -227,17 +222,22 @@ def main():
             all_ins = db_get("inspections", "select=*")
             ins_map = {i['inspection_id']: i for i in all_ins}
             
-            groups = {}
+            # 物件名ごとにグループ化するロジックに変更
+            tree = {}
             for r in all_recs:
                 ins = ins_map.get(r['inspection_id'])
                 if ins:
-                    key = (ins['property_name'], ins['inspection_type'])
-                    groups[key] = groups.get(key, 0) + 1
+                    p = ins['property_name']
+                    t = ins['inspection_type']
+                    if p not in tree: tree[p] = {}
+                    tree[p][t] = tree[p].get(t, 0) + 1
             
-            if not groups: st.info("現在、対応が必要な是正項目はありません。")
-            for (p_name, i_type), count in groups.items():
-                if st.button(f"{p_name} / {i_type} ({count}件)", key=f"f_{p_name}_{i_type}"):
-                    st.session_state.drill_target = {"prop": p_name, "type": i_type}; st.rerun()
+            if not tree: st.info("現在、対応が必要な是正項目はありません。")
+            for p_name, types in tree.items():
+                with st.expander(p_name):
+                    for t_name, count in types.items():
+                        if st.button(f"{t_name} ({count}件)", key=f"f_{p_name}_{t_name}"):
+                            st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.rerun()
         else:
             if st.button("＜ 戻る"): st.session_state.drill_target = None; st.rerun()
             sel = st.session_state.drill_target
@@ -265,7 +265,7 @@ def main():
                             st.rerun()
 
     # ------------------------------------------
-    # 4. 是正確認
+    # 4. 是正確認 (物件フォルダ化)
     # ------------------------------------------
     elif st.session_state.active_menu == "是正確認（管理者）":
         st.header("是正確認")
@@ -274,17 +274,22 @@ def main():
             all_ins = db_get("inspections", "select=*")
             ins_map = {i['inspection_id']: i for i in all_ins}
             
-            groups = {}
+            # 物件名ごとにグループ化するロジックに変更
+            tree = {}
             for r in all_recs:
                 ins = ins_map.get(r['inspection_id'])
                 if ins:
-                    key = (ins['property_name'], ins['inspection_type'])
-                    groups[key] = groups.get(key, 0) + 1
+                    p = ins['property_name']
+                    t = ins['inspection_type']
+                    if p not in tree: tree[p] = {}
+                    tree[p][t] = tree[p].get(t, 0) + 1
             
-            if not groups: st.info("確認待ちの項目はありません。")
-            for (p_name, i_type), count in groups.items():
-                if st.button(f"{p_name} / {i_type} ({count}件)", key=f"c_{p_name}_{i_type}"):
-                    st.session_state.drill_target = {"prop": p_name, "type": i_type}; st.rerun()
+            if not tree: st.info("確認待ちの項目はありません。")
+            for p_name, types in tree.items():
+                with st.expander(p_name):
+                    for t_name, count in types.items():
+                        if st.button(f"{t_name} ({count}件)", key=f"c_{p_name}_{t_name}"):
+                            st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.rerun()
         else:
             if st.button("＜ 戻る"): st.session_state.drill_target = None; st.rerun()
             sel = st.session_state.drill_target
