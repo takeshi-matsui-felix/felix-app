@@ -94,7 +94,7 @@ if "current_box" not in st.session_state: st.session_state.current_box = None
 if "active_menu" not in st.session_state: st.session_state.active_menu = "物件登録（管理者）"
 if "drill_target" not in st.session_state: st.session_state.drill_target = None
 if "pre_selected_prop" not in st.session_state: st.session_state.pre_selected_prop = None
-if "issue_saved" not in st.session_state: st.session_state.issue_saved = False # 復活：連続登録用フラグ
+if "issue_saved" not in st.session_state: st.session_state.issue_saved = False
 
 def jump_to_menu(menu_name, prop_id=None):
     st.session_state.active_menu = menu_name
@@ -150,29 +150,36 @@ def main():
             if c2.button("✕", key=f"d_{p['property_id']}"): db_delete_property(p['property_id']); st.rerun()
 
     # ------------------------------------------
-    # 2. 検査実施 (連続登録ロジック復活)
+    # 2. 検査実施 (初期値の空選択化 修正版)
     # ------------------------------------------
     elif st.session_state.active_menu == "検査実施（管理者）":
         st.header("検査実施")
         if st.session_state.current_box is None:
             props = db_get("properties", "select=*")
             
+            # 物件リストの先頭に「-- 選択 --」を追加
+            prop_opts = [{"property_id": None, "property_name": "-- 選択 --"}] + props
+            
             prop_idx = 0
             if st.session_state.pre_selected_prop:
-                for i, p in enumerate(props):
+                for i, p in enumerate(prop_opts):
                     if p['property_id'] == st.session_state.pre_selected_prop:
                         prop_idx = i
                         break
             
-            target = st.selectbox("物件を選択", props, index=prop_idx, format_func=lambda x: x['property_name'])
+            target = st.selectbox("物件を選択", prop_opts, index=prop_idx, format_func=lambda x: x['property_name'])
             ins_type = st.selectbox("検査種類", INSP_OPTS)
+            
             if st.button("検査スタート"):
-                if target and ins_type != "-- 選択 --":
+                # 物件と検査種類が正しく選ばれているかチェック
+                if target['property_name'] != "-- 選択 --" and ins_type != "-- 選択 --":
                     nid = str(uuid.uuid4())
                     db_post("inspections", {"inspection_id": nid, "property_id": target['property_id'], "property_name": target['property_name'], "inspection_type": ins_type, "inspection_date": str(datetime.date.today()), "inspector": "管理者"})
                     st.session_state.current_box = {"id": nid, "prop_id": target['property_id'], "name": target['property_name'], "type": ins_type}
                     st.session_state.issue_saved = False
                     st.rerun()
+                else:
+                    st.error("物件と検査種類を選択してください。")
         else:
             st.subheader(f"{st.session_state.current_box['name']} / {st.session_state.current_box['type']}")
             
