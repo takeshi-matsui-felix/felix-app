@@ -94,10 +94,12 @@ if "current_box" not in st.session_state: st.session_state.current_box = None
 if "active_menu" not in st.session_state: st.session_state.active_menu = "物件登録（管理者）"
 if "drill_target" not in st.session_state: st.session_state.drill_target = None
 if "pre_selected_prop" not in st.session_state: st.session_state.pre_selected_prop = None
+if "issue_saved" not in st.session_state: st.session_state.issue_saved = False # 復活：連続登録用フラグ
 
 def jump_to_menu(menu_name, prop_id=None):
     st.session_state.active_menu = menu_name
     st.session_state.drill_target = None
+    st.session_state.issue_saved = False
     if prop_id: 
         st.session_state.pre_selected_prop = prop_id
     st.rerun()
@@ -126,7 +128,10 @@ def main():
     selected_menu = st.sidebar.radio("機能メニュー", menu_opts, index=menu_opts.index(st.session_state.active_menu) if st.session_state.active_menu in menu_opts else 0)
 
     if selected_menu != st.session_state.active_menu:
-        st.session_state.active_menu = selected_menu; st.session_state.drill_target = None; st.rerun()
+        st.session_state.active_menu = selected_menu
+        st.session_state.drill_target = None
+        st.session_state.issue_saved = False
+        st.rerun()
 
     # ------------------------------------------
     # 1. 物件登録
@@ -145,14 +150,13 @@ def main():
             if c2.button("✕", key=f"d_{p['property_id']}"): db_delete_property(p['property_id']); st.rerun()
 
     # ------------------------------------------
-    # 2. 検査実施
+    # 2. 検査実施 (連続登録ロジック復活)
     # ------------------------------------------
     elif st.session_state.active_menu == "検査実施（管理者）":
         st.header("検査実施")
         if st.session_state.current_box is None:
             props = db_get("properties", "select=*")
             
-            # 物件の初期選択位置を計算
             prop_idx = 0
             if st.session_state.pre_selected_prop:
                 for i, p in enumerate(props):
@@ -167,29 +171,47 @@ def main():
                     nid = str(uuid.uuid4())
                     db_post("inspections", {"inspection_id": nid, "property_id": target['property_id'], "property_name": target['property_name'], "inspection_type": ins_type, "inspection_date": str(datetime.date.today()), "inspector": "管理者"})
                     st.session_state.current_box = {"id": nid, "prop_id": target['property_id'], "name": target['property_name'], "type": ins_type}
+                    st.session_state.issue_saved = False
                     st.rerun()
         else:
             st.subheader(f"{st.session_state.current_box['name']} / {st.session_state.current_box['type']}")
-            col1, col2 = st.columns(2)
-            f = col1.selectbox("階層", FLOOR_OPTS)
-            a = col2.selectbox("部位", AREA_OPTS)
-            w = st.selectbox("工種", WORK_OPTS)
-            desc = st.text_area("指摘内容")
             
-            photo = st.file_uploader("指摘箇所を撮影", type=['jpg','png','jpeg'])
-            if photo: st.image(photo, caption="プレビュー")
+            # --- まだ保存していない時の入力画面 ---
+            if not st.session_state.issue_saved:
+                col1, col2 = st.columns(2)
+                f = col1.selectbox("階層", FLOOR_OPTS)
+                a = col2.selectbox("部位", AREA_OPTS)
+                w = st.selectbox("工種", WORK_OPTS)
+                desc = st.text_area("指摘内容")
+                
+                photo = st.file_uploader("指摘箇所を撮影", type=['jpg','png','jpeg'])
+                if photo: st.image(photo, caption="プレビュー")
+                
+                if st.button("この指摘を保存"):
+                    if f != "-- 選択 --" and a != "-- 選択 --" and w != "-- 選択 --":
+                        db_post("inspection_records", {"record_id": str(uuid.uuid4()), "inspection_id": st.session_state.current_box['id'], "property_id": st.session_state.current_box['prop_id'], "floor_level": f, "area": a, "work_type": w, "issue_detail": desc, "issue_photo_url": process_photo(photo), "progress_status": "是正待ち"})
+                        st.session_state.issue_saved = True
+                        st.rerun()
+                    else:
+                        st.error("階層・部位・工種を選択してください。")
+                
+                if st.button("検査を終了する"): 
+                    st.session_state.current_box = None
+                    st.rerun()
             
-            if st.button("この指摘を保存"):
-                if f != "-- 選択 --" and a != "-- 選択 --" and w != "-- 選択 --":
-                    db_post("inspection_records", {"record_id": str(uuid.uuid4()), "inspection_id": st.session_state.current_box['id'], "property_id": st.session_state.current_box['prop_id'], "floor_level": f, "area": a, "work_type": w, "issue_detail": desc, "issue_photo_url": process_photo(photo), "progress_status": "是正待ち"})
-                    st.success("保存完了")
-                else:
-                    st.error("階層・部位・工種を選択してください。")
-            
-            if st.button("検査を終了する"): st.session_state.current_box = None; st.rerun()
+            # --- 保存直後の「連続登録」案内画面 ---
+            else:
+                st.success("保存完了！")
+                if st.button("続けて別の箇所を登録する"):
+                    st.session_state.issue_saved = False
+                    st.rerun()
+                if st.button("検査を終了する"):
+                    st.session_state.current_box = None
+                    st.session_state.issue_saved = False
+                    st.rerun()
 
     # ------------------------------------------
-    # 3. 是正実施 (工種別グルーピング・写真ボタン完全復旧)
+    # 3. 是正実施
     # ------------------------------------------
     elif st.session_state.active_menu == "是正実施（協力業者）":
         st.header("是正実施")
@@ -236,7 +258,7 @@ def main():
                             st.rerun()
 
     # ------------------------------------------
-    # 4. 是正確認 (工種別グルーピング完全復旧)
+    # 4. 是正確認
     # ------------------------------------------
     elif st.session_state.active_menu == "是正確認（管理者）":
         st.header("是正確認")
@@ -286,7 +308,7 @@ def main():
                             st.rerun()
 
     # ------------------------------------------
-    # 5. 完了分一覧 (絶対統合 + 工種別整理 + アイコン排除)
+    # 5. 完了分一覧
     # ------------------------------------------
     elif st.session_state.active_menu == "完了分一覧（共通）":
         if st.session_state.drill_target is None:
