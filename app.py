@@ -18,7 +18,7 @@ HEADERS = {
 }
 
 # 管理者パスワード
-ADMIN_PASSWORD = "2011"
+ADMIN_PASSWORD = "1234"
 
 def db_get(table, params=""):
     url = f"{SUPABASE_URL}/rest/v1/{table}?{params}"
@@ -89,24 +89,22 @@ if "drill_target" not in st.session_state: st.session_state.drill_target = None
 if "current_box" not in st.session_state: st.session_state.current_box = None
 if "issue_saved" not in st.session_state: st.session_state.issue_saved = False
 
-# 【絶対修正】どんなバージョンでも絶対にエラー落ちしない業者用URL判定
-if st.session_state.role is None:
-    partner_mode = False
-    try:
-        # 新バージョン用判定
-        if "mode" in st.query_params and st.query_params["mode"] == "partner":
-            partner_mode = True
-    except Exception:
-        try:
-            # 旧バージョン用判定
-            params = st.experimental_get_query_params()
-            if params.get("mode", [""])[0] == "partner":
-                partner_mode = True
-        except Exception:
-            pass
+# 【絶対修正】業者用URLへのアクセスを強制するロジック（履歴が残っていても上書きする）
+is_partner_url = False
+try:
+    if hasattr(st, "query_params") and "mode" in st.query_params:
+        if "partner" in str(st.query_params.get("mode", "")):
+            is_partner_url = True
+    elif hasattr(st, "experimental_get_query_params"):
+        params = st.experimental_get_query_params()
+        if "mode" in params and "partner" in str(params["mode"][0]):
+            is_partner_url = True
+except Exception:
+    pass
 
-    if partner_mode:
-        st.session_state.role = "partner"
+if is_partner_url:
+    st.session_state.role = "partner"
+    if st.session_state.active_menu not in ["是正実施（協力業者）", "完了分一覧（共通）"]:
         st.session_state.active_menu = "是正実施（協力業者）"
 
 def jump_to_menu(menu_name, prop_id=None):
@@ -145,9 +143,16 @@ def main():
     st.sidebar.markdown(f"ユーザー: {st.session_state.role}")
     if st.sidebar.button("ログアウト"):
         for k in list(st.session_state.keys()): del st.session_state[k]
+        # URLパラメータを消去して確実にログアウト状態に戻す
+        try:
+            if hasattr(st, "query_params"):
+                st.query_params.clear()
+            elif hasattr(st, "experimental_set_query_params"):
+                st.experimental_set_query_params()
+        except:
+            pass
         st.rerun()
 
-    # 【絶対修正】余計なタグ(<td>)を完全に排除したクリーンなリスト
     menu_opts = ["物件登録（管理者）", "検査実施（管理者）", "是正実施（協力業者）", "是正確認（管理者）", "完了分一覧（共通）"] if st.session_state.role == "admin" else ["是正実施（協力業者）", "完了分一覧（共通）"]
     
     if st.session_state.active_menu not in menu_opts:
@@ -205,7 +210,7 @@ def main():
                 if st.button("次を登録"): st.session_state.issue_saved = False; st.rerun()
                 if st.button("終了"): st.session_state.current_box = None; st.session_state.issue_saved = False; st.rerun()
 
-    # 3. 是正実施 (写真必須化ロジック)
+    # 3. 是正実施
     elif st.session_state.active_menu == "是正実施（協力業者）":
         st.header("是正実施")
         if st.session_state.drill_target is None:
@@ -248,7 +253,6 @@ def main():
                         up = st.file_uploader("是正写真をアップロード（必須）", key=f"up_{r['record_id']}", type=['jpg','png','jpeg'])
                         if up: st.image(up, caption="プレビュー")
                         
-                        # 【絶対修正】写真がないと保存させない
                         if st.button("報告する", key=f"s_{r['record_id']}"):
                             if up is not None:
                                 db_patch("inspection_records", r['record_id'], {"progress_status": "是正確認中", "fix_photo_url": process_photo(up)})
