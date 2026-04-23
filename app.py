@@ -18,7 +18,7 @@ HEADERS = {
 }
 
 # 管理者パスワード
-ADMIN_PASSWORD = "1234"
+ADMIN_PASSWORD = "2011"
 
 def db_get(table, params=""):
     url = f"{SUPABASE_URL}/rest/v1/{table}?{params}"
