@@ -58,7 +58,7 @@ def process_photo(upload_file):
     return f"data:{upload_file.type};base64,{b64}"
 
 # ==========================================
-# 2. UI設定: スマホ＆クラウド最適化
+# 2. UI設定: スマホ＆クラウド最終最適化
 # ==========================================
 st.set_page_config(page_title="Felix検査App", layout="wide")
 
@@ -67,24 +67,25 @@ st.markdown("""
     /* 画面全体の設定 */
     .stApp { background-color: #121212; color: #FFFFFF !important; }
     
-    /* サイドバー（メニュー）の文字を白に強制 */
-    section[data-testid="stSidebar"] * {
+    /* サイドバー（メニュー）の文字色を強制的に白にする */
+    [data-testid="stSidebar"] * {
         color: #FFFFFF !important;
     }
 
     /* カメラボタン（ファイルアップローダー）の視認性改善 */
     [data-testid="stFileUploadDropzone"] {
         background-color: #262730 !important; /* 濃いグレー */
-        border: 1px dashed #666 !important;
-        color: #FFFFFF !important;
+        border: 2px dashed #555 !important;
+        border-radius: 10px !important;
     }
     [data-testid="stFileUploadDropzone"] p, 
     [data-testid="stFileUploadDropzone"] span,
     [data-testid="stFileUploadDropzone"] small {
-        color: #FFFFFF !important;
+        color: #FFFFFF !important; /* ボタン内の文字を白に */
+        font-weight: bold !important;
     }
     
-    /* 報告書エリア内の文字色（黒固定） */
+    /* 報告書エリア内（白背景部分）の文字色を黒に固定 */
     #print-report-wrapper, #print-report-wrapper * {
         color: #000000 !important;
     }
@@ -95,7 +96,7 @@ st.markdown("""
         border-radius: 6px; height: 50px; font-weight: bold; width: 100%;
     }
     
-    /* 不要なフッターのみを非表示にする */
+    /* フッターを非表示（ヘッダーは三本線メニューのために残す） */
     footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
@@ -133,7 +134,7 @@ def main():
             st.rerun()
         if st.button("協力業者としてログイン"):
             st.session_state.role = "partner"
-            st.session_state.active_menu = "是正実施（協力業者）"
+            st.session_state.active_menu = "<td>是正実施（協力業者）</td>"
             st.rerun()
         return
 
@@ -226,10 +227,10 @@ def main():
                 work = st.selectbox("工種", WORK_OPTS)
                 desc = st.text_area("指摘内容", placeholder="具体的な指摘内容を入力してください")
                 
-                # 写真撮影/アップロード
+                # 写真撮影
                 photo = st.file_uploader("指摘箇所を撮影", type=['jpg','png','jpeg'])
-                if photo:
-                    st.image(photo, caption="撮影した写真のプレビュー", use_container_width=True)
+                if photo is not None:
+                    st.image(photo, caption="撮影プレビュー", use_container_width=True)
                 
                 if st.button("この指摘を保存"):
                     if f == DEF_SEL or a == DEF_SEL or work == DEF_SEL:
@@ -258,7 +259,7 @@ def main():
     # 3. 是正実施
     # ------------------------------------------
     elif st.session_state.active_menu == "是正実施（協力業者）":
-        st.header("<td>是正実施</td>")
+        st.header("是正実施")
         if st.session_state.drill_insp_id is None:
             slim_recs = db_get("inspection_records", "progress_status=eq.是正待ち&select=inspection_id")
             if not slim_recs:
@@ -270,7 +271,7 @@ def main():
                 for ins in inspections:
                     iid = ins['inspection_id']
                     if iid in count_map:
-                        if st.button(f"{ins['property_name']} / {ins['inspection_type']} ({count_map[iid]}件)"):
+                        if st.button(f"{ins['property_name']} / {ins['inspection_type']} ({count_map[iid]}件)", key=f"fix_list_{iid}"):
                             st.session_state.drill_insp_id = iid
                             st.rerun()
         else:
@@ -283,10 +284,9 @@ def main():
                     st.write(f"【指摘】{r['issue_detail']}")
                     if r.get('issue_photo_url'): st.image(r['issue_photo_url'], use_container_width=True)
                     
-                    # 是正写真撮影
-                    fix_photo = st.file_uploader("是正写真を撮影/アップロード", key=f"fix_{r['record_id']}")
-                    if fix_photo:
-                        st.image(fix_photo, caption="是正後のプレビュー", use_container_width=True)
+                    fix_photo = st.file_uploader("是正写真を撮影", key=f"fix_{r['record_id']}")
+                    if fix_photo is not None:
+                        st.image(fix_photo, caption="是正プレビュー", use_container_width=True)
                         
                     if st.button("是正完了を報告", key=f"send_{r['record_id']}"):
                         db_patch("inspection_records", r['record_id'], {
@@ -300,7 +300,7 @@ def main():
     elif st.session_state.active_menu == "是正確認（管理者）":
         st.header("是正確認")
         if st.session_state.drill_insp_id is None:
-            slim_recs = db_get("inspection_records", "progress_status=eq.是正確認中&select=inspection_id")
+            slim_recs = db_get("inspection_records", "progress_status=eq.<td>是正確認中</td>&select=inspection_id")
             if not slim_recs: st.info("確認待ちの項目はありません。")
             else:
                 count_map = {}
@@ -309,7 +309,7 @@ def main():
                 for ins in inspections:
                     iid = ins['inspection_id']
                     if iid in count_map:
-                        if st.button(f"{ins['property_name']} / {ins['inspection_type']} ({count_map[iid]}件)"):
+                        if st.button(f"{ins['property_name']} / {ins['inspection_type']} ({count_map[iid]}件)", key=f"conf_list_{iid}"):
                             st.session_state.drill_insp_id = iid
                             st.rerun()
         else:
@@ -322,7 +322,6 @@ def main():
                     c1, c2 = st.columns(2)
                     if r.get('issue_photo_url'): c1.image(r['issue_photo_url'], caption="Before")
                     if r.get('fix_photo_url'): c2.image(r['fix_photo_url'], caption="After")
-                    
                     if st.button("承認", key=f"ok_{r['record_id']}"):
                         db_patch("inspection_records", r['record_id'], {"progress_status": "完了"})
                         st.rerun()
@@ -339,7 +338,9 @@ def main():
             st.header("完了分一覧")
             inspections = db_get("inspections", "select=*")
             for ins in inspections:
-                if st.button(f"{ins['property_name']} / {ins['inspection_type']}"):
+                # エラー回避のため、ボタンにユニークなキーを付与
+                btn_label = f"{ins.get('property_name', '不明')} / {ins.get('inspection_type', '不明')}"
+                if st.button(btn_label, key=f"done_btn_{ins['inspection_id']}"):
                     st.session_state.drill_insp_id = ins['inspection_id']
                     st.rerun()
         else:
@@ -347,10 +348,9 @@ def main():
                 st.session_state.drill_insp_id = None
                 st.rerun()
             
-            # リストから対象の検査情報を取得
-            insp_list = db_get("inspections", f"inspection_id=eq.{st.session_state.drill_insp_id}")
-            if not insp_list: return
-            ins = insp_list[0]
+            insp_data = db_get("inspections", f"inspection_id=eq.{st.session_state.drill_insp_id}")
+            if not insp_data: return
+            ins = insp_data[0]
             recs = db_get("inspection_records", f"inspection_id=eq.{st.session_state.drill_insp_id}&progress_status=eq.完了")
 
             html = f"""
