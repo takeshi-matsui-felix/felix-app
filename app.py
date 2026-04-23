@@ -93,10 +93,13 @@ if "role" not in st.session_state: st.session_state.role = None
 if "current_box" not in st.session_state: st.session_state.current_box = None
 if "active_menu" not in st.session_state: st.session_state.active_menu = "物件登録（管理者）"
 if "drill_target" not in st.session_state: st.session_state.drill_target = None
+if "pre_selected_prop" not in st.session_state: st.session_state.pre_selected_prop = None
 
-def jump_to_menu(menu_name):
+def jump_to_menu(menu_name, prop_id=None):
     st.session_state.active_menu = menu_name
     st.session_state.drill_target = None
+    if prop_id: 
+        st.session_state.pre_selected_prop = prop_id
     st.rerun()
 
 FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
@@ -138,7 +141,7 @@ def main():
         props = db_get("properties", "select=*")
         for p in props:
             c1, c2 = st.columns([8, 2])
-            if c1.button(f"{p['property_name']} 検査へ", key=f"p_{p['property_id']}"): jump_to_menu("検査実施（管理者）")
+            if c1.button(f"{p['property_name']} 検査へ", key=f"p_{p['property_id']}"): jump_to_menu("検査実施（管理者）", p['property_id'])
             if c2.button("✕", key=f"d_{p['property_id']}"): db_delete_property(p['property_id']); st.rerun()
 
     # ------------------------------------------
@@ -148,7 +151,16 @@ def main():
         st.header("検査実施")
         if st.session_state.current_box is None:
             props = db_get("properties", "select=*")
-            target = st.selectbox("物件を選択", props, format_func=lambda x: x['property_name'])
+            
+            # 物件の初期選択位置を計算
+            prop_idx = 0
+            if st.session_state.pre_selected_prop:
+                for i, p in enumerate(props):
+                    if p['property_id'] == st.session_state.pre_selected_prop:
+                        prop_idx = i
+                        break
+            
+            target = st.selectbox("物件を選択", props, index=prop_idx, format_func=lambda x: x['property_name'])
             ins_type = st.selectbox("検査種類", INSP_OPTS)
             if st.button("検査スタート"):
                 if target and ins_type != "-- 選択 --":
