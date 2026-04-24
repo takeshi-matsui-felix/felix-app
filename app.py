@@ -49,61 +49,16 @@ def process_photo(upload_file):
         return f"data:image/jpeg;base64,{base64.b64encode(upload_file.getvalue()).decode('utf-8')}"
 
 # ==========================================
-# 2. UI設定 (プルダウン白文字・超強制版)
+# 2. UI設定 (白背景に完全リセット・バグCSS全削除)
 # ==========================================
 st.set_page_config(page_title="Felix検査App", layout="wide")
 
+# 最低限のボタンの押しやすさ（高さと太字）だけを残し、色をいじる処理を全消去しました
 st.markdown("""
 <style>
-    .stApp { background-color: #121212; color: #FFFFFF !important; font-family: sans-serif; }
-    header[data-testid="stHeader"] { background-color: #121212 !important; }
-    
-    [data-testid="stSidebar"] { background-color: #121212 !important; border-right: 1px solid #333; }
-    [data-testid="stSidebar"] * { color: #FFFFFF !important; }
-    [data-testid="stSidebar"] .stRadio label { color: #FFFFFF !important; font-weight: bold !important; }
-
     div.stButton > button {
-        background-color: #1E1E1E; color: #00E5FF !important; border: 1px solid #00E5FF;
         border-radius: 6px; height: 50px; font-weight: bold; width: 100%; margin-bottom: 5px;
     }
-    
-    [data-testid="stFileUploadDropzone"] {
-        background-color: #262730 !important; border: 2px dashed #555 !important; border-radius: 10px !important;
-    }
-    [data-testid="stFileUploadDropzone"] p, [data-testid="stFileUploadDropzone"] span {
-        color: #FFFFFF !important; font-weight: bold !important;
-    }
-    
-    /* ======== プルダウンの文字見えない問題の「完全強制」修正 ======== */
-    /* 入力欄そのもの */
-    div[data-baseweb="select"] > div {
-        background-color: #1E1E1E !important; 
-        color: #FFFFFF !important; 
-    }
-    div[data-baseweb="select"] span {
-        color: #FFFFFF !important;
-    }
-    /* 展開されたリストの枠外全体 (ここがすり抜けていた原因です) */
-    div[data-baseweb="popover"], 
-    div[data-baseweb="popover"] ul,
-    ul[role="listbox"] {
-        background-color: #2D2D2D !important;
-    }
-    /* リストの中の文字（すべて白に固定） */
-    div[data-baseweb="popover"] li, 
-    div[data-baseweb="popover"] span, 
-    div[data-baseweb="popover"] div, 
-    div[data-baseweb="popover"] p,
-    li[role="option"],
-    li[role="option"] span,
-    li[role="option"] div {
-        color: #FFFFFF !important;
-        -webkit-text-fill-color: #FFFFFF !important;
-    }
-    /* ======== ============================================ ======== */
-    
-    div[data-testid="stExpander"] { background-color: #1E1E1E !important; border: 1px solid #444 !important; }
-    #print-report-wrapper, #print-report-wrapper * { color: #000000 !important; }
     footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
@@ -227,17 +182,23 @@ def main():
                     f = c1.selectbox("階層", FLOOR_OPTS)
                     a = c2.selectbox("部位", AREA_OPTS)
                 
+                # 1. 工種を選択
                 w = st.selectbox("工種を選択", WORK_OPTS)
                 
+                # 2. 定型文リストを取得
                 temp_list = ["-- 定型文から選ぶ --"]
                 if ins_type in ISSUE_TEMPLATES:
                     res = ISSUE_TEMPLATES[ins_type]
                     if isinstance(res, dict): temp_list += res.get(a, [])
                     else: temp_list += res
                 
+                # 3. 定型文のプルダウン (独立・自動入力なし)
                 sel_temp = st.selectbox("よくある指摘事項（メイン項目）", temp_list)
+                
+                # 4. 自由入力のテキストエリア (独立)
                 desc = st.text_area("詳細・場所の追記（または定型文以外の自由入力）")
                 
+                # 5. 写真アップロード
                 photo = st.file_uploader("撮影", type=['jpg','png','jpeg'])
                 if photo: st.image(photo)
                 
@@ -251,6 +212,7 @@ def main():
                     else:
                         final_desc = desc.strip()
 
+                    # 入力チェック
                     if w != "-- 選択 --" and final_desc != "" and photo is not None:
                         db_post("inspection_records", {
                             "record_id": str(uuid.uuid4()), 
@@ -259,7 +221,7 @@ def main():
                             "floor_level": f, 
                             "area": a, 
                             "work_type": w, 
-                            "issue_detail": final_desc,  
+                            "issue_detail": final_desc,  # 合体させたテキストを保存
                             "issue_photo_url": process_photo(photo), 
                             "progress_status": "是正待ち"
                         })
