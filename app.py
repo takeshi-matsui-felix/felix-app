@@ -17,7 +17,6 @@ HEADERS = {
     "Prefer": "return=minimal"
 }
 
-# 社内パスワード
 ADMIN_PASSWORD = "2011"
 
 def db_get(table, params=""):
@@ -50,7 +49,7 @@ def process_photo(upload_file):
         return f"data:image/jpeg;base64,{base64.b64encode(upload_file.getvalue()).decode('utf-8')}"
 
 # ==========================================
-# 2. UI設定
+# 2. UI設定 (文字見えないバグ完全修正版)
 # ==========================================
 st.set_page_config(page_title="Felix検査App", layout="wide")
 
@@ -75,6 +74,24 @@ st.markdown("""
         color: #FFFFFF !important; font-weight: bold !important;
     }
     
+    /* ======== プルダウン文字見えない問題の修正 ======== */
+    div[data-baseweb="select"] > div {
+        background-color: #2D2D2D !important;
+        color: #FFFFFF !important;
+        -webkit-text-fill-color: #FFFFFF !important;
+    }
+    div[data-baseweb="popover"], ul[role="listbox"] {
+        background-color: #2D2D2D !important;
+    }
+    li[role="option"] {
+        background-color: #2D2D2D !important;
+        color: #FFFFFF !important;
+    }
+    li[role="option"] span {
+        color: #FFFFFF !important;
+    }
+    /* ================================================= */
+    
     div[data-testid="stExpander"] { background-color: #1E1E1E !important; border: 1px solid #444 !important; }
     #print-report-wrapper, #print-report-wrapper * { color: #000000 !important; }
     footer {visibility: hidden;}
@@ -88,18 +105,15 @@ if "drill_target" not in st.session_state: st.session_state.drill_target = None
 if "current_box" not in st.session_state: st.session_state.current_box = None
 if "issue_saved" not in st.session_state: st.session_state.issue_saved = False
 
-# 業者用URLへのアクセスを強制するロジック
+# 業者用URL強制ロジック
 is_partner_url = False
 try:
     if hasattr(st, "query_params") and "mode" in st.query_params:
-        if "partner" in str(st.query_params.get("mode", "")):
-            is_partner_url = True
+        if "partner" in str(st.query_params.get("mode", "")): is_partner_url = True
     elif hasattr(st, "experimental_get_query_params"):
         params = st.experimental_get_query_params()
-        if "mode" in params and "partner" in str(params["mode"][0]):
-            is_partner_url = True
-except Exception:
-    pass
+        if "mode" in params and "partner" in str(params["mode"][0]): is_partner_url = True
+except Exception: pass
 
 if is_partner_url:
     st.session_state.role = "partner"
@@ -114,7 +128,7 @@ def jump_to_menu(menu_name, prop_id=None):
     st.rerun()
 
 FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
-AREA_OPTS = ["-- 選択 --", "LDK","洋室","SK","UB","WC","洗面","玄関","SCL"]
+AREA_OPTS = ["-- 選択 --", "玄関", "廊下・階段・ENT", "LDK", "キッチン", "洋室", "洗面室", "UB", "トイレ", "バルコニー", "外部", "SK", "SCL", "その他"]
 WORK_OPTS = ["-- 選択 --", "FM","造作","内装","電気","設備","ガス","清掃","SK","サッシ","外壁","外構","コーキング","その他"]
 INSP_OPTS = ["-- 選択 --", "配筋検査","躯体検査","断熱検査","中間検査","社内検査(設計)","社内検査(建設)","社内検査(マーケ)","社内検査(不動産)"]
 
@@ -126,15 +140,11 @@ def main():
             pwd = st.text_input("Password", type="password")
             if st.button("管理者ログイン"):
                 if pwd == ADMIN_PASSWORD:
-                    st.session_state.role = "admin"
-                    st.session_state.active_menu = "物件登録（管理者）"
-                    st.rerun()
+                    st.session_state.role = "admin"; st.session_state.active_menu = "物件登録（管理者）"; st.rerun()
                 else: st.error("パスワードが違います")
         with t2:
             if st.button("協力業者としてログイン"):
-                st.session_state.role = "partner"
-                st.session_state.active_menu = "是正実施（協力業者）"
-                st.rerun()
+                st.session_state.role = "partner"; st.session_state.active_menu = "是正実施（協力業者）"; st.rerun()
         return
 
     st.sidebar.markdown(f"ユーザー: {st.session_state.role}")
@@ -147,14 +157,13 @@ def main():
         st.rerun()
 
     menu_opts = ["物件登録（管理者）", "検査実施（管理者）", "是正実施（協力業者）", "是正確認（管理者）", "完了分一覧（共通）"] if st.session_state.role == "admin" else ["是正実施（協力業者）", "完了分一覧（共通）"]
+    if st.session_state.active_menu not in menu_opts: st.session_state.active_menu = menu_opts[0]
     
-    if st.session_state.active_menu not in menu_opts:
-        st.session_state.active_menu = menu_opts[0]
-        
     selected_menu = st.sidebar.radio("MENU", menu_opts, index=menu_opts.index(st.session_state.active_menu))
     if selected_menu != st.session_state.active_menu:
         st.session_state.active_menu = selected_menu; st.session_state.drill_target = None; st.rerun()
 
+    # 1. 物件登録
     if st.session_state.active_menu == "物件登録（管理者）":
         st.header("物件登録")
         name = st.text_input("新規物件名")
@@ -166,6 +175,7 @@ def main():
             if c1.button(f"{p['property_name']} 検査へ", key=f"p_{p['property_id']}"): jump_to_menu("検査実施（管理者）", p['property_id'])
             if c2.button("✕", key=f"d_{p['property_id']}"): db_delete_property(p['property_id']); st.rerun()
 
+    # 2. 検査実施
     elif st.session_state.active_menu == "検査実施（管理者）":
         if st.session_state.current_box is None:
             st.header("検査開始")
@@ -204,6 +214,7 @@ def main():
                 if st.button("次を登録"): st.session_state.issue_saved = False; st.rerun()
                 if st.button("終了"): st.session_state.current_box = None; st.session_state.issue_saved = False; st.rerun()
 
+    # 3. 是正実施
     elif st.session_state.active_menu == "是正実施（協力業者）":
         st.header("是正実施")
         if st.session_state.drill_target is None:
@@ -253,6 +264,7 @@ def main():
                             else:
                                 st.error("エラー：是正写真を撮影または選択してください。写真がないと報告できません。")
 
+    # 4. 是正確認
     elif st.session_state.active_menu == "是正確認（管理者）":
         st.header("是正確認")
         if st.session_state.drill_target is None:
@@ -298,6 +310,7 @@ def main():
                         if st.button("否認（差し戻し）", key=f"ng_{r['record_id']}"): 
                             db_patch("inspection_records", r['record_id'], {"progress_status": "是正待ち", "reject_reason": reason}); st.rerun()
 
+    # 5. 完了分一覧
     elif st.session_state.active_menu == "完了分一覧（共通）":
         if st.session_state.drill_target is None:
             st.header("完了報告書")
