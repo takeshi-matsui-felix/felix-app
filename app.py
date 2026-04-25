@@ -65,7 +65,7 @@ def process_photo(upload_file):
 # ==========================================
 # 2. UI設定 (スマホ画面にピタッと収まるレスポンシブ仕様)
 # ==========================================
-st.set_page_config(page_title="Felix検査App", layout="wide")
+st.set_page_config(page_title="Felix検査App", page_icon="icon.png", layout="wide")
 
 st.markdown("""
 <style>
