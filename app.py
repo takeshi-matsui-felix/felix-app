@@ -4,6 +4,7 @@ import uuid
 import datetime
 import base64
 import io
+import json
 
 # ==========================================
 # 1. Supabase 接続設定
@@ -96,7 +97,7 @@ st.markdown("""
         border-bottom: 2px solid #EEEEEE; padding-bottom: 20px; margin-bottom: 20px;
     }
     
-    /* 🖨️ 印刷用設定: 物件名以下のみを印刷する強力なフィルター */
+    /* 🖨️ 印刷用設定 */
     @media print {
         section[data-testid="stSidebar"], 
         header[data-testid="stHeader"] { display: none !important; }
@@ -110,7 +111,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. 定型文データ (安全な辞書形式に変更し、文字切れエラーを完全防止)
+# 3. 定型文データ
 # ==========================================
 ISSUE_TEMPLATES = {
     "配筋検査": {
@@ -633,7 +634,7 @@ def main():
                 recs = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})&progress_status=eq.{status}")
                 
                 # ------------------------------------
-                # ✅ 完了報告書の印刷用画面 (新・横並びカード形式)
+                # ✅ 完了報告書の印刷用画面 (表示切れ防止策導入)
                 # ------------------------------------
                 if status == "完了":
                     if st.session_state.role == "admin" and target_iid:
@@ -653,13 +654,13 @@ def main():
                                 st.error("パスワードが違います")
                         st.markdown("<hr class='admin-delete-box'>", unsafe_allow_html=True)
 
-                    # ヘッダー部分
-                    html = f"""<div id="print-report-wrapper" style="background:white; padding:0; font-family:sans-serif; width:100%;">
+                    # ヘッダー部分を単独で描画
+                    st.markdown(f"""<div style="background:white; padding:0; font-family:sans-serif; width:100%;">
                         <div style="text-align:center; margin-bottom:5px; font-size:24px; font-weight:bold;">{prop_val}</div>
                         <div style="text-align:center; margin-top:0; font-size:20px; font-weight:bold;">{type_val}報告書</div>
                         <div style="text-align:right; font-size:12px; color:#555; margin-bottom:10px; border-bottom:2px solid #000; padding-bottom:5px;">
                             <strong>検査日:</strong> {ins_date_str} &nbsp;&nbsp; <strong>検査員:</strong> {inspector_str}
-                        </div>"""
+                        </div></div>""", unsafe_allow_html=True)
                     
                     w_groups = {}
                     for r in recs:
@@ -671,8 +672,10 @@ def main():
                         w_groups[w].append(r)
                         
                     issue_count = 1
+                    
+                    # 🚨【修正ポイント】指摘1件ごとに細かく分けて描画する（巨大データによる表示切れエラーを防止）
                     for w_name, w_recs in w_groups.items():
-                        html += f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px;'>■ 工種: {w_name}</div>"
+                        st.markdown(f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px;'>■ 工種: {w_name}</div>", unsafe_allow_html=True)
                         
                         for idx, r in enumerate(w_recs):
                             floor = r.get('floor_level', '')
@@ -686,7 +689,8 @@ def main():
                             img_b = f'<img src="{i_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;">' if i_photo else '<div style="text-align:center; padding:30px; color:#999; border:1px solid #eee;">写真なし</div>'
                             img_a = f'<img src="{f_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;">' if f_photo else '<div style="text-align:center; padding:30px; color:#999; border:1px solid #eee;">写真なし</div>'
                             
-                            html += f"""
+                            # 指摘1件ごとに HTML を出力
+                            st.markdown(f"""
                             <div style="page-break-inside: avoid; border-bottom: 1px dashed #ccc; padding: 15px 0; margin-bottom: 10px;">
                                 <div style="font-size:14px; font-weight:bold; margin-bottom:5px;">
                                     No.{issue_count} {loc_text}
@@ -707,11 +711,8 @@ def main():
                                     </tr>
                                 </table>
                             </div>
-                            """
+                            """, unsafe_allow_html=True)
                             issue_count += 1
-                            
-                    html += "</div>"
-                    st.markdown(html, unsafe_allow_html=True)
                 
                 else:
                     # 是正確認中の画面
