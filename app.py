@@ -21,7 +21,7 @@ HEADERS = {
 ADMIN_PASSWORD = "2011"
 DELETE_PASSWORD = "5963" # 完了データの削除用パスワード
 
-# 🛡 【絶対防御】データベース通信時のエラー回避
+# 🛡 データベース通信
 def db_get(table, params=""):
     url = f"{SUPABASE_URL}/rest/v1/{table}?{params}"
     try:
@@ -44,9 +44,6 @@ def db_patch(table, record_id, data):
 
 def db_delete_record(record_id):
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
-
-def db_delete_inspection_data(inspection_id):
-    requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{inspection_id}", headers=HEADERS)
 
 def db_delete_property(prop_id):
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?property_id=eq.{prop_id}", headers=HEADERS)
@@ -72,7 +69,6 @@ def process_photo(upload_file):
 # ==========================================
 st.set_page_config(page_title="Felix検査App", page_icon="icon.png", layout="wide")
 
-# 📱 スマホ用アイコン設定
 try:
     with open("icon.png", "rb") as f:
         img_base64 = base64.b64encode(f.read()).decode()
@@ -628,27 +624,31 @@ def main():
                         
             ins_date_str = target_ins.get('inspection_date', '-') if target_ins else '-'
             inspector_str = target_ins.get('inspector', '-') if target_ins else '-'
-            target_iid = target_ins.get('inspection_id') if target_ins else None
             
             if t_ids:
                 recs = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})&progress_status=eq.{status}")
                 
                 # ------------------------------------
-                # ✅ 完了報告書の印刷用画面 (表示切れ防止策導入)
+                # ✅ 完了報告書の印刷用画面 (表示切れ防止策＆削除バグ修正導入)
                 # ------------------------------------
                 if status == "完了":
-                    if st.session_state.role == "admin" and target_iid:
+                    if st.session_state.role == "admin":
                         st.markdown(f"""<div class="admin-delete-box" style="background-color:#FFF0F0; padding:15px; border:2px solid #FF4B4B; border-radius:10px; margin-bottom:20px;">
                             <h3 style="color:#FF4B4B; margin-top:0;">📋 完了物件の保存及び削除（管理者専用）</h3>
                             <p style="font-size:14px; color:#333;">この検査記録の保存（PDF化や印刷）が完了しましたら、システム容量を空けるためにデータを削除してください。<br><b>※一度削除した写真は元に戻せません。</b></p>
                         </div>""", unsafe_allow_html=True)
                         
-                        del_pass = st.text_input("削除用パスワードを入力 (5963)", type="password", key=f"del_pass_{target_iid}")
+                        del_pass = st.text_input("削除用パスワードを入力 (5963)", type="password", key=f"del_pass_all")
                         
-                        if st.button(f"🚨 この検査（{type_val}）のデータを完全に削除する", key=f"del_btn_{target_iid}"):
+                        if st.button(f"🚨 この検査（{type_val}）のデータを完全に削除する", key=f"del_btn_all"):
                             if del_pass == DELETE_PASSWORD:
-                                db_delete_inspection_data(target_iid)
-                                st.success("データの削除が完了しました。")
+                                # 💡【修正ポイント】裏側に隠れた複数のIDを一つ残らずすべて削除する
+                                for iid in t_ids:
+                                    requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{iid}", headers=HEADERS)
+                                    requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{iid}", headers=HEADERS)
+                                
+                                st.success("すべてのデータの削除が完了しました！")
+                                st.session_state.drill_target = None
                                 st.rerun()
                             else:
                                 st.error("パスワードが違います")
@@ -673,7 +673,7 @@ def main():
                         
                     issue_count = 1
                     
-                    # 🚨【修正ポイント】指摘1件ごとに細かく分けて描画する（巨大データによる表示切れエラーを防止）
+                    # 指摘1件ごとに細かく分けて描画する（巨大データによる表示切れエラーを防止）
                     for w_name, w_recs in w_groups.items():
                         st.markdown(f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px;'>■ 工種: {w_name}</div>", unsafe_allow_html=True)
                         
@@ -689,7 +689,6 @@ def main():
                             img_b = f'<img src="{i_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;">' if i_photo else '<div style="text-align:center; padding:30px; color:#999; border:1px solid #eee;">写真なし</div>'
                             img_a = f'<img src="{f_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;">' if f_photo else '<div style="text-align:center; padding:30px; color:#999; border:1px solid #eee;">写真なし</div>'
                             
-                            # 指摘1件ごとに HTML を出力
                             st.markdown(f"""
                             <div style="page-break-inside: avoid; border-bottom: 1px dashed #ccc; padding: 15px 0; margin-bottom: 10px;">
                                 <div style="font-size:14px; font-weight:bold; margin-bottom:5px;">
