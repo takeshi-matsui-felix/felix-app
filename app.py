@@ -19,7 +19,7 @@ HEADERS = {
 }
 
 ADMIN_PASSWORD = "2011"
-DELETE_PASSWORD = "5963" # 完了データの削除用パスワード
+DELETE_PASSWORD = "5963"
 
 # 🛡 データベース通信
 def db_get(table, params=""):
@@ -95,8 +95,6 @@ st.markdown("""
     .record-box {
         border-bottom: 2px solid #EEEEEE; padding-bottom: 20px; margin-bottom: 20px;
     }
-    
-    /* 🖨️ 印刷用設定 */
     @media print {
         section[data-testid="stSidebar"], 
         header[data-testid="stHeader"] { display: none !important; }
@@ -203,6 +201,8 @@ WORK_OPTS_SHANAI = ["-- 選択 --", "A.リペア", "B.清掃", "C.クロス", "D
 
 INSP_OPTS = ["-- 選択 --", "配筋検査","躯体検査","断熱検査","中間検査","社内検査(設計)","社内検査(建設)","社内検査(マーケ)","社内検査(不動産)"]
 SHANAI_KENSA_TYPES = ["社内検査(設計)", "社内検査(建設)", "社内検査(マーケ)", "社内検査(不動産)"]
+# 💡【追加】検査員のプルダウン選択肢
+INSPECTOR_OPTS = ["工事監理チーム", "建設部", "不動産事業部", "マーケティング部"]
 
 # ==========================================
 # 5. メイン画面・機能
@@ -236,11 +236,26 @@ def main():
         st.query_params.clear()
         st.rerun()
 
-    menu_opts = ["物件登録（管理者）", "検査実施（管理者）", "是正実施（協力業者）", "是正確認（管理者）", "完了分一覧（共通）"] if st.session_state.role == "admin" else ["是正実施（協力業者）", "完了分一覧（共通）"]
+    # 💡【機能追加】「確認待ち」の件数を取得してメニュー名を書き換える
+    confirm_cnt = 0
+    if st.session_state.role == "admin":
+        wait_conf_recs = db_get("inspection_records", "progress_status=eq.確認待ち")
+        confirm_cnt = len(wait_conf_recs)
+
+    def format_menu(m):
+        if m == "検査内容確認（管理者）" and confirm_cnt > 0:
+            return f"{m} 🔴未確認{confirm_cnt}件"
+        return m
+
+    if st.session_state.role == "admin":
+        menu_opts = ["物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正実施（協力業者）", "是正確認（管理者）", "完了分一覧（共通）"]
+    else:
+        menu_opts = ["是正実施（協力業者）", "完了分一覧（共通）"]
+        
     if st.session_state.active_menu not in menu_opts:
         st.session_state.active_menu = menu_opts[0]
     
-    selected_menu = st.sidebar.radio("MENU", menu_opts, index=menu_opts.index(st.session_state.active_menu))
+    selected_menu = st.sidebar.radio("MENU", menu_opts, index=menu_opts.index(st.session_state.active_menu), format_func=format_menu)
     
     if selected_menu != st.session_state.active_menu:
         st.session_state.active_menu = selected_menu
@@ -315,7 +330,8 @@ def main():
             
             c1, c2 = st.columns(2)
             ins_date = c1.date_input("検査日時", datetime.date.today())
-            inspector = c2.text_input("検査員", "管理者")
+            # 💡【機能追加】検査員をプルダウンに変更
+            inspector = c2.selectbox("検査員", INSPECTOR_OPTS)
             
             if st.button("検査スタート"):
                 prop_name = target.get('property_name')
@@ -323,7 +339,9 @@ def main():
                 if prop_name != "-- 選択 --" and ins_type != "-- 選択 --":
                     nid = str(uuid.uuid4())
                     db_post("inspections", {"inspection_id": nid, "property_id": prop_id, "property_name": prop_name, "inspection_type": ins_type, "inspection_date": str(ins_date), "inspector": inspector})
-                    st.session_state.current_box = {"id": nid, "prop_id": prop_id, "name": prop_name, "type": ins_type}
+                    
+                    # 💡【機能追加】工事監理チームかどうかのフラグを持たせる
+                    st.session_state.current_box = {"id": nid, "prop_id": prop_id, "name": prop_name, "type": ins_type, "inspector": inspector}
                     st.session_state.pre_selected_prop = None
                     st.session_state.issue_saved = False
                     st.rerun()
@@ -337,6 +355,7 @@ def main():
             c_type = cb.get('type', '')
             c_id = cb.get('id', '')
             c_prop_id = cb.get('prop_id', '')
+            c_inspector = cb.get('inspector', '')
             
             st.subheader(f"{c_name} / {c_type}")
             
@@ -400,6 +419,9 @@ def main():
                         final_desc = desc.strip()
 
                     if w and final_desc != "" and photo is not None:
+                        # 💡【機能追加】工事監理チームの場合は「確認待ち」にする
+                        initial_status = "確認待ち" if c_inspector == "工事監理チーム" else "是正待ち"
+                        
                         db_post("inspection_records", {
                             "record_id": str(uuid.uuid4()), 
                             "inspection_id": c_id, 
@@ -409,7 +431,7 @@ def main():
                             "work_type": w, 
                             "issue_detail": final_desc,  
                             "issue_photo_url": process_photo(photo), 
-                            "progress_status": "是正待ち"
+                            "progress_status": initial_status
                         })
                         st.session_state.issue_saved = True
                         st.rerun()
@@ -428,6 +450,94 @@ def main():
                     st.session_state.current_box = None
                     st.session_state.issue_saved = False
                     st.rerun()
+
+    # ----------------------------------------
+    # 💡【新設】メニュー: 検査内容確認（管理者）
+    # ----------------------------------------
+    elif st.session_state.active_menu == "検査内容確認（管理者）":
+        st.header("検査内容確認（承認）")
+        all_recs = db_get("inspection_records", "progress_status=eq.確認待ち")
+        all_ins = db_get("inspections", "select=*")
+        
+        ins_map = {}
+        for i in all_ins:
+            if isinstance(i, dict) and i.get('inspection_id'):
+                ins_map[i.get('inspection_id')] = i
+                
+        tree = {}
+        for r in all_recs:
+            if not isinstance(r, dict):
+                continue
+            ins = ins_map.get(r.get('inspection_id'))
+            if ins:
+                p = ins.get('property_name', '不明')
+                t = ins.get('inspection_type', '不明')
+                if p not in tree:
+                    tree[p] = {}
+                tree[p][t] = tree[p].get(t, 0) + 1
+        
+        if not tree:
+            st.info("現在、確認待ちの検査はありません。")
+                
+        for p_idx, (p_name, types) in enumerate(tree.items()):
+            with st.expander(p_name):
+                for t_idx, (t_name, count) in enumerate(types.items()):
+                    if st.button(f"{t_name} ({count}件)", key=f"f_{p_idx}_{t_idx}"):
+                        st.session_state.drill_target = {"prop": p_name, "type": t_name}
+                        st.rerun()
+        
+        sel = st.session_state.drill_target
+        if not isinstance(sel, dict):
+            sel = {}
+        prop_val = sel.get('prop', '')
+        type_val = sel.get('type', '')
+        
+        if prop_val and type_val:
+            if st.button("＜ 物件選択に戻る"):
+                st.session_state.drill_target = None
+                st.rerun()
+            
+            t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
+            
+            if t_ids:
+                recs = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})&progress_status=eq.確認待ち")
+                
+                # 💡【機能追加】一括承認ボタン
+                st.info(f"この検査（{prop_val} / {type_val}）には、現在 **{len(recs)}件** の確認待ちデータがあります。")
+                if st.button("✅ この検査をすべて承認して業者（是正実施）に送る", type="primary"):
+                    for r in recs:
+                        db_patch("inspection_records", r['record_id'], {"progress_status": "是正待ち"})
+                    st.success("一括承認が完了しました！協力業者へ表示されます。")
+                    st.session_state.drill_target = None
+                    st.rerun()
+                    
+                st.markdown("---")
+                
+                w_groups = {}
+                for r in recs:
+                    if not isinstance(r, dict):
+                        continue
+                    w = r.get('work_type') or 'その他'
+                    if w not in w_groups:
+                        w_groups[w] = []
+                    w_groups[w].append(r)
+                
+                for w_name, w_recs in w_groups.items():
+                    st.subheader(f"■ 工種: {w_name}")
+                    for r in w_recs:
+                        floor = r.get('floor_level', '')
+                        area = r.get('area', '')
+                        detail = r.get('issue_detail', '')
+                        head_text = f"【{floor} {area}】".strip()
+                        if floor == "一式":
+                            head_text = ""
+                        title = f"{head_text} {detail}" if head_text else f"【指摘内容】 {detail}"
+                        
+                        st.markdown('<div class="record-box">', unsafe_allow_html=True)
+                        st.markdown(f"**{title}**")
+                        if r.get('issue_photo_url'): 
+                            st.image(r.get('issue_photo_url'), width=300)
+                        st.markdown('</div>', unsafe_allow_html=True)
 
     # ----------------------------------------
     # メニュー: 3. 是正実施
@@ -475,7 +585,6 @@ def main():
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
             
             if t_ids:
-                # 💡【機能追加1】全レコードを取得して集計を行う
                 recs_all = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})")
                 recs = [r for r in recs_all if r.get('progress_status') == '是正待ち']
                 
@@ -636,7 +745,6 @@ def main():
             inspector_str = target_ins.get('inspector', '-') if target_ins else '-'
             
             if t_ids:
-                # 💡【機能追加2】全レコードを取得して完了・未完了を集計
                 recs_all = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})")
                 recs = [r for r in recs_all if r.get('progress_status') == status]
                 
@@ -666,7 +774,6 @@ def main():
                                 st.error("パスワードが違います")
                         st.markdown("<hr class='admin-delete-box'>", unsafe_allow_html=True)
 
-                    # ヘッダー部分を単独で描画（総数を追加）
                     st.markdown(f"""<div style="background:white; padding:0; font-family:sans-serif; width:100%;">
                         <div style="text-align:center; margin-bottom:5px; font-size:24px; font-weight:bold;">{prop_val}</div>
                         <div style="text-align:center; margin-top:0; font-size:20px; font-weight:bold;">{type_val}報告書</div>
@@ -685,7 +792,6 @@ def main():
                         
                     issue_count = 1
                     
-                    # 指摘1件ごとに細かく分けて描画する（巨大データによる表示切れエラーを防止）
                     for w_name, w_recs in w_groups.items():
                         st.markdown(f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px;'>■ 工種: {w_name}</div>", unsafe_allow_html=True)
                         
@@ -726,7 +832,6 @@ def main():
                             issue_count += 1
                 
                 else:
-                    # 💡【機能追加2】是正確認中の画面でゴール（完了数・未完了数）を表示
                     conf_cnt = len(recs)
                     st.info(f"📊 **【進捗】 全 {total_cnt} 件 ･･･ [ ✅ 完了：{comp_cnt}件 ／ ⚠️ 未完了：{unres_cnt}件 ]** \n※うち、現在確認待ちが **{conf_cnt}件** あります。")
                     
