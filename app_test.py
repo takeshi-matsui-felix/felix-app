@@ -1,16 +1,13 @@
 import streamlit as st
 import streamlit.components.v1 as components
-import sys
-import base64
+import os
 
 st.set_page_config(page_title="爆速カメラ テスト", layout="centered")
 
 # ==========================================
 # 📸 爆速カメラ・コンポーネント (HTML/JS)
 # ==========================================
-# スマホ内でカメラを起動し、撮影と同時に800x800にリサイズ・圧縮（JPEG 70%）を行う魔法のコード
-FAST_CAMERA_HTML = """
-<!DOCTYPE html>
+FAST_CAMERA_HTML = """<!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
@@ -56,11 +53,8 @@ FAST_CAMERA_HTML = """
             captureBtn.innerText = "圧縮＆送信中...";
             captureBtn.style.background = "#ccc";
 
-            // 1. オリジナルのサイズを取得
             let w = video.videoWidth;
             let h = video.videoHeight;
-
-            // 2. 最大800pxにリサイズ計算
             const MAX_SIZE = 800;
             if (w > h) {
                 if (w > MAX_SIZE) { h *= MAX_SIZE / w; w = MAX_SIZE; }
@@ -68,18 +62,13 @@ FAST_CAMERA_HTML = """
                 if (h > MAX_SIZE) { w *= MAX_SIZE / h; h = MAX_SIZE; }
             }
 
-            // 3. Canvasに圧縮サイズで描画
             canvas.width = w;
             canvas.height = h;
             ctx.drawImage(video, 0, 0, w, h);
 
-            // 4. JPEG (品質70%) でBase64エンコード
             const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.7);
-
-            // 5. StreamlitのPythonへ送信！
             sendToStreamlit(compressedDataUrl);
             
-            // 撮影時の振動（スマホのみ）
             if (navigator.vibrate) navigator.vibrate(50);
             
             setTimeout(() => {
@@ -92,8 +81,16 @@ FAST_CAMERA_HTML = """
 </html>
 """
 
+# 🛠️ 修正ポイント：HTMLを直接渡すのではなく、裏で一時的なフォルダとファイルを作成して読み込ませる
+COMPONENT_DIR = "fast_camera_comp"
+if not os.path.exists(COMPONENT_DIR):
+    os.makedirs(COMPONENT_DIR)
+
+with open(os.path.join(COMPONENT_DIR, "index.html"), "w", encoding="utf-8") as f:
+    f.write(FAST_CAMERA_HTML)
+
 def fast_camera_component():
-    component_func = components.declare_component("fast_camera", html=FAST_CAMERA_HTML)
+    component_func = components.declare_component("fast_camera", path=COMPONENT_DIR)
     return component_func(key="fast_camera_test")
 
 # ==========================================
@@ -104,7 +101,6 @@ st.write("20秒かかっていた写真アップロードが、何秒になる�
 st.markdown("---")
 
 st.markdown("### 1. ここで撮影してください")
-# コンポーネントの呼び出し（ここで圧縮されたBase64データが返ってくる）
 compressed_image_b64 = fast_camera_component()
 
 st.markdown("### 2. 受信結果")
@@ -112,11 +108,11 @@ if compressed_image_b64:
     st.success("✅ 受信完了！劇的に早くなっていませんか？")
     
     # データのサイズ計算（Base64の文字数から推定KBを算出）
-    size_in_bytes = (len(compressed_image_b64) * 3) / 4
+    base64_str = compressed_image_b64.split(",")[1] if "," in compressed_image_b64 else compressed_image_b64
+    size_in_bytes = (len(base64_str) * 3) / 4
     size_in_kb = size_in_bytes / 1024
-    st.info(f"💾 **スマホ内で圧縮されたデータサイズ: 約 {size_in_kb:.1f} KB**\n\n(※通常1枚 5,000〜10,000 KBなので、約 1/50 の軽さになっています)")
+    st.info(f"💾 **スマホ内で圧縮されたデータサイズ: 約 {size_in_kb:.1f} KB**\n\n(※通常1枚 5,000〜10,000 KBなので、劇的に軽くなっています)")
     
-    # 画像の表示
     st.image(compressed_image_b64, caption="受信した圧縮済み画像")
 else:
     st.warning("待機中... カメラで撮影ボタンを押してください。")
