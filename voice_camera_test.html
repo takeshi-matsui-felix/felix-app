@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>📸 音声＆カメラ同時起動プロトタイプ</title>
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #1a1a1a; color: #fff; margin: 0; padding: 15px; display: flex; flex-direction: column; align-items: center; }
+        h2 { color: #deff9a; text-align: center; font-size: 20px; }
+        .video-container { width: 100%; max-width: 500px; height: 350px; background-color: #000; border-radius: 12px; overflow: hidden; position: relative; border: 2px solid #333; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        .status-badge { position: absolute; top: 10px; left: 10px; background-color: rgba(255, 0, 0, 0.8); color: white; padding: 5px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; display: none; }
+        .controls { display: flex; gap: 10px; margin-top: 15px; width: 100%; max-width: 500px; }
+        button { flex: 1; padding: 15px; font-size: 16px; font-weight: bold; border-radius: 8px; border: none; cursor: pointer; }
+        #startBtn { background-color: #deff9a; color: #000; }
+        #captureBtn { background-color: #4a90e2; color: #fff; display: none; }
+        textarea { width: 100%; max-width: 500px; height: 120px; margin-top: 15px; padding: 10px; border-radius: 8px; border: 1px solid #555; background-color: #222; color: #deff9a; font-size: 16px; resize: none; box-sizing: border-box; }
+        canvas { display: none; }
+        .result-container { margin-top: 15px; width: 100%; max-width: 500px; display: none; }
+        .result-container img { width: 100%; border-radius: 12px; border: 2px solid #deff9a; }
+    </style>
+</head>
+<body>
+
+    <h2>📸 FELIX Voice-Cam Prototype</h2>
+
+    <div class="video-container">
+        <video id="cameraView" autoplay playsinline></video>
+        <div id="recordingStatus" class="status-badge">🎙️ 音声認識中...</div>
+    </div>
+
+    <div class="controls">
+        <button id="startBtn">▶️ カメラとマイクを起動</button>
+        <button id="captureBtn">📸 パシャッ！ (写真撮影)</button>
+    </div>
+
+    <textarea id="transcript" placeholder="ここに喋った言葉が自動で入力されます..."></textarea>
+
+    <div class="result-container" id="resultArea">
+        <h3 style="font-size: 16px; margin-bottom: 5px;">✅ 撮影結果（Before）</h3>
+        <img id="photoResult" src="" alt="Captured Photo">
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const startBtn = document.getElementById('startBtn');
+        const captureBtn = document.getElementById('captureBtn');
+        const cameraView = document.getElementById('cameraView');
+        const transcriptArea = document.getElementById('transcript');
+        const recordingStatus = document.getElementById('recordingStatus');
+        const canvas = document.getElementById('canvas');
+        const photoResult = document.getElementById('photoResult');
+        const resultArea = document.getElementById('resultArea');
+
+        let recognition;
+        let isRecognizing = false;
+
+        // ① 音声認識のセットアップ（iPhoneとAndroid両対応）
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (typeof SpeechRecognition !== "undefined") {
+            recognition = new SpeechRecognition();
+            recognition.continuous = true; // 喋り終わっても録音を続ける
+            recognition.interimResults = true; // 喋っている途中の文字も表示する
+            recognition.lang = 'ja-JP';
+
+            // 音声が認識された時の処理
+            recognition.onresult = (event) => {
+                let finalTranscript = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    }
+                }
+                if (finalTranscript !== '') {
+                    // テキストエリアに追記していく
+                    transcriptArea.value += finalTranscript + " ";
+                }
+            };
+
+            // iPhone対策: 無音で勝手に止まったら、強制的に再起動させる
+            recognition.onend = () => {
+                if (isRecognizing) {
+                    recognition.start();
+                }
+            };
+        } else {
+            alert("お使いのブラウザは音声認識に対応していません。SafariかChromeを使用してください。");
+        }
+
+        // ② ボタンを押した時の処理（カメラとマイクの同時起動）
+        startBtn.addEventListener('click', async () => {
+            try {
+                // 外側のカメラ（背面カメラ）を要求
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' }, 
+                    audio: false // マイクはSpeechRecognitionで独自に使うためここではfalse
+                });
+                
+                cameraView.srcObject = stream;
+                
+                // 音声認識をスタート
+                if (recognition) {
+                    isRecognizing = true;
+                    recognition.start();
+                    recordingStatus.style.display = 'block';
+                }
+
+                // UIの切り替え
+                startBtn.style.display = 'none';
+                captureBtn.style.display = 'block';
+
+            } catch (err) {
+                alert("カメラまたはマイクの起動に失敗しました。許可設定を確認してください。");
+                console.error(err);
+            }
+        });
+
+        // ③ 撮影ボタンを押した時の処理
+        captureBtn.addEventListener('click', () => {
+            // キャンバスにビデオの現在のフレームを描画
+            canvas.width = cameraView.videoWidth;
+            canvas.height = cameraView.videoHeight;
+            canvas.getContext('2d').drawImage(cameraView, 0, 0, canvas.width, canvas.height);
+            
+            // 画像データ（Base64）に変換して表示
+            const imageData = canvas.toDataURL('image/jpeg', 0.8);
+            photoResult.src = imageData;
+            resultArea.style.display = 'block';
+
+            // 音声認識をストップさせる場合（今回はテストなので止めずに続けさせます）
+            // isRecognizing = false;
+            // recognition.stop();
+            // recordingStatus.style.display = 'none';
+        });
+    </script>
+</body>
+</html>
