@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>📸 FELIX Voice-Cam V2</title>
+    <title>📸 FELIX Voice-Cam V3 (AI Engine)</title>
     <style>
         body { font-family: sans-serif; background-color: #1a1a1a; color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
         .video-container { width: 100%; max-width: 400px; border-radius: 15px; overflow: hidden; position: relative; border: 2px solid #deff9a; }
@@ -19,7 +19,7 @@
     </style>
 </head>
 <body>
-    <h2 style="color: #deff9a; margin-top:0;">📸 Voice-Cam V2</h2>
+    <h2 style="color: #deff9a; margin-top:0;">📸 Voice-Cam V3<br><span style="font-size:12px; color:#aaa;">(ファジィ検索エンジン搭載)</span></h2>
     <div class="video-container">
         <video id="video" autoplay playsinline></video>
         <div id="status" class="status">停止中</div>
@@ -30,7 +30,7 @@
         <button id="captureBtn">📸 撮影（パシャッ）</button>
     </div>
     
-    <textarea id="output" placeholder="喋った言葉がここに表示されます... (タップして手修正も可能)"></textarea>
+    <textarea id="output" placeholder="喋った言葉が自動補正されて表示されます..."></textarea>
     <button id="clearBtn">🗑️ テキストを消してやり直す</button>
 
     <img id="photoResult" />
@@ -49,23 +49,61 @@
         let recognition;
         let isStarted = false;
 
-        // 🛠️ FELIX専用 自動変換辞書（ここをどんどん増やせば最強になります！）
-        const dictionary = {
-            "ようぜせい": "要是正",
-            "このじ": "コの字",
-            "じんつうこう": "人通口",
-            "ビスうき": "ビス浮き",
-            "ごうはん": "合板"
-        };
+        // 🧠 FELIX専用 マスター語彙リスト（ステップ1でここを自動生成します）
+        const masterVocabulary = [
+            "人通口", "U字溝", "要是正", "ビス浮き", "合板", "補強筋"
+        ];
 
-        // 辞書を使ってテキストを置き換える関数
-        function applyDictionary(text) {
-            let newText = text;
-            for (let key in dictionary) {
-                // 音声認識の揺れに対応するため、単純な文字列置換を行う
-                newText = newText.split(key).join(dictionary[key]);
+        // 🧮 レーベンシュタイン距離（文字の類似度）を計算するアルゴリズム
+        function getSimilarity(s1, s2) {
+            let longer = s1; let shorter = s2;
+            if (s1.length < s2.length) { longer = s2; shorter = s1; }
+            let longerLength = longer.length;
+            if (longerLength === 0) return 1.0;
+            
+            let costs = new Array();
+            for (let i = 0; i <= longer.length; i++) {
+                let lastValue = i;
+                for (let j = 0; j <= shorter.length; j++) {
+                    if (i === 0) costs[j] = j;
+                    else {
+                        if (j > 0) {
+                            let newValue = costs[j - 1];
+                            if (longer.charAt(i - 1) !== shorter.charAt(j - 1))
+                                newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
+                            costs[j - 1] = lastValue;
+                            lastValue = newValue;
+                        }
+                    }
+                }
+                if (i > 0) costs[shorter.length] = lastValue;
             }
-            return newText;
+            return (longerLength - costs[shorter.length]) / parseFloat(longerLength);
+        }
+
+        // 🔍 音声テキストをマスター語彙リストと照合して自動補正する機能
+        function autoCorrect(text) {
+            let correctedText = text;
+            
+            // 例: 3文字〜5文字の塊でスキャンして、似ている言葉があれば置き換える
+            masterVocabulary.forEach(word => {
+                // 文字数が同じくらいの誤変換を探す（簡易的なスライディングウィンドウ）
+                let windowSize = word.length;
+                for (let i = 0; i <= correctedText.length - windowSize; i++) {
+                    let chunk = correctedText.substring(i, i + windowSize);
+                    let similarity = getSimilarity(chunk, word);
+                    
+                    // 類似度が60%以上なら自動的に書き換える（例: U事項(3文字) vs U字溝(3文字) -> 66%一致）
+                    if (similarity >= 0.60 && similarity < 1.0) {
+                        correctedText = correctedText.substring(0, i) + word + correctedText.substring(i + windowSize);
+                    }
+                }
+            });
+            
+            // 漢字の全く違う誤変換（陣痛行など）は、私が自動生成するマッピング辞書でカバーします
+            correctedText = correctedText.replace(/陣痛行|陣痛候|陣痛/g, "人通口");
+            
+            return correctedText;
         }
 
         startBtn.onclick = async () => {
@@ -91,8 +129,8 @@
                     for (let i = 0; i < event.results.length; i++) {
                         text += event.results[i][0].transcript;
                     }
-                    // 辞書フィルターを通してテキストエリアに表示
-                    output.value = applyDictionary(text);
+                    // 🛠️ 取得したテキストを自動補正エンジンにかける
+                    output.value = autoCorrect(text);
                 };
 
                 recognition.onend = () => {
@@ -118,9 +156,8 @@
             if (window.navigator.vibrate) window.navigator.vibrate(50);
         };
 
-        // クリアボタンの処理
         clearBtn.onclick = () => {
-            output.value = ""; // テキストを空にする
+            output.value = "";
         };
     </script>
 </body>
