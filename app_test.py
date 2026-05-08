@@ -1,14 +1,13 @@
 import streamlit as st
 import streamlit.components.v1 as components
-import base64
+import os
 
-st.set_page_config(page_title="スマホ内・瞬間圧縮テスト", layout="centered")
+st.set_page_config(page_title="スマホ内・瞬間圧縮テスト V4", layout="centered")
 
 # ==========================================
-# 📱 スマホ内で圧縮を完結させる専用HTML/JSコンポーネント
+# 📱 スマホ内で圧縮を完結させる専用HTML/JS
 # ==========================================
-CLIENT_COMPRESS_HTML = """
-<!DOCTYPE html>
+CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
@@ -18,11 +17,11 @@ CLIENT_COMPRESS_HTML = """
         
         /* 現場で押しやすい大きなボタンのデザイン */
         .upload-btn {
-            display: inline-block;
+            display: block;
             width: 100%;
             max-width: 400px;
             padding: 18px 20px;
-            background-color: #FF4B4B; /* Streamlitの赤色 */
+            background-color: #FF4B4B; 
             color: white;
             border-radius: 8px;
             font-size: 16px;
@@ -34,7 +33,7 @@ CLIENT_COMPRESS_HTML = """
         }
         .upload-btn:active { background-color: #FF3333; transform: translateY(2px); }
         
-        /* 本当の入力フォームは綺麗に隠す（透明化ではなく標準的な手法） */
+        /* 本当の入力フォームは隠す（iOSでも確実な手法） */
         input[type="file"] { display: none; }
         
         #status { margin-top: 15px; font-size: 14px; color: #333; font-weight: bold; text-align: center; }
@@ -52,7 +51,10 @@ CLIENT_COMPRESS_HTML = """
     <img id="preview" />
 
     <script>
-        // Streamlitの枠（iframe）の高さを自動調整する関数
+        // Python側にデータを返すための確実な通信関数
+        function sendToStreamlit(val) {
+            window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}, "*");
+        }
         function setHeight(h) {
             window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: h}, "*");
         }
@@ -66,7 +68,6 @@ CLIENT_COMPRESS_HTML = """
             const file = e.target.files[0];
             if (!file) return;
 
-            // 撮影・選択された瞬間に処理開始（まだネットには送っていません）
             status.innerHTML = '⏳ スマホ内で高速圧縮中...';
             setHeight(120);
 
@@ -75,8 +76,7 @@ CLIENT_COMPRESS_HTML = """
                 const img = new Image();
                 img.onload = function() {
                     
-                    // 【圧縮設定】最大サイズと画質をコントロール
-                    const MAX_SIZE = 800; // 縦横最大800px（十分な画質を担保）
+                    const MAX_SIZE = 800; 
                     let width = img.width;
                     let height = img.height;
 
@@ -86,28 +86,22 @@ CLIENT_COMPRESS_HTML = """
                         if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; }
                     }
 
-                    // Canvas（お絵かきボード）を使って画像を縮小描画
                     const canvas = document.createElement('canvas');
                     canvas.width = width;
                     canvas.height = height;
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, width, height);
 
-                    // 【最重要】JPEG形式で品質を40%に落とし、約50KB〜70KBを狙う
+                    // JPEG形式、品質40%（約50〜70KBを狙う）
                     const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.4);
 
-                    // プレビュー表示
                     preview.src = compressedDataUrl;
                     preview.style.display = "block";
-                    status.innerHTML = '✅ 圧縮完了！Streamlitに送信しました';
-                    setHeight(400); // 画像を表示するので枠を広げる
+                    status.innerHTML = '✅ 圧縮完了！サーバーに送信しました';
+                    setHeight(400); 
 
-                    // 圧縮された軽いデータだけをStreamlit（Python側）へ送る
-                    window.parent.postMessage({
-                        isStreamlitMessage: true,
-                        type: "streamlit:setComponentValue",
-                        value: compressedDataUrl
-                    }, "*");
+                    // 圧縮データ（Base64）をStreamlitへ送信
+                    sendToStreamlit(compressedDataUrl);
                 };
                 img.src = event.target.result;
             };
@@ -118,9 +112,17 @@ CLIENT_COMPRESS_HTML = """
 </html>
 """
 
-# StreamlitにHTMLコンポーネントを認識させる
+# 🛠️ データを確実に受け取るための「双方向パイプ（フォルダ）」を作成
+COMPONENT_DIR = "fast_camera_comp_v4"
+if not os.path.exists(COMPONENT_DIR):
+    os.makedirs(COMPONENT_DIR)
+
+with open(os.path.join(COMPONENT_DIR, "index.html"), "w", encoding="utf-8") as f:
+    f.write(CLIENT_COMPRESS_HTML)
+
 def client_compress_component():
-    return components.html(CLIENT_COMPRESS_HTML, height=120)
+    component_func = components.declare_component("fast_camera_v4", path=COMPONENT_DIR)
+    return component_func(key="fast_camera_test_v4")
 
 # ==========================================
 # 画面表示
@@ -130,15 +132,16 @@ st.write("5MBの写真がスマホの中で圧縮され、サーバーには軽�
 st.markdown("---")
 
 st.markdown("### 1. ここで撮影してください")
-# コンポーネントの呼び出し
 compressed_b64 = client_compress_component()
 
 st.markdown("### 2. 受信結果（サーバー側）")
-if compressed_b64:
+
+# 確実に文字列データとして受け取れた場合のみ処理する（エラー防止）
+if compressed_b64 and isinstance(compressed_b64, str) and "base64," in compressed_b64:
     st.success("🎉 サクッと受信完了しました！")
     
     # Python側で受け取ったBase64データの実際のサイズ（KB）を計算
-    base64_str = compressed_b64.split(",")[1] if "," in compressed_b64 else compressed_b64
+    base64_str = compressed_b64.split("base64,")[1]
     size_in_bytes = (len(base64_str) * 3) / 4
     size_in_kb = size_in_bytes / 1024
     
