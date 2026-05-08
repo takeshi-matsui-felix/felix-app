@@ -5,7 +5,7 @@ import os
 st.set_page_config(page_title="爆速カメラ テスト", layout="centered")
 
 # ==========================================
-# 📸 爆速カメラ・コンポーネント (HTML/JS)
+# 📸 爆速カメラ・コンポーネント (ネイティブカメラ呼び出し版)
 # ==========================================
 FAST_CAMERA_HTML = """<!DOCTYPE html>
 <html lang="ja">
@@ -14,20 +14,18 @@ FAST_CAMERA_HTML = """<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
-        body { margin: 0; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; background: #1e1e1e; color: white; padding: 10px; }
-        .video-container { width: 100%; max-width: 400px; border-radius: 12px; overflow: hidden; border: 2px solid #4a90e2; position: relative; background: #000; }
-        video { width: 100%; display: block; }
-        .btn { width: 100%; max-width: 400px; padding: 15px; margin-top: 15px; background: #deff9a; color: #000; border: none; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        .btn:active { background: #c5e685; transform: translateY(2px); box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
-        canvas { display: none; }
+        body { margin: 0; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; background: #1e1e1e; padding: 10px; }
+        .btn { width: 100%; max-width: 400px; padding: 20px; background: #deff9a; color: #000; border: none; border-radius: 12px; font-size: 18px; font-weight: bold; cursor: pointer; text-align: center; box-sizing: border-box; box-shadow: 0 4px 6px rgba(0,0,0,0.3); display: block; }
+        .btn:active { background: #c5e685; transform: translateY(2px); }
+        /* 本当のカメラ起動ボタンは隠し、おしゃれなラベルをボタンの代わりにする */
+        #cameraInput { display: none; }
+        #preview { width: 100%; max-width: 400px; margin-top: 15px; border-radius: 10px; display: none; border: 2px solid #deff9a; }
     </style>
 </head>
 <body>
-    <div class="video-container">
-        <video id="video" autoplay playsinline></video>
-    </div>
-    <button class="btn" id="captureBtn"><i class="fa-solid fa-camera"></i> 撮影して圧縮送信 (ラグなし)</button>
-    <canvas id="canvas"></canvas>
+    <label for="cameraInput" class="btn" id="btnLabel"><i class="fa-solid fa-camera"></i> 撮影して圧縮送信</label>
+    <input type="file" accept="image/*" capture="environment" id="cameraInput">
+    <img id="preview" />
 
     <script>
         function sendToStreamlit(val) {
@@ -36,52 +34,56 @@ FAST_CAMERA_HTML = """<!DOCTYPE html>
         function setHeight(h) {
             window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: h}, "*");
         }
-        window.onload = () => setHeight(500);
+        window.onload = () => setHeight(100);
 
-        const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
-        const captureBtn = document.getElementById('captureBtn');
+        const input = document.getElementById('cameraInput');
+        const preview = document.getElementById('preview');
+        const btnLabel = document.getElementById('btnLabel');
 
-        // カメラ起動
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
-            .then(stream => { video.srcObject = stream; })
-            .catch(err => { alert("カメラの許可が必要です: " + err); });
+        // 写真が撮り終わった瞬間に作動する
+        input.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
 
-        // 撮影＆圧縮処理
-        captureBtn.onclick = () => {
-            captureBtn.innerText = "圧縮＆送信中...";
-            captureBtn.style.background = "#ccc";
-
-            let w = video.videoWidth;
-            let h = video.videoHeight;
-            const MAX_SIZE = 800;
-            if (w > h) {
-                if (w > MAX_SIZE) { h *= MAX_SIZE / w; w = MAX_SIZE; }
-            } else {
-                if (h > MAX_SIZE) { w *= MAX_SIZE / h; h = MAX_SIZE; }
-            }
-
-            canvas.width = w;
-            canvas.height = h;
-            ctx.drawImage(video, 0, 0, w, h);
-
-            const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.7);
-            sendToStreamlit(compressedDataUrl);
+            btnLabel.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 圧縮中...';
             
-            if (navigator.vibrate) navigator.vibrate(50);
-            
-            setTimeout(() => {
-                captureBtn.innerHTML = '<i class="fa-solid fa-camera"></i> もう一度撮影する';
-                captureBtn.style.background = "#deff9a";
-            }, 1000);
-        };
+            const img = new Image();
+            img.onload = function() {
+                let w = img.width;
+                let h = img.height;
+                const MAX_SIZE = 800; // ここで縦横800pxにリサイズ
+
+                if (w > h) {
+                    if (w > MAX_SIZE) { h *= MAX_SIZE / w; w = MAX_SIZE; }
+                } else {
+                    if (h > MAX_SIZE) { w *= MAX_SIZE / h; h = MAX_SIZE; }
+                }
+
+                // キャンバスを使って圧縮
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, w, h);
+
+                // JPEG形式、画質70%でデータ化
+                const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+                preview.src = compressedDataUrl;
+                preview.style.display = "block";
+                setHeight(400); 
+                
+                btnLabel.innerHTML = '<i class="fa-solid fa-check"></i> 送信完了！(再撮影可)';
+                
+                // Streamlitに圧縮済みデータを送信
+                sendToStreamlit(compressedDataUrl);
+            };
+            img.src = URL.createObjectURL(file);
+        });
     </script>
 </body>
 </html>
 """
 
-# 🛠️ 修正ポイント：HTMLを直接渡すのではなく、裏で一時的なフォルダとファイルを作成して読み込ませる
 COMPONENT_DIR = "fast_camera_comp"
 if not os.path.exists(COMPONENT_DIR):
     os.makedirs(COMPONENT_DIR)
@@ -111,7 +113,7 @@ if compressed_image_b64:
     base64_str = compressed_image_b64.split(",")[1] if "," in compressed_image_b64 else compressed_image_b64
     size_in_bytes = (len(base64_str) * 3) / 4
     size_in_kb = size_in_bytes / 1024
-    st.info(f"💾 **スマホ内で圧縮されたデータサイズ: 約 {size_in_kb:.1f} KB**\n\n(※通常1枚 5,000〜10,000 KBなので、劇的に軽くなっています)")
+    st.info(f"💾 **スマホ内で圧縮されたデータサイズ: 約 {size_in_kb:.1f} KB**\n\n(※通常1枚 5,000〜10,000 KBなので、約1/50の軽さになっています)")
     
     st.image(compressed_image_b64, caption="受信した圧縮済み画像")
 else:
