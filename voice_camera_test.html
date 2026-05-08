@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>📸 FELIX Voice-Cam V3 (AI Engine)</title>
+    <title>📸 FELIX Voice-Cam V3.1 (緊急補正版)</title>
     <style>
         body { font-family: sans-serif; background-color: #1a1a1a; color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
         .video-container { width: 100%; max-width: 400px; border-radius: 15px; overflow: hidden; position: relative; border: 2px solid #deff9a; }
@@ -19,7 +19,7 @@
     </style>
 </head>
 <body>
-    <h2 style="color: #deff9a; margin-top:0;">📸 Voice-Cam V3<br><span style="font-size:12px; color:#aaa;">(ファジィ検索エンジン搭載)</span></h2>
+    <h2 style="color: #deff9a; margin-top:0;">📸 Voice-Cam V3.1<br><span style="font-size:12px; color:#aaa;">(U字溝 緊急対応版)</span></h2>
     <div class="video-container">
         <video id="video" autoplay playsinline></video>
         <div id="status" class="status">停止中</div>
@@ -49,12 +49,12 @@
         let recognition;
         let isStarted = false;
 
-        // 🧠 FELIX専用 マスター語彙リスト（ステップ1でここを自動生成します）
+        // 🧠 FELIX専用 マスター語彙リスト
         const masterVocabulary = [
             "人通口", "U字溝", "要是正", "ビス浮き", "合板", "補強筋"
         ];
 
-        // 🧮 レーベンシュタイン距離（文字の類似度）を計算するアルゴリズム
+        // 🧮 レーベンシュタイン距離（文字の類似度）計算アルゴリズム
         function getSimilarity(s1, s2) {
             let longer = s1; let shorter = s2;
             if (s1.length < s2.length) { longer = s2; shorter = s1; }
@@ -81,27 +81,40 @@
             return (longerLength - costs[shorter.length]) / parseFloat(longerLength);
         }
 
-        // 🔍 音声テキストをマスター語彙リストと照合して自動補正する機能
+        // 🔍 自動補正機能（音の誤変換強制リスト ＋ アルゴリズム）
         function autoCorrect(text) {
             let correctedText = text;
             
-            // 例: 3文字〜5文字の塊でスキャンして、似ている言葉があれば置き換える
+            // ★漢字が全く違う誤変換パターンの強制補正リスト
+            const phoneticDictionary = {
+                "言う事項": "U字溝",
+                "言う事こう": "U字溝",
+                "U事項": "U字溝",
+                "陣痛行": "人通口",
+                "陣痛候": "人通口",
+                "陣痛": "人通口",
+                "ようぜせい": "要是正",
+                "このじ": "コの字",
+                "ごうはん": "合板"
+            };
+
+            for (let key in phoneticDictionary) {
+                let regex = new RegExp(key, "g");
+                correctedText = correctedText.replace(regex, phoneticDictionary[key]);
+            }
+
+            // アルゴリズム補正（タイポ対策）
             masterVocabulary.forEach(word => {
-                // 文字数が同じくらいの誤変換を探す（簡易的なスライディングウィンドウ）
                 let windowSize = word.length;
                 for (let i = 0; i <= correctedText.length - windowSize; i++) {
                     let chunk = correctedText.substring(i, i + windowSize);
                     let similarity = getSimilarity(chunk, word);
                     
-                    // 類似度が60%以上なら自動的に書き換える（例: U事項(3文字) vs U字溝(3文字) -> 66%一致）
                     if (similarity >= 0.60 && similarity < 1.0) {
                         correctedText = correctedText.substring(0, i) + word + correctedText.substring(i + windowSize);
                     }
                 }
             });
-            
-            // 漢字の全く違う誤変換（陣痛行など）は、私が自動生成するマッピング辞書でカバーします
-            correctedText = correctedText.replace(/陣痛行|陣痛候|陣痛/g, "人通口");
             
             return correctedText;
         }
@@ -129,7 +142,7 @@
                     for (let i = 0; i < event.results.length; i++) {
                         text += event.results[i][0].transcript;
                     }
-                    // 🛠️ 取得したテキストを自動補正エンジンにかける
+                    // テキストを自動補正エンジンにかける
                     output.value = autoCorrect(text);
                 };
 
