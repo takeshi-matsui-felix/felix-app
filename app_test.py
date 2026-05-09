@@ -84,13 +84,12 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
     <style>
         body { margin: 0; padding: 5px; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background-color: transparent;}
         
-        /* スタイリッシュなボタンデザイン */
         .upload-btn {
             display: block; 
             width: 100%; 
             max-width: 400px; 
             padding: 18px 20px;
-            background-color: #FF4B4B; /* 初期はStreamlitレッド */
+            background-color: #FF4B4B; 
             color: white; 
             border-radius: 8px;
             font-size: 16px; 
@@ -99,7 +98,7 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
             cursor: pointer; 
             box-sizing: border-box; 
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            transition: background-color 0.3s ease, transform 0.1s ease; /* スムーズな色の変化 */
+            transition: background-color 0.3s ease, transform 0.1s ease; 
         }
         .upload-btn:active { transform: translateY(2px); box-shadow: 0 2px 3px rgba(0,0,0,0.1); }
         input[type="file"] { display: none; }
@@ -116,7 +115,7 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
         function setHeight(h) { window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: h}, "*"); }
         function sendToStreamlit(val) { window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}, "*"); }
 
-        window.onload = function() { sendReady(); setHeight(80); }; // 高さはボタンが収まるサイズで固定
+        window.onload = function() { sendReady(); setHeight(80); }; 
 
         const input = document.getElementById('file-input');
         const uploadLabel = document.getElementById('upload-label');
@@ -127,7 +126,6 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
             const file = e.target.files[0];
             if (!file) return;
 
-            // 1. 圧縮中：オレンジ色になり、アイコンがクルクル回る
             uploadLabel.style.backgroundColor = '#f39c12';
             btnIcon.className = 'fa-solid fa-spinner fa-spin';
             btnText.innerHTML = '&nbsp;高速圧縮中...';
@@ -154,7 +152,6 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 
                     const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.4);
 
-                    // 2. 完了時：グリーンに変わり、チェックマークになる
                     uploadLabel.style.backgroundColor = '#2ecc71';
                     btnIcon.className = 'fa-solid fa-check';
                     btnText.innerHTML = '&nbsp;写真セット完了';
@@ -902,5 +899,98 @@ def main():
                             i_photo = r.get("issue_photo_url")
                             f_photo = r.get("fix_photo_url")
                             
-                            img_b = f'<img src="{i_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;">' if i_photo else '<div style="text-align:center; padding:30px; color:#999; border:1px solid #eee;">写真なし</div>'
-                            img_a = f'<img src="{f_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;">' if f_photo else '<div style="text-align:center; padding:30px; color:#999; border
+                            no_img_html = '<div style="text-align:center; padding:30px; color:#999; border:1px solid #eee;">写真なし</div>'
+                            
+                            if i_photo:
+                                img_b = f'<img src="{i_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;">'
+                            else:
+                                img_b = no_img_html
+                                
+                            if f_photo:
+                                img_a = f'<img src="{f_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;">'
+                            else:
+                                img_a = no_img_html
+                            
+                            st.markdown(f"""
+                            <div style="page-break-inside: avoid; border-bottom: 1px dashed #ccc; padding: 15px 0; margin-bottom: 10px;">
+                                <div style="font-size:14px; font-weight:bold; margin-bottom:5px;">
+                                    No.{issue_count} {loc_text}
+                                </div>
+                                <div style="font-size:14px; margin-bottom:12px; line-height:1.4;">
+                                    <strong>指摘内容：</strong> {detail}
+                                </div>
+                                <table style="width:100%; table-layout:fixed; border-collapse:collapse; border:none;">
+                                    <tr>
+                                        <td style="width:50%; text-align:center; vertical-align:top; padding-right:5px;">
+                                            <div style="font-size:12px; color:#555; margin-bottom:4px;">[ Before（指摘時） ]</div>
+                                            {img_b}
+                                        </td>
+                                        <td style="width:50%; text-align:center; vertical-align:top; padding-left:5px;">
+                                            <div style="font-size:12px; color:#555; margin-bottom:4px;">[ After（是正後） ]</div>
+                                            {img_a}
+                                        </td>
+                                    </tr>
+                                </table>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            issue_count += 1
+                
+                else:
+                    conf_cnt = len(recs)
+                    st.info(f"📊 **【進捗】 全 {total_cnt} 件 ･･･ [ ✅ 完了：{comp_cnt}件 ／ ⚠️ 未完了：{unres_cnt}件 ]** \n※うち、現在確認待ちが **{conf_cnt}件** あります。")
+                    
+                    w_groups = {}
+                    for r in recs:
+                        if not isinstance(r, dict):
+                            continue
+                        w = r.get('work_type') or 'その他'
+                        if w not in w_groups:
+                            w_groups[w] = []
+                        w_groups[w].append(r)
+                    
+                    for w_name, w_recs in w_groups.items():
+                        st.subheader(f"■ 工種: {w_name}")
+                        for r_idx, r in enumerate(w_recs):
+                            rec_id = r.get('record_id')
+                            if not rec_id:
+                                continue
+                            
+                            floor = r.get('floor_level', '')
+                            area = r.get('area', '')
+                            detail = r.get('issue_detail', '')
+                            
+                            head_text = f"【{floor} {area}】".strip()
+                            if floor == "一式":
+                                head_text = ""
+                            title = f"{head_text} {detail}" if head_text else f"【指摘内容】 {detail}"
+                            
+                            st.markdown(f"**{title}**")
+                            
+                            c1, c2 = st.columns(2)
+                            i_photo = r.get('issue_photo_url')
+                            f_photo = r.get('fix_photo_url')
+                            if i_photo:
+                                c1.image(i_photo, caption="Before")
+                            if f_photo:
+                                c2.image(f_photo, caption="After")
+                            
+                            ca, cb = st.columns(2)
+                            if ca.button("✅ 承認（完了へ）", key=f"ok_{rec_id}"): 
+                                db_patch("inspection_records", rec_id, {"progress_status": "完了"})
+                                st.rerun()
+                            
+                            reason = cb.text_input("否認理由を入力", key=f"re_{rec_id}", label_visibility="collapsed", placeholder="否認理由があれば入力")
+                            if cb.button("❌ 否認（差し戻し）", key=f"ng_{rec_id}"): 
+                                db_patch("inspection_records", rec_id, {"progress_status": "是正待ち", "reject_reason": reason})
+                                st.rerun()
+                            
+                            st.markdown("---") 
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        st.error(f"システムエラーが発生しました。")
+        if st.button("システム復旧"):
+            st.session_state.clear()
+            st.rerun()
