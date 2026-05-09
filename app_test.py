@@ -60,8 +60,7 @@ def process_photo(upload_file):
     if upload_file is None:
         return None
     if isinstance(upload_file, str) and upload_file.startswith("data:image"):
-        return upload_file # スマホ内で圧縮された完成品はそのまま通過させる
-    # 万が一、旧仕様のファイルが来た場合の予備処理
+        return upload_file 
     try:
         from PIL import Image
         img = Image.open(upload_file)
@@ -74,7 +73,7 @@ def process_photo(upload_file):
         return f"data:image/jpeg;base64,{base64.b64encode(upload_file.getvalue()).decode('utf-8')}"
 
 # ==========================================
-# 📱 2. スマホ内・瞬間圧縮コンポーネント（V6・最強版）
+# 📱 2. スマホ内・瞬間圧縮コンポーネント
 # ==========================================
 CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 <html lang="ja">
@@ -146,7 +145,7 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 
                     preview.src = compressedDataUrl;
                     preview.style.display = "block";
-                    status.innerHTML = '✅ 準備完了！';
+                    status.innerHTML = '✅ 準備完了';
                     setHeight(350); 
 
                     sendToStreamlit(compressedDataUrl);
@@ -198,7 +197,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 4. 定型文データ（辞書完全版）
+# 4. 定型文データ
 # ==========================================
 ISSUE_TEMPLATES = {
     "配筋検査": {
@@ -282,7 +281,7 @@ def jump_to_menu(menu_name, prop_id=None):
 # --- 選択肢の定義 ---
 FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
 AREA_OPTS_STANDARD = ["-- 選択 --", "玄関", "廊下・階段・ENT", "LDK", "キッチン", "洋室", "洗面室", "UB", "トイレ", "バルコニー", "外部", "その他"]
-AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バルバルコニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "その他"]
+AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バルコニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "その他"]
 WORK_OPTS_STANDARD = ["-- 選択 --", "基礎工事（鉄筋）", "基礎工事（型枠）", "フレーミング", "FM", "造作", "内装", "電気", "設備", "ガス", "清掃", "サッシ", "外壁", "外構", "コーキング", "リペア", "その他"]
 WORK_OPTS_HAIKIN = ["-- 選択 --", "基礎工事(鉄筋)", "水道", "ガス", "その他"]
 WORK_OPTS_KUTAI = ["-- 選択 --", "フレーミング", "電気", "水道", "防水", "その他"]
@@ -491,7 +490,6 @@ def main():
                 
                 w = st.radio("工種を選択", work_opts[1:], horizontal=True)
                 
-                # ★★★【最高速】スマホ内瞬間圧縮ボタンを呼び出し ★★★
                 st.markdown("##### 現場写真の追加")
                 photo = client_compress_component(key="insp_cam")
                 
@@ -524,13 +522,13 @@ def main():
                         st.session_state.issue_saved = True
                         st.rerun()
                     else: 
-                        st.error("工種・内容・写真はすべて必須です（写真が圧縮完了するまでお待ちください）")
+                        st.error("工種・内容・写真はすべて必須です（写真が準備完了するまでお待ちください）")
                 
                 if st.button("終了"):
                     st.session_state.current_box = None
                     st.rerun()
             else:
-                st.success("🎉 保存完了！（1秒でサクッと保存されました）") 
+                st.success("保存完了") 
                 if st.button("続けて次を登録"):
                     st.session_state.issue_saved = False
                     st.rerun()
@@ -730,7 +728,6 @@ def main():
                                 idx_w = edit_w_opts.index(current_w) if current_w in edit_w_opts else 0
                                 new_w = st.selectbox("工種を変更", edit_w_opts, index=idx_w, key=f"edit_w_{rec_id}")
                                 
-                                # 編集時の写真アップロードも自動圧縮エンジンを使用
                                 new_photo = client_compress_component(key=f"edit_cam_{rec_id}")
                                 
                                 if new_photo and isinstance(new_photo, str) and "base64," in new_photo:
@@ -759,7 +756,6 @@ def main():
                                 
                         with c2:
                             st.markdown("**【是正写真（After）】**")
-                            # ★★★【最高速】是正写真側にも瞬間圧縮ボタンを呼び出し ★★★
                             up = client_compress_component(key=f"fix_cam_{rec_id}")
                             
                             if up and isinstance(up, str) and "base64," in up:
@@ -770,7 +766,7 @@ def main():
                                     db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "fix_photo_url": process_photo(up)})
                                     st.rerun()
                                 else: 
-                                    st.error("写真が必要です（圧縮が完了してから押してください）")
+                                    st.error("写真が必要です（準備完了するまでお待ちください）")
                         
                         st.markdown('</div>', unsafe_allow_html=True)
             else:
@@ -935,7 +931,8 @@ def main():
                             w_groups[w] = []
                         w_groups[w].append(r)
                     
-                    for w_idx, (w_name, w_recs) in w_groups.items():
+                    # ★【完全修正】ここでエラーを起こしていた文法ミスを修正しました
+                    for w_name, w_recs in w_groups.items():
                         st.subheader(f"■ 工種: {w_name}")
                         for r_idx, r in enumerate(w_recs):
                             rec_id = r.get('record_id')
