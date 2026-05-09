@@ -1,10 +1,12 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import requests
 import uuid
 import datetime
 import base64
 import io
-import json
+import os
+import tempfile
 
 # ==========================================
 # 1. Supabase 接続設定
@@ -21,7 +23,7 @@ HEADERS = {
 ADMIN_PASSWORD = "2011"
 DELETE_PASSWORD = "5963"
 
-# 🛡 データベース通信
+# 🛡 データベース通信関数
 def db_get(table, params=""):
     url = f"{SUPABASE_URL}/rest/v1/{table}?{params}"
     try:
@@ -53,9 +55,12 @@ def db_delete_property(prop_id):
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?property_id=eq.{prop_id}", headers=HEADERS)
     requests.delete(f"{SUPABASE_URL}/rest/v1/properties?property_id=eq.{prop_id}", headers=HEADERS)
 
+# ★ 処理済みのBase64データをそのまま返すように改良
 def process_photo(upload_file):
     if upload_file is None:
         return None
+    if isinstance(upload_file, str) and upload_file.startswith("data:image"):
+        return upload_file 
     try:
         from PIL import Image
         img = Image.open(upload_file)
@@ -68,7 +73,105 @@ def process_photo(upload_file):
         return f"data:image/jpeg;base64,{base64.b64encode(upload_file.getvalue()).decode('utf-8')}"
 
 # ==========================================
-# 2. UI設定 & ログイン保持ロジック
+# 📱 2. スマホ内・瞬間圧縮コンポーネント
+# ==========================================
+CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body { margin: 0; padding: 5px; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background-color: transparent;}
+        .upload-btn {
+            display: block; width: 100%; max-width: 400px; padding: 18px 20px;
+            background-color: #FF4B4B; color: white; border-radius: 8px;
+            font-size: 16px; font-weight: bold; text-align: center;
+            cursor: pointer; box-sizing: border-box; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .upload-btn:active { background-color: #FF3333; transform: translateY(2px); }
+        input[type="file"] { display: none; }
+        #status { margin-top: 10px; font-size: 14px; color: #333; font-weight: bold; text-align: center; }
+        #preview { margin-top: 10px; max-width: 100%; border-radius: 8px; display: none; border: 2px solid #ddd; }
+    </style>
+</head>
+<body>
+    <label class="upload-btn">
+        <i class="fa-solid fa-camera"></i> 現場で撮影 ／ アルバムから選択
+        <input type="file" accept="image/*" id="file-input">
+    </label>
+    <div id="status"></div>
+    <img id="preview" />
+
+    <script>
+        function sendReady() { window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1}, "*"); }
+        function setHeight(h) { window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: h}, "*"); }
+        function sendToStreamlit(val) { window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}, "*"); }
+
+        window.onload = function() { sendReady(); setHeight(80); };
+
+        const input = document.getElementById('file-input');
+        const status = document.getElementById('status');
+        const preview = document.getElementById('preview');
+
+        input.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            status.innerHTML = '⏳ 圧縮中...';
+            setHeight(100);
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    const MAX_SIZE = 800; 
+                    let width = img.width;
+                    let height = img.height;
+
+                    if (width > height) {
+                        if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; }
+                    } else {
+                        if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; }
+                    }
+
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.4);
+
+                    preview.src = compressedDataUrl;
+                    preview.style.display = "block";
+                    status.innerHTML = '✅ 準備完了';
+                    setHeight(350); 
+
+                    sendToStreamlit(compressedDataUrl);
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+    </script>
+</body>
+</html>
+"""
+
+# 一時領域にコンポーネントを配置して読み込む
+temp_dir = os.path.join(tempfile.gettempdir(), "fast_camera_comp_final")
+os.makedirs(temp_dir, exist_ok=True)
+with open(os.path.join(temp_dir, "index.html"), "w", encoding="utf-8") as f:
+    f.write(CLIENT_COMPRESS_HTML)
+
+_client_compress_func = components.declare_component("fast_camera_final", path=temp_dir)
+
+def client_compress_component(key):
+    return _client_compress_func(key=key)
+
+# ==========================================
+# 3. UI設定 & ログイン保持ロジック
 # ==========================================
 st.set_page_config(page_title="Felix検査App", page_icon="icon.png", layout="wide")
 
@@ -81,34 +184,20 @@ except FileNotFoundError:
 
 st.markdown("""
 <style>
-    div.stButton > button {
-        border-radius: 6px; height: 50px; font-weight: bold; width: 100%; margin-bottom: 5px;
-    }
+    div.stButton > button { border-radius: 6px; height: 50px; font-weight: bold; width: 100%; margin-bottom: 5px; }
     footer {visibility: hidden;}
-    [data-testid="stStatusWidget"] {
-        position: fixed !important; top: 50% !important; left: 50% !important;
-        transform: translate(-50%, -50%) !important; background-color: rgba(255, 255, 255, 0.95) !important;
-        border: 1px solid #E0E0E0 !important; border-radius: 12px !important;
-        padding: 15px 25px !important; z-index: 99999 !important;
-        box-shadow: 0px 4px 15px rgba(0,0,0,0.1) !important;
-    }
-    .record-box {
-        border-bottom: 2px solid #EEEEEE; padding-bottom: 20px; margin-bottom: 20px;
-    }
+    [data-testid="stStatusWidget"] { display: none; }
+    .record-box { border-bottom: 2px solid #EEEEEE; padding-bottom: 20px; margin-bottom: 20px; }
     @media print {
-        section[data-testid="stSidebar"], 
-        header[data-testid="stHeader"] { display: none !important; }
-        h1, h2, h3, h4, h5, h6 { display: none !important; }
+        section[data-testid="stSidebar"], header[data-testid="stHeader"] { display: none !important; }
         .stButton, [data-testid="stTextInput"], .admin-delete-box, hr { display: none !important; }
         .main .block-container { padding-top: 0 !important; margin-top: 0 !important; }
-        @page { margin: 10mm; }
-        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. 定型文データ
+# 4. 定型文データ
 # ==========================================
 ISSUE_TEMPLATES = {
     "配筋検査": {
@@ -156,7 +245,7 @@ ISSUE_TEMPLATES = {
 }
 
 # ==========================================
-# 4. 強制クリーンアップ・セッション管理
+# 5. 強制クリーンアップ・セッション管理
 # ==========================================
 for key in ["role", "active_menu", "pre_selected_prop", "delete_target"]:
     if key not in st.session_state:
@@ -201,11 +290,10 @@ WORK_OPTS_SHANAI = ["-- 選択 --", "A.リペア", "B.清掃", "C.クロス", "D
 
 INSP_OPTS = ["-- 選択 --", "配筋検査","躯体検査","断熱検査","中間検査","社内検査(設計)","社内検査(建設)","社内検査(マーケ)","社内検査(不動産)"]
 SHANAI_KENSA_TYPES = ["社内検査(設計)", "社内検査(建設)", "社内検査(マーケ)", "社内検査(不動産)"]
-# 💡【追加】検査員のプルダウン選択肢
 INSPECTOR_OPTS = ["工事監理チーム", "建設部", "不動産事業部", "マーケティング部"]
 
 # ==========================================
-# 5. メイン画面・機能
+# 6. メイン画面・機能
 # ==========================================
 def main():
     if st.session_state.role is None:
@@ -236,7 +324,6 @@ def main():
         st.query_params.clear()
         st.rerun()
 
-    # 💡【機能追加】「確認待ち」の件数を取得してメニュー名を書き換える
     confirm_cnt = 0
     if st.session_state.role == "admin":
         wait_conf_recs = db_get("inspection_records", "progress_status=eq.確認待ち")
@@ -330,7 +417,6 @@ def main():
             
             c1, c2 = st.columns(2)
             ins_date = c1.date_input("検査日時", datetime.date.today())
-            # 💡【機能追加】検査員をプルダウンに変更
             inspector = c2.selectbox("検査員", INSPECTOR_OPTS)
             
             if st.button("検査スタート"):
@@ -340,7 +426,6 @@ def main():
                     nid = str(uuid.uuid4())
                     db_post("inspections", {"inspection_id": nid, "property_id": prop_id, "property_name": prop_name, "inspection_type": ins_type, "inspection_date": str(ins_date), "inspector": inspector})
                     
-                    # 💡【機能追加】工事監理チームかどうかのフラグを持たせる
                     st.session_state.current_box = {"id": nid, "prop_id": prop_id, "name": prop_name, "type": ins_type, "inspector": inspector}
                     st.session_state.pre_selected_prop = None
                     st.session_state.issue_saved = False
@@ -405,10 +490,12 @@ def main():
                 
                 w = st.radio("工種を選択", work_opts[1:], horizontal=True)
                 
-                photo = st.file_uploader("撮影", type=['jpg','png','jpeg'])
-                if photo is not None:
-                    st.image(photo, use_container_width=True)
+                st.markdown("##### 現場写真の追加")
+                photo = client_compress_component(key="insp_cam")
                 
+                if photo and isinstance(photo, str) and "base64," in photo:
+                    st.image(photo, use_container_width=True)
+
                 if st.button("この内容で保存"):
                     final_desc = ""
                     if sel_temp:
@@ -419,7 +506,6 @@ def main():
                         final_desc = desc.strip()
 
                     if w and final_desc != "" and photo is not None:
-                        # 💡【機能追加】工事監理チームの場合は「確認待ち」にする
                         initial_status = "確認待ち" if c_inspector == "工事監理チーム" else "是正待ち"
                         
                         db_post("inspection_records", {
@@ -436,13 +522,13 @@ def main():
                         st.session_state.issue_saved = True
                         st.rerun()
                     else: 
-                        st.error("工種・内容・写真はすべて必須です")
+                        st.error("工種・内容・写真はすべて必須です（写真が準備完了するまでお待ちください）")
                 
                 if st.button("終了"):
                     st.session_state.current_box = None
                     st.rerun()
             else:
-                st.success("保存完了！") 
+                st.success("保存完了") 
                 if st.button("続けて次を登録"):
                     st.session_state.issue_saved = False
                     st.rerun()
@@ -452,7 +538,7 @@ def main():
                     st.rerun()
 
     # ----------------------------------------
-    # 💡【新設】メニュー: 検査内容確認（管理者）
+    # メニュー: 3. 検査内容確認（管理者）
     # ----------------------------------------
     elif st.session_state.active_menu == "検査内容確認（管理者）":
         st.header("検査内容確認（承認）")
@@ -502,7 +588,6 @@ def main():
             if t_ids:
                 recs = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})&progress_status=eq.確認待ち")
                 
-                # 💡【機能追加】一括承認ボタン
                 st.info(f"この検査（{prop_val} / {type_val}）には、現在 **{len(recs)}件** の確認待ちデータがあります。")
                 if st.button("✅ この検査をすべて承認して業者（是正実施）に送る", type="primary"):
                     for r in recs:
@@ -540,7 +625,7 @@ def main():
                         st.markdown('</div>', unsafe_allow_html=True)
 
     # ----------------------------------------
-    # メニュー: 3. 是正実施
+    # メニュー: 4. 是正実施
     # ----------------------------------------
     elif st.session_state.active_menu == "是正実施（協力業者）":
         st.header("是正実施")
@@ -643,14 +728,15 @@ def main():
                                 idx_w = edit_w_opts.index(current_w) if current_w in edit_w_opts else 0
                                 new_w = st.selectbox("工種を変更", edit_w_opts, index=idx_w, key=f"edit_w_{rec_id}")
                                 
-                                new_photo = st.file_uploader("写真を差し替え (変更なしなら空)", type=['jpg','png','jpeg'], key=f"edit_p_{rec_id}")
-                                if new_photo is not None:
+                                new_photo = client_compress_component(key=f"edit_cam_{rec_id}")
+                                
+                                if new_photo and isinstance(new_photo, str) and "base64," in new_photo:
                                     st.image(new_photo, caption="差し替えプレビュー", use_container_width=True)
                                 
                                 col_u, col_d = st.columns(2)
                                 if col_u.button("💾 更新を保存", key=f"edit_save_{rec_id}"):
                                     up_data = {"work_type": new_w, "issue_detail": new_detail}
-                                    if new_photo is not None:
+                                    if new_photo and "base64," in new_photo:
                                         up_data["issue_photo_url"] = process_photo(new_photo)
                                     db_patch("inspection_records", rec_id, up_data)
                                     st.success("更新しました！")
@@ -670,23 +756,24 @@ def main():
                                 
                         with c2:
                             st.markdown("**【是正写真（After）】**")
-                            up = st.file_uploader("是正写真を撮影・アップロード", key=f"up_{rec_id}", type=['jpg','png','jpeg'], label_visibility="collapsed")
-                            if up is not None: 
+                            up = client_compress_component(key=f"fix_cam_{rec_id}")
+                            
+                            if up and isinstance(up, str) and "base64," in up:
                                 st.image(up, caption="アップロード画像プレビュー", use_container_width=True)
                             
                             if st.button("✅ 完了報告", key=f"s_{rec_id}"):
-                                if up is not None: 
+                                if up and "base64," in up: 
                                     db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "fix_photo_url": process_photo(up)})
                                     st.rerun()
                                 else: 
-                                    st.error("写真が必要です")
+                                    st.error("写真が必要です（準備完了するまでお待ちください）")
                         
                         st.markdown('</div>', unsafe_allow_html=True)
             else:
                 st.info("対象の項目がありません。")
 
     # ----------------------------------------
-    # メニュー: 4. 是正確認 / 5. 完了分一覧
+    # メニュー: 5. 是正確認 / 6. 完了分一覧
     # ----------------------------------------
     elif st.session_state.active_menu in ["是正確認（管理者）", "完了分一覧（共通）"]:
         status = "是正確認中" if "確認" in st.session_state.active_menu else "完了"
@@ -844,7 +931,8 @@ def main():
                             w_groups[w] = []
                         w_groups[w].append(r)
                     
-                    for w_idx, (w_name, w_recs) in enumerate(w_groups.items()):
+                    # ★【完全修正】ここでエラーを起こしていた文法ミスを修正しました
+                    for w_name, w_recs in w_groups.items():
                         st.subheader(f"■ 工種: {w_name}")
                         for r_idx, r in enumerate(w_recs):
                             rec_id = r.get('record_id')
