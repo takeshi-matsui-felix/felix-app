@@ -73,7 +73,7 @@ def process_photo(upload_file):
         return f"data:image/jpeg;base64,{base64.b64encode(upload_file.getvalue()).decode('utf-8')}"
 
 # ==========================================
-# 📱 2. スマホ内・瞬間圧縮コンポーネント
+# 📱 2. スマホ内・瞬間圧縮コンポーネント（二重表示修正版）
 # ==========================================
 CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 <html lang="ja">
@@ -92,7 +92,6 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
         .upload-btn:active { background-color: #FF3333; transform: translateY(2px); }
         input[type="file"] { display: none; }
         #status { margin-top: 10px; font-size: 14px; color: #333; font-weight: bold; text-align: center; }
-        #preview { margin-top: 10px; max-width: 100%; border-radius: 8px; display: none; border: 2px solid #ddd; }
     </style>
 </head>
 <body>
@@ -101,7 +100,6 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
         <input type="file" accept="image/*" id="file-input">
     </label>
     <div id="status"></div>
-    <img id="preview" />
 
     <script>
         function sendReady() { window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1}, "*"); }
@@ -112,7 +110,6 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 
         const input = document.getElementById('file-input');
         const status = document.getElementById('status');
-        const preview = document.getElementById('preview');
 
         input.addEventListener('change', function(e) {
             const file = e.target.files[0];
@@ -143,10 +140,9 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 
                     const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.4);
 
-                    preview.src = compressedDataUrl;
-                    preview.style.display = "block";
                     status.innerHTML = '✅ 準備完了';
-                    setHeight(350); 
+                    // 画像のプレビューをなくしたので、枠は広げずコンパクトなままにする
+                    setHeight(90); 
 
                     sendToStreamlit(compressedDataUrl);
                 };
@@ -931,7 +927,6 @@ def main():
                             w_groups[w] = []
                         w_groups[w].append(r)
                     
-                    # ★【完全修正】ここでエラーを起こしていた文法ミスを修正しました
                     for w_name, w_recs in w_groups.items():
                         st.subheader(f"■ 工種: {w_name}")
                         for r_idx, r in enumerate(w_recs):
