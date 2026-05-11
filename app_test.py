@@ -55,7 +55,6 @@ def db_delete_property(prop_id):
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?property_id=eq.{prop_id}", headers=HEADERS)
     requests.delete(f"{SUPABASE_URL}/rest/v1/properties?property_id=eq.{prop_id}", headers=HEADERS)
 
-# ★ 処理済みのBase64データをそのまま返すように改良
 def process_photo(upload_file):
     if upload_file is None:
         return None
@@ -73,7 +72,7 @@ def process_photo(upload_file):
         return f"data:image/jpeg;base64,{base64.b64encode(upload_file.getvalue()).decode('utf-8')}"
 
 # ==========================================
-# 📱 2. スマホ内・瞬間圧縮コンポーネント（UIスタイリッシュ版）
+# 📱 2. スマホ内・瞬間圧縮コンポーネント
 # ==========================================
 CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 <html lang="ja">
@@ -83,21 +82,11 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         body { margin: 0; padding: 5px; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background-color: transparent;}
-        
         .upload-btn {
-            display: block; 
-            width: 100%; 
-            max-width: 400px; 
-            padding: 18px 20px;
-            background-color: #FF4B4B; 
-            color: white; 
-            border-radius: 8px;
-            font-size: 16px; 
-            font-weight: bold; 
-            text-align: center;
-            cursor: pointer; 
-            box-sizing: border-box; 
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            display: block; width: 100%; max-width: 400px; padding: 18px 20px;
+            background-color: #FF4B4B; color: white; border-radius: 8px;
+            font-size: 16px; font-weight: bold; text-align: center; cursor: pointer; 
+            box-sizing: border-box; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             transition: background-color 0.3s ease, transform 0.1s ease; 
         }
         .upload-btn:active { transform: translateY(2px); box-shadow: 0 2px 3px rgba(0,0,0,0.1); }
@@ -109,12 +98,10 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
         <i class="fa-solid fa-camera" id="btn-icon"></i> <span id="btn-text">現場で撮影 ／ アルバムから選択</span>
         <input type="file" accept="image/*" id="file-input">
     </label>
-
     <script>
         function sendReady() { window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1}, "*"); }
         function setHeight(h) { window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: h}, "*"); }
         function sendToStreamlit(val) { window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}, "*"); }
-
         window.onload = function() { sendReady(); setHeight(80); }; 
 
         const input = document.getElementById('file-input');
@@ -135,27 +122,21 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
                 const img = new Image();
                 img.onload = function() {
                     const MAX_SIZE = 800; 
-                    let width = img.width;
-                    let height = img.height;
-
+                    let width = img.width; let height = img.height;
                     if (width > height) {
                         if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; }
                     } else {
                         if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; }
                     }
-
                     const canvas = document.createElement('canvas');
-                    canvas.width = width;
-                    canvas.height = height;
+                    canvas.width = width; canvas.height = height;
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, width, height);
-
                     const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.4);
 
                     uploadLabel.style.backgroundColor = '#2ecc71';
                     btnIcon.className = 'fa-solid fa-check';
                     btnText.innerHTML = '&nbsp;写真セット完了';
-
                     sendToStreamlit(compressedDataUrl);
                 };
                 img.src = event.target.result;
@@ -167,19 +148,18 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 </html>
 """
 
-# 一時領域にコンポーネントを配置して読み込む
-temp_dir = os.path.join(tempfile.gettempdir(), "fast_camera_comp_final_v5")
+temp_dir = os.path.join(tempfile.gettempdir(), "fast_camera_final_v6")
 os.makedirs(temp_dir, exist_ok=True)
 with open(os.path.join(temp_dir, "index.html"), "w", encoding="utf-8") as f:
     f.write(CLIENT_COMPRESS_HTML)
 
-_client_compress_func = components.declare_component("fast_camera_final_v5", path=temp_dir)
+_client_compress_func = components.declare_component("fast_camera_final_v6", path=temp_dir)
 
 def client_compress_component(key):
     return _client_compress_func(key=key)
 
 # ==========================================
-# 3. UI設定 & ログイン保持ロジック
+# 3. UI設定
 # ==========================================
 st.set_page_config(page_title="Felix検査App", page_icon="icon.png", layout="wide")
 
@@ -196,12 +176,7 @@ st.markdown("""
     footer {visibility: hidden;}
     [data-testid="stStatusWidget"] { display: none; }
     .record-box { border-bottom: 2px solid #EEEEEE; padding-bottom: 20px; margin-bottom: 20px; }
-    
     .badge-wrap { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: bold; margin-left: 5px; }
-    .badge-done { color: #2ecc71; }
-    .badge-warn { color: #e67e22; }
-    .badge-conf { color: #FF4B4B; }
-
     @media print {
         section[data-testid="stSidebar"], header[data-testid="stHeader"] { display: none !important; }
         .stButton, [data-testid="stTextInput"], .admin-delete-box, hr { display: none !important; }
@@ -383,7 +358,7 @@ ISSUE_TEMPLATES = {
 }
 
 # ==========================================
-# 5. 強制クリーンアップ・セッション管理
+# 5. セッション管理 & 選択肢リスト
 # ==========================================
 for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "skip_render_ids"]:
     if key not in st.session_state:
@@ -401,10 +376,6 @@ if "drill_target" not in st.session_state or not isinstance(st.session_state.dri
 if "current_box" not in st.session_state or not isinstance(st.session_state.current_box, dict):
     st.session_state.current_box = None
 
-if "kikan_phase" not in st.session_state:
-    st.session_state.kikan_phase = "配筋検査"
-
-# 🔑 【自動ログイン機能】
 qp = st.query_params
 if qp.get("auth") == ADMIN_PASSWORD:
     st.session_state.role = "admin"
@@ -427,23 +398,26 @@ def jump_to_menu(menu_name, prop_id=None):
 FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
 AREA_OPTS_STANDARD = ["-- 選択 --", "玄関", "廊下・階段・ENT", "LDK", "キッチン", "洋室", "洗面室", "UB", "トイレ", "バルコニー", "外部", "その他"]
 AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バルコニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "その他"]
+
 WORK_OPTS_STANDARD = ["-- 選択 --", "基礎工事（鉄筋）", "基礎工事（型枠）", "フレーミング", "FM", "造作", "内装", "電気", "設備", "ガス", "清掃", "サッシ", "外壁", "外構", "コーキング", "リペア", "その他"]
 WORK_OPTS_HAIKIN = ["-- 選択 --", "基礎工事(鉄筋)", "水道", "ガス", "その他"]
 WORK_OPTS_KUTAI = ["-- 選択 --", "フレーミング", "電気", "水道", "防水", "その他"]
 WORK_OPTS_CHUKAN = ["-- 選択 --", "造作", "電気", "水道", "外壁", "ガス", "足場", "その他"]
 WORK_OPTS_SHANAI = ["-- 選択 --", "A.リペア", "B.清掃", "C.クロス", "D.造作", "E.水道", "F.電気", "G.キッチン", "H.サッシ", "I.外壁", "J.外構", "K.コーキング", "L.ガス", "板金", "Z.その他"]
 
-INSP_OPTS = ["-- 選択 --", "配筋検査","躯体検査","断熱検査","中間検査","社内検査(設計)","社内検査(建設)","社内検査(マーケ)","社内検査(不動産)", "【検査機関】"]
+# ★ アプローチ②専用：シンプルに統一した共通工種リスト
+WORK_OPTS_KIKAN = ["基礎工事", "フレーミング", "防水", "造作", "内装", "電気", "設備", "ガス", "サッシ", "外壁", "足場", "外構", "その他"]
+
+# ★ アプローチ②専用：独立した検査機関の各種検査を網羅
+INSP_OPTS = [
+    "-- 選択 --", 
+    "配筋検査", "躯体検査", "断熱検査", "中間検査", 
+    "社内検査(設計)", "社内検査(建設)", "社内検査(マーケ)", "社内検査(不動産)",
+    "【検査機関】配筋検査", "【検査機関】躯体検査", "【検査機関】断熱検査", "【検査機関】中間検査", "【検査機関】完了検査"
+]
+
 SHANAI_KENSA_TYPES = ["社内検査(設計)", "社内検査(建設)", "社内検査(マーケ)", "社内検査(不動産)"]
 INSPECTOR_OPTS = ["工事監理チーム", "建設部", "不動産事業部", "マーケティング部"]
-
-KIKAN_WORK_MAP = {
-    "配筋検査": ["基礎工事(鉄筋)", "水道", "ガス", "その他"],
-    "躯体検査": ["フレーミング", "電気", "水道", "防水", "その他"],
-    "断熱検査": ["基礎工事", "フレーミング", "造作", "電気", "設備", "ガス", "その他"],
-    "中間検査": ["造作", "電気", "水道", "外壁", "ガス", "足場", "その他"],
-    "完了検査": ["基礎工事", "フレーミング", "造作", "内装", "電気", "設備", "ガス", "サッシ", "外壁", "外構", "その他"]
-}
 
 # ==========================================
 # 6. メイン画面・機能
@@ -521,8 +495,7 @@ def main():
         props = db_get("properties", "select=*")
         for idx, p in enumerate(props):
             prop_id = p.get('property_id')
-            if not prop_id:
-                continue
+            if not prop_id: continue
             prop_name = p.get('property_name', '不明')
             key_suffix = f"{prop_id}_{idx}"
             
@@ -563,8 +536,7 @@ def main():
             if st.session_state.pre_selected_prop:
                 for i, p in enumerate(opts):
                     if p.get('property_id') == st.session_state.pre_selected_prop:
-                        idx = i
-                        break
+                        idx = i; break
             
             target = st.selectbox("物件を選択", opts, index=idx, format_func=lambda x: x.get('property_name', '不明'))
             ins_type = st.selectbox("検査種類を選択", INSP_OPTS)
@@ -588,8 +560,7 @@ def main():
                     st.error("物件と検査種類を選んでください")
         else:
             cb = st.session_state.current_box
-            if not isinstance(cb, dict):
-                cb = {}
+            if not isinstance(cb, dict): cb = {}
             c_name = cb.get('name', '')
             c_type = cb.get('type', '')
             c_id = cb.get('id', '')
@@ -599,49 +570,32 @@ def main():
             st.subheader(f"{c_name} / {c_type}")
             
             if not st.session_state.issue_saved:
-                f = "一式"
-                a = "全体"
-                
-                if c_type == "【検査機関】":
-                    st.markdown("#### 🔘 検査フェーズ選択")
-                    k_opts = ["配筋検査", "躯体検査", "断熱検査", "中間検査", "完了検査"]
-                    
-                    k_cols = st.columns(5)
-                    for k_idx, k_opt in enumerate(k_opts):
-                        b_type = "primary" if st.session_state.kikan_phase == k_opt else "secondary"
-                        if k_cols[k_idx].button(k_opt, type=b_type, key=f"kb_{k_idx}", use_container_width=True):
-                            st.session_state.kikan_phase = k_opt
-                            st.rerun()
-                    
-                    st.markdown(f"**現在選択中のフェーズ: 📌 {st.session_state.kikan_phase}**")
-                    st.markdown("<hr style='margin:10px 0;'>", unsafe_allow_html=True)
+                # ★ アプローチ②導入：検査機関専用の極限シンプル画面
+                if c_type.startswith("【検査機関】"):
+                    f = "一式"
+                    a = "全体"
+                    sel_temp = None
                     
                     st.markdown("##### 詳細・場所の追記（自由入力）")
-                    desc = st.text_area("詳細情報を入力", label_visibility="collapsed")
+                    desc = st.text_area("詳細情報を入力", label_visibility="collapsed", placeholder="具体的な指摘内容や場所を入力してください")
                     
                     st.markdown("##### 工種を選択")
-                    target_w_opts = KIKAN_WORK_MAP.get(st.session_state.kikan_phase, ["その他"])
-                    w = st.radio("工種を選択", target_w_opts, horizontal=True, label_visibility="collapsed")
+                    w = st.radio("工種を選択", WORK_OPTS_KIKAN, horizontal=True, label_visibility="collapsed")
                     
-                    a = st.session_state.kikan_phase
-                    sel_temp = None
-
                 else:
+                    # 従来の社内・標準検査画面
+                    f = "一式"
+                    a = "全体"
                     if c_type in SHANAI_KENSA_TYPES:
-                        area_opts = AREA_OPTS_SHANAI
-                        work_opts = WORK_OPTS_SHANAI
+                        area_opts = AREA_OPTS_SHANAI; work_opts = WORK_OPTS_SHANAI
                     elif c_type == "躯体検査":
-                        area_opts = AREA_OPTS_STANDARD
-                        work_opts = WORK_OPTS_KUTAI
+                        area_opts = AREA_OPTS_STANDARD; work_opts = WORK_OPTS_KUTAI
                     elif c_type == "配筋検査":
-                        area_opts = AREA_OPTS_STANDARD
-                        work_opts = WORK_OPTS_HAIKIN
+                        area_opts = AREA_OPTS_STANDARD; work_opts = WORK_OPTS_HAIKIN
                     elif c_type == "中間検査":
-                        area_opts = AREA_OPTS_STANDARD
-                        work_opts = WORK_OPTS_CHUKAN
+                        area_opts = AREA_OPTS_STANDARD; work_opts = WORK_OPTS_CHUKAN
                     else:
-                        area_opts = AREA_OPTS_STANDARD
-                        work_opts = WORK_OPTS_STANDARD
+                        area_opts = AREA_OPTS_STANDARD; work_opts = WORK_OPTS_STANDARD
                     
                     if c_type not in ["配筋検査", "躯体検査", "中間検査"]:
                         f = st.radio("階層を選択", FLOOR_OPTS[1:], horizontal=True)
@@ -653,9 +607,7 @@ def main():
                     elif c_type in SHANAI_KENSA_TYPES:
                         cat_dict = ISSUE_TEMPLATES.get("社内検査(設計)", {}).get(a, {})
                     
-                    if not isinstance(cat_dict, dict):
-                        cat_dict = {}
-                    
+                    if not isinstance(cat_dict, dict): cat_dict = {}
                     cat_keys = list(cat_dict.keys())
                     sel_cat = st.radio("分類を選択（A列）", cat_keys, horizontal=True) if cat_keys else None
                     
@@ -679,24 +631,16 @@ def main():
                     final_desc = ""
                     if sel_temp:
                         final_desc = sel_temp
-                        if desc.strip() != "":
-                            final_desc += "：" + desc.strip()
+                        if desc.strip() != "": final_desc += "：" + desc.strip()
                     else:
                         final_desc = desc.strip()
 
                     if w and final_desc != "" and photo is not None:
                         initial_status = "確認待ち" if c_inspector == "工事監理チーム" else "是正待ち"
-                        
                         db_post("inspection_records", {
-                            "record_id": str(uuid.uuid4()), 
-                            "inspection_id": c_id, 
-                            "property_id": c_prop_id, 
-                            "floor_level": f, 
-                            "area": a, 
-                            "work_type": w, 
-                            "issue_detail": final_desc,  
-                            "issue_photo_url": process_photo(photo), 
-                            "progress_status": initial_status
+                            "record_id": str(uuid.uuid4()), "inspection_id": c_id, "property_id": c_prop_id, 
+                            "floor_level": f, "area": a, "work_type": w, "issue_detail": final_desc,  
+                            "issue_photo_url": process_photo(photo), "progress_status": initial_status
                         })
                         st.session_state.issue_saved = True
                         st.rerun()
@@ -709,12 +653,9 @@ def main():
             else:
                 st.success("保存完了") 
                 if st.button("続けて次を登録"):
-                    st.session_state.issue_saved = False
-                    st.rerun()
+                    st.session_state.issue_saved = False; st.rerun()
                 if st.button("検査全体を終了"):
-                    st.session_state.current_box = None
-                    st.session_state.issue_saved = False
-                    st.rerun()
+                    st.session_state.current_box = None; st.session_state.issue_saved = False; st.rerun()
 
     # ----------------------------------------
     # メニュー: 3. 検査内容確認（管理者）
@@ -724,83 +665,59 @@ def main():
         all_recs = db_get("inspection_records", "progress_status=eq.確認待ち")
         all_ins = db_get("inspections", "select=*")
         
-        ins_map = {}
-        for i in all_ins:
-            if isinstance(i, dict) and i.get('inspection_id'):
-                ins_map[i.get('inspection_id')] = i
-                
+        ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
         tree = {}
         for r in all_recs:
-            if not isinstance(r, dict):
-                continue
+            if not isinstance(r, dict): continue
             ins = ins_map.get(r.get('inspection_id'))
             if ins:
-                p = ins.get('property_name', '不明')
-                t = ins.get('inspection_type', '不明')
-                if p not in tree:
-                    tree[p] = {}
+                p = ins.get('property_name', '不明'); t = ins.get('inspection_type', '不明')
+                if p not in tree: tree[p] = {}
                 tree[p][t] = tree[p].get(t, 0) + 1
         
-        if not tree:
-            st.info("現在、確認待ちの検査はありません。")
+        if not tree: st.info("現在、確認待ちの検査はありません。")
                 
         for p_idx, (p_name, types) in enumerate(tree.items()):
             with st.expander(p_name):
                 for t_idx, (t_name, count) in enumerate(types.items()):
                     if st.button(f"{t_name} ({count}件)", key=f"f_{p_idx}_{t_idx}"):
-                        st.session_state.drill_target = {"prop": p_name, "type": t_name}
-                        st.rerun()
+                        st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.rerun()
         
         sel = st.session_state.drill_target
-        if not isinstance(sel, dict):
-            sel = {}
-        prop_val = sel.get('prop', '')
-        type_val = sel.get('type', '')
+        if not isinstance(sel, dict): sel = {}
+        prop_val = sel.get('prop', ''); type_val = sel.get('type', '')
         
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"):
-                st.session_state.drill_target = None
-                st.rerun()
+                st.session_state.drill_target = None; st.rerun()
             
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
-            
             if t_ids:
                 recs = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})&progress_status=eq.確認待ち")
-                
                 st.info(f"この検査（{prop_val} / {type_val}）には、現在 **{len(recs)}件** の確認待ちデータがあります。")
                 if st.button("✅ この検査をすべて承認して業者（是正実施）に送る", type="primary"):
-                    for r in recs:
-                        db_patch("inspection_records", r['record_id'], {"progress_status": "是正待ち"})
+                    for r in recs: db_patch("inspection_records", r['record_id'], {"progress_status": "是正待ち"})
                     st.success("一括承認が完了しました！協力業者へ表示されます。")
-                    st.session_state.drill_target = None
-                    st.rerun()
-                    
+                    st.session_state.drill_target = None; st.rerun()
                 st.markdown("---")
                 
                 w_groups = {}
                 for r in recs:
-                    if not isinstance(r, dict):
-                        continue
+                    if not isinstance(r, dict): continue
                     w = r.get('work_type') or 'その他'
-                    if w not in w_groups:
-                        w_groups[w] = []
+                    if w not in w_groups: w_groups[w] = []
                     w_groups[w].append(r)
                 
                 for w_name, w_recs in w_groups.items():
                     st.subheader(f"■ 工種: {w_name}")
                     for r in w_recs:
-                        floor = r.get('floor_level', '')
-                        area = r.get('area', '')
-                        detail = r.get('issue_detail', '')
-                        head_text = f"【{floor} {area}】".strip()
-                        if floor == "一式":
-                            head_text = ""
+                        floor = r.get('floor_level', ''); area = r.get('area', ''); detail = r.get('issue_detail', '')
+                        head_text = "" if type_val.startswith("【検査機関】") or floor == "一式" else f"【{floor} {area}】".strip()
                         title = f"{head_text} {detail}" if head_text else f"【指摘内容】 {detail}"
                         
                         st.markdown('<div class="record-box">', unsafe_allow_html=True)
                         st.markdown(f"**{title}**")
-                        if r.get('issue_photo_url'): 
-                            st.image(r.get('issue_photo_url'), width=300)
+                        if r.get('issue_photo_url'): st.image(r.get('issue_photo_url'), width=300)
                         st.markdown('</div>', unsafe_allow_html=True)
 
     # ----------------------------------------
@@ -808,113 +725,75 @@ def main():
     # ----------------------------------------
     elif st.session_state.active_menu == "是正実施（協力業者）":
         st.header("是正実施")
-        
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status")
         all_ins = db_get("inspections", "select=*")
         
-        ins_map = {}
-        for i in all_ins:
-            if isinstance(i, dict) and i.get('inspection_id'):
-                ins_map[i.get('inspection_id')] = i
-                
-        tree = {}
-        tree_counts = {}
+        ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
+        tree = {}; tree_counts = {}
         
         for r in all_recs_for_tree:
             if not isinstance(r, dict): continue
-            iid = r.get('inspection_id')
-            p_stat = r.get('progress_status')
+            iid = r.get('inspection_id'); p_stat = r.get('progress_status')
             ins = ins_map.get(iid)
             if ins:
-                p = ins.get('property_name', '不明')
-                t = ins.get('inspection_type', '不明')
-                if p not in tree:
-                    tree[p] = set()
-                    tree_counts[p] = {}
+                p = ins.get('property_name', '不明'); t = ins.get('inspection_type', '不明')
+                if p not in tree: tree[p] = set(); tree_counts[p] = {}
                 tree[p].add(t)
-                
                 if t not in tree_counts[p]:
                     tree_counts[p][t] = {"total": 0, "done": 0, "wait_conf": 0, "unres": 0, "wait_fix": 0}
                 
                 tree_counts[p][t]["total"] += 1
-                if p_stat == "完了":
-                    tree_counts[p][t]["done"] += 1
-                elif p_stat == "是正確認中":
-                    tree_counts[p][t]["wait_conf"] += 1
-                    tree_counts[p][t]["unres"] += 1
-                elif p_stat == "是正待ち":
-                    tree_counts[p][t]["wait_fix"] += 1
-                    tree_counts[p][t]["unres"] += 1
-                else:
-                    tree_counts[p][t]["unres"] += 1
+                if p_stat == "完了": tree_counts[p][t]["done"] += 1
+                elif p_stat == "是正確認中": tree_counts[p][t]["wait_conf"] += 1; tree_counts[p][t]["unres"] += 1
+                elif p_stat == "是正待ち": tree_counts[p][t]["wait_fix"] += 1; tree_counts[p][t]["unres"] += 1
+                else: tree_counts[p][t]["unres"] += 1
                 
         sel = st.session_state.drill_target
-        if not isinstance(sel, dict):
-            sel = {}
-        prop_val = sel.get('prop', '')
-        type_val = sel.get('type', '')
+        if not isinstance(sel, dict): sel = {}
+        prop_val = sel.get('prop', ''); type_val = sel.get('type', '')
         
         if not (prop_val and type_val):
             has_visible_items = False
             for p_idx, (p_name, types) in enumerate(tree.items()):
-                valid_types = []
-                for t_name in types:
-                    if tree_counts.get(p_name, {}).get(t_name, {}).get("wait_fix", 0) > 0:
-                        valid_types.append(t_name)
-                
+                valid_types = [t for t in types if tree_counts.get(p_name, {}).get(t, {}).get("wait_fix", 0) > 0]
                 if valid_types:
                     has_visible_items = True
                     with st.expander(p_name):
                         for t_idx, t_name in enumerate(sorted(valid_types)):
                             c_data = tree_counts[p_name][t_name]
                             badge_text = f"全 {c_data['total']} 件 ･･･ [ ✅ 完了：{c_data['done']}件 ／ ⚠️ 未完了：{c_data['unres']}件 ] ※うち是正報告待ち {c_data['wait_fix']}件"
-                            
                             t_cols = st.columns([3, 7])
                             if t_cols[0].button(t_name, key=f"f_{p_idx}_{t_idx}", use_container_width=True):
-                                st.session_state.drill_target = {"prop": p_name, "type": t_name}
-                                st.rerun()
+                                st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.rerun()
                             t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#555;'>{badge_text}</span></div>", unsafe_allow_html=True)
-            
-            if not has_visible_items:
-                st.info("対象の項目はありません。")
+            if not has_visible_items: st.info("対象の項目はありません。")
         
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"):
-                st.session_state.drill_target = None
-                st.session_state.skip_render_ids = []
-                st.rerun()
+                st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.rerun()
             
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
-            
             if t_ids:
                 recs_all = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})")
                 recs = [r for r in recs_all if r.get('progress_status') == '是正待ち']
-                
-                total_cnt = len(recs_all)
-                wait_cnt = len(recs)
+                total_cnt = len(recs_all); wait_cnt = len(recs)
                 st.info(f"📊 **【進捗】 指摘総数：{total_cnt}件 ／ 残り（是正報告待ち）：{wait_cnt}件**")
                 
                 w_groups = {}
                 for r in recs:
                     if not isinstance(r, dict): continue
                     rec_id = r.get('record_id')
-                    if rec_id in st.session_state.skip_render_ids:
-                        continue
-                    
+                    if rec_id in st.session_state.skip_render_ids: continue
                     w = r.get('work_type') or 'その他'
                     if w not in w_groups: w_groups[w] = []
                     w_groups[w].append(r)
                 
-                if type_val in SHANAI_KENSA_TYPES:
-                    edit_w_opts = WORK_OPTS_SHANAI
-                elif type_val == "躯体検査":
-                    edit_w_opts = WORK_OPTS_KUTAI
-                elif type_val == "配筋検査":
-                    edit_w_opts = WORK_OPTS_HAIKIN
-                elif type_val == "中間検査":
-                    edit_w_opts = WORK_OPTS_CHUKAN
-                else:
-                    edit_w_opts = WORK_OPTS_STANDARD
+                if type_val.startswith("【検査機関】"): edit_w_opts = WORK_OPTS_KIKAN
+                elif type_val in SHANAI_KENSA_TYPES: edit_w_opts = WORK_OPTS_SHANAI
+                elif type_val == "躯体検査": edit_w_opts = WORK_OPTS_KUTAI
+                elif type_val == "配筋検査": edit_w_opts = WORK_OPTS_HAIKIN
+                elif type_val == "中間検査": edit_w_opts = WORK_OPTS_CHUKAN
+                else: edit_w_opts = WORK_OPTS_STANDARD
 
                 for w_idx, (w_name, w_recs) in enumerate(w_groups.items()):
                     st.subheader(f"■ 工種: {w_name}")
@@ -922,72 +801,55 @@ def main():
                         rec_id = r.get('record_id')
                         if not rec_id: continue 
                         
-                        floor = r.get('floor_level', '')
-                        area = r.get('area', '')
-                        detail = r.get('issue_detail', '')
-                        
-                        head_text = f"【{floor} {area}】".strip()
-                        if floor == "一式": head_text = ""
+                        floor = r.get('floor_level', ''); area = r.get('area', ''); detail = r.get('issue_detail', '')
+                        head_text = "" if type_val.startswith("【検査機関】") or floor == "一式" else f"【{floor} {area}】".strip()
                         title = f"{head_text} {detail}" if head_text else f"【指摘内容】 {detail}"
                         
                         c_box = st.container()
                         with c_box:
                             st.markdown('<div class="record-box">', unsafe_allow_html=True)
                             st.markdown(f"**{title}**")
-                            
-                            if r.get('reject_reason'):
-                                st.error(f"否認理由: {r.get('reject_reason')}")
+                            if r.get('reject_reason'): st.error(f"否認理由: {r.get('reject_reason')}")
                             
                             if st.session_state.role == "admin":
                                 if st.checkbox("⚙️ 是正内容編集 (管理者専用)", key=f"edit_chk_{rec_id}"):
                                     st.markdown("#### 📝 データ編集")
                                     new_detail = st.text_area("指摘内容を変更", value=detail, key=f"edit_d_{rec_id}")
-                                    
                                     current_w = r.get('work_type', '')
                                     idx_w = edit_w_opts.index(current_w) if current_w in edit_w_opts else 0
                                     new_w = st.selectbox("工種を変更", edit_w_opts, index=idx_w, key=f"edit_w_{rec_id}")
-                                    
                                     new_photo = client_compress_component(key=f"edit_cam_{rec_id}")
-                                    
                                     if new_photo and isinstance(new_photo, str) and "base64," in new_photo:
                                         st.image(new_photo, caption="差し替えプレビュー", use_container_width=True)
                                     
                                     col_u, col_d = st.columns(2)
                                     if col_u.button("💾 更新を保存", key=f"edit_save_{rec_id}"):
                                         up_data = {"work_type": new_w, "issue_detail": new_detail}
-                                        if new_photo and "base64," in new_photo:
-                                            up_data["issue_photo_url"] = process_photo(new_photo)
+                                        if new_photo and "base64," in new_photo: up_data["issue_photo_url"] = process_photo(new_photo)
                                         db_patch("inspection_records", rec_id, up_data)
-                                        st.success("更新しました！")
-                                        st.rerun()
+                                        st.success("更新しました！"); st.rerun()
                                     if col_d.button("🗑️ この指摘を削除", key=f"edit_del_{rec_id}"):
-                                        db_delete_record(rec_id)
-                                        st.rerun()
+                                        db_delete_record(rec_id); st.rerun()
                                     st.markdown("<br>", unsafe_allow_html=True)
 
                             c1, c2 = st.columns(2)
                             with c1:
                                 st.markdown("**【指摘箇所（Before）】**")
-                                if r.get('issue_photo_url'): 
-                                    st.image(r.get('issue_photo_url'), use_container_width=True)
-                                else:
-                                    st.write("写真なし")
+                                if r.get('issue_photo_url'): st.image(r.get('issue_photo_url'), use_container_width=True)
+                                else: st.write("写真なし")
                                     
                             with c2:
                                 st.markdown("**【是正写真（After）】**")
                                 up = client_compress_component(key=f"fix_cam_{rec_id}")
-                                
                                 if up and isinstance(up, str) and "base64," in up:
                                     st.image(up, caption="アップロード画像プレビュー", use_container_width=True)
                                 
+                                # ★ 爆速化処理：報告完了と同時に画面から即時クリア
                                 if st.button("✅ 完了報告", key=f"s_{rec_id}"):
                                     if up and "base64," in up: 
                                         db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "fix_photo_url": process_photo(up)})
-                                        st.session_state.skip_render_ids.append(rec_id)
-                                        st.rerun()
-                                    else: 
-                                        st.error("写真が必要です（準備完了するまでお待ちください）")
-                            
+                                        st.session_state.skip_render_ids.append(rec_id); st.rerun()
+                                    else: st.error("写真が必要です（準備完了するまでお待ちください）")
                             st.markdown('</div>', unsafe_allow_html=True)
 
     # ----------------------------------------
@@ -995,61 +857,41 @@ def main():
     # ----------------------------------------
     elif st.session_state.active_menu in ["是正確認（管理者）", "完了分一覧（共通）"]:
         status = "是正確認中" if "確認" in st.session_state.active_menu else "完了"
-        
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status")
         all_ins = db_get("inspections", "select=*")
         
-        ins_map = {}
-        for i in all_ins:
-            if isinstance(i, dict) and i.get('inspection_id'):
-                ins_map[i.get('inspection_id')] = i
-                
-        tree = {}
-        tree_counts = {} 
+        ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
+        tree = {}; tree_counts = {} 
         
         for r in all_recs_for_tree:
             if not isinstance(r, dict): continue
-            iid = r.get('inspection_id')
-            p_stat = r.get('progress_status')
+            iid = r.get('inspection_id'); p_stat = r.get('progress_status')
             ins = ins_map.get(iid)
             if ins:
-                p = ins.get('property_name', '不明')
-                t = ins.get('inspection_type', '不明')
-                if p not in tree:
-                    tree[p] = set()
-                    tree_counts[p] = {}
+                p = ins.get('property_name', '不明'); t = ins.get('inspection_type', '不明')
+                if p not in tree: tree[p] = set(); tree_counts[p] = {}
                 tree[p].add(t)
-                
                 if t not in tree_counts[p]:
                     tree_counts[p][t] = {"total": 0, "done": 0, "wait_conf": 0, "unres": 0}
                 
                 tree_counts[p][t]["total"] += 1
-                if p_stat == "完了":
-                    tree_counts[p][t]["done"] += 1
-                elif p_stat == "是正確認中":
-                    tree_counts[p][t]["wait_conf"] += 1
-                    tree_counts[p][t]["unres"] += 1
-                else:
-                    tree_counts[p][t]["unres"] += 1
+                if p_stat == "完了": tree_counts[p][t]["done"] += 1
+                elif p_stat == "是正確認中": tree_counts[p][t]["wait_conf"] += 1; tree_counts[p][t]["unres"] += 1
+                else: tree_counts[p][t]["unres"] += 1
 
         sel = st.session_state.drill_target
-        if not isinstance(sel, dict):
-            sel = {}
-        prop_val = sel.get('prop', '')
-        type_val = sel.get('type', '')
+        if not isinstance(sel, dict): sel = {}
+        prop_val = sel.get('prop', ''); type_val = sel.get('type', '')
 
         if not (prop_val and type_val):
             st.header(st.session_state.active_menu)
-            
             has_visible_items = False
             for p_idx, (p_name, types) in enumerate(tree.items()):
                 valid_types = []
                 for t_name in types:
                     c_data = tree_counts.get(p_name, {}).get(t_name, {})
-                    if status == "是正確認中" and c_data.get("wait_conf", 0) > 0:
-                        valid_types.append(t_name)
-                    elif status == "完了" and c_data.get("done", 0) > 0:
-                        valid_types.append(t_name)
+                    if status == "是正確認中" and c_data.get("wait_conf", 0) > 0: valid_types.append(t_name)
+                    elif status == "完了" and c_data.get("done", 0) > 0: valid_types.append(t_name)
                 
                 if valid_types:
                     has_visible_items = True
@@ -1057,50 +899,34 @@ def main():
                         for t_idx, t_name in enumerate(sorted(valid_types)):
                             c_data = tree_counts[p_name][t_name]
                             badge_text = f"全 {c_data['total']} 件 ･･･ [ ✅ 完了：{c_data['done']}件 ／ ⚠️ 未完了：{c_data['unres']}件 ] ※うち確認待ち {c_data['wait_conf']}件"
-                            
                             t_cols = st.columns([3, 7])
                             if t_cols[0].button(t_name, key=f"c_{p_idx}_{t_idx}", use_container_width=True):
-                                st.session_state.drill_target = {"prop": p_name, "type": t_name}
-                                st.rerun()
+                                st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.rerun()
                             t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#555;'>{badge_text}</span></div>", unsafe_allow_html=True)
-            
-            if not has_visible_items:
-                st.info("対象の項目はありません。")
+            if not has_visible_items: st.info("対象の項目はありません。")
 
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"):
-                st.session_state.drill_target = None
-                st.session_state.skip_render_ids = []
-                st.rerun()
+                st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.rerun()
             
-            target_ins = None
-            t_ids = []
+            target_ins = None; t_ids = []
             for i in all_ins:
                 if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val:
                     t_ids.append(str(i.get('inspection_id')))
-                    if target_ins is None:
-                        target_ins = i
+                    if target_ins is None: target_ins = i
                         
             ins_date_str = target_ins.get('inspection_date', '-') if target_ins else '-'
             inspector_str = target_ins.get('inspector', '-') if target_ins else '-'
             
-            recs_all = []
             if t_ids:
                 recs_all = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})")
-            
-            # ★ 確実に順序を守り、ここで先にタイトル文字を合成します（UnboundLocalErrorを完全排除）
-            report_title = type_val
-            if type_val == "【検査機関】" and recs_all:
-                phase_attr = recs_all[0].get('area', '')
-                if phase_attr and phase_attr != "全体":
-                    report_title = f"【検査機関】{phase_attr}"
-
-            if t_ids:
                 recs = [r for r in recs_all if r.get('progress_status') == status]
-                
                 total_cnt = len(recs_all)
                 comp_cnt = len([r for r in recs_all if r.get('progress_status') == '完了'])
                 unres_cnt = total_cnt - comp_cnt
+
+                # ★ アプローチ②効果：選択した項目名（type_val）が素直にそのままタイトルになるため美しく直感的
+                report_title = type_val
 
                 if status == "完了":
                     if st.session_state.role == "admin":
@@ -1108,20 +934,14 @@ def main():
                             <h3 style="color:#FF4B4B; margin-top:0;">📋 完了物件の保存及び削除（管理者専用）</h3>
                             <p style="font-size:14px; color:#333;">この検査記録の保存（PDF化や印刷）が完了しましたら、システム容量を空けるためにデータを削除してください。<br><b>※一度削除した写真は元に戻せません。</b></p>
                         </div>""", unsafe_allow_html=True)
-                        
                         del_pass = st.text_input("削除用パスワードを入力 (5963)", type="password", key=f"del_pass_all")
-                        
                         if st.button(f"🚨 この検査（{type_val}）のデータを完全に削除する", key=f"del_btn_all"):
                             if del_pass == DELETE_PASSWORD:
                                 for iid in t_ids:
                                     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{iid}", headers=HEADERS)
                                     requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{iid}", headers=HEADERS)
-                                
-                                st.success("すべてのデータの削除が完了しました！")
-                                st.session_state.drill_target = None
-                                st.rerun()
-                            else:
-                                st.error("パスワードが違います")
+                                st.success("すべてのデータの削除が完了しました！"); st.session_state.drill_target = None; st.rerun()
+                            else: st.error("パスワードが違います")
                         st.markdown("<hr class='admin-delete-box'>", unsafe_allow_html=True)
 
                     st.markdown(f"""<div style="background:white; padding:0; font-family:sans-serif; width:100%;">
@@ -1139,24 +959,13 @@ def main():
                         w_groups[w].append(r)
                         
                     issue_count = 1
-                    
                     for w_name, w_recs in w_groups.items():
                         st.markdown(f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px;'>■ 工種: {w_name}</div>", unsafe_allow_html=True)
-                        
                         for idx, r in enumerate(w_recs):
-                            floor = r.get('floor_level', '')
-                            area = r.get('area', '')
-                            
-                            if type_val == "【検査機関】":
-                                loc_text = ""
-                            else:
-                                loc_text = f"【{floor} {area}】" if floor != "一式" else ""
-                                
+                            floor = r.get('floor_level', ''); area = r.get('area', '')
+                            loc_text = "" if type_val.startswith("【検査機関】") or floor == "一式" else f"【{floor} {area}】"
                             detail = r.get('issue_detail', '')
-                            
-                            i_photo = r.get("issue_photo_url")
-                            f_photo = r.get("fix_photo_url")
-                            
+                            i_photo = r.get("issue_photo_url"); f_photo = r.get("fix_photo_url")
                             no_img_html = '<div style="text-align:center; padding:30px; color:#999; border:1px solid #eee;">写真なし</div>'
                             img_b = f'<img src="{i_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;">' if i_photo else no_img_html
                             img_a = f'<img src="{f_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;">' if f_photo else no_img_html
@@ -1174,20 +983,16 @@ def main():
                             </div>
                             """, unsafe_allow_html=True)
                             issue_count += 1
-                
                 else:
                     conf_cnt = len(recs)
                     st.info(f"📊 **【進捗】 全 {total_cnt} 件 ･･･ [ ✅ 完了：{comp_cnt}件 ／ ⚠️ 未完了：{unres_cnt}件 ]** \n※うち、現在確認待ちが **{conf_cnt}件** あります。")
-                    
                     st.markdown(f"<h3 style='margin-top:0;'>📋 {report_title}</h3>", unsafe_allow_html=True)
                     
                     w_groups = {}
                     for r in recs:
                         if not isinstance(r, dict): continue
                         rec_id = r.get('record_id')
-                        if rec_id in st.session_state.skip_render_ids:
-                            continue
-                        
+                        if rec_id in st.session_state.skip_render_ids: continue
                         w = r.get('work_type') or 'その他'
                         if w not in w_groups: w_groups[w] = []
                         w_groups[w].append(r)
@@ -1197,42 +1002,28 @@ def main():
                         for r_idx, r in enumerate(w_recs):
                             rec_id = r.get('record_id')
                             if not rec_id: continue
-                            
-                            floor = r.get('floor_level', '')
-                            area = r.get('area', '')
-                            detail = r.get('issue_detail', '')
-                            
-                            if type_val == "【検査機関】":
-                                head_text = ""
-                            else:
-                                head_text = f"【{floor} {area}】".strip()
-                                if floor == "一式": head_text = ""
-                                
+                            floor = r.get('floor_level', ''); area = r.get('area', ''); detail = r.get('issue_detail', '')
+                            head_text = "" if type_val.startswith("【検査機関】") or floor == "一式" else f"【{floor} {area}】".strip()
                             title = f"{head_text} {detail}" if head_text else f"【指摘内容】 {detail}"
                             
                             c_box = st.container()
                             with c_box:
                                 st.markdown(f"**{title}**")
-                                
                                 c1, c2 = st.columns(2)
-                                i_photo = r.get('issue_photo_url')
-                                f_photo = r.get('fix_photo_url')
-                                
+                                i_photo = r.get('issue_photo_url'); f_photo = r.get('fix_photo_url')
                                 if i_photo: c1.image(i_photo, caption="Before")
                                 if f_photo: c2.image(f_photo, caption="After")
                                 
                                 ca, cb = st.columns(2)
+                                # ★ 爆速化処理：承認・否認と同時に即時クリア
                                 if ca.button("✅ 承認（完了へ）", key=f"ok_{rec_id}"): 
                                     db_patch("inspection_records", rec_id, {"progress_status": "完了"})
-                                    st.session_state.skip_render_ids.append(rec_id)
-                                    st.rerun()
+                                    st.session_state.skip_render_ids.append(rec_id); st.rerun()
                                 
                                 reason = cb.text_input("否認理由を入力", key=f"re_{rec_id}", label_visibility="collapsed", placeholder="否認理由があれば入力")
                                 if cb.button("❌ 否認（差し戻し）", key=f"ng_{rec_id}"): 
                                     db_patch("inspection_records", rec_id, {"progress_status": "是正待ち", "reject_reason": reason})
-                                    st.session_state.skip_render_ids.append(rec_id)
-                                    st.rerun()
-                                
+                                    st.session_state.skip_render_ids.append(rec_id); st.rerun()
                                 st.markdown("---") 
 
 if __name__ == "__main__":
@@ -1241,5 +1032,4 @@ if __name__ == "__main__":
     except Exception as e:
         st.error("システムエラーが発生しました。")
         if st.button("システム復旧"):
-            st.session_state.clear()
-            st.rerun()
+            st.session_state.clear(); st.rerun()
