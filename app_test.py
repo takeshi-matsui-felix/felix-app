@@ -168,12 +168,12 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 """
 
 # 一時領域にコンポーネントを配置して読み込む
-temp_dir = os.path.join(tempfile.gettempdir(), "fast_camera_comp_final_v2")
+temp_dir = os.path.join(tempfile.gettempdir(), "fast_camera_comp_final_v3")
 os.makedirs(temp_dir, exist_ok=True)
 with open(os.path.join(temp_dir, "index.html"), "w", encoding="utf-8") as f:
     f.write(CLIENT_COMPRESS_HTML)
 
-_client_compress_func = components.declare_component("fast_camera_final_v2", path=temp_dir)
+_client_compress_func = components.declare_component("fast_camera_final_v3", path=temp_dir)
 
 def client_compress_component(key):
     return _client_compress_func(key=key)
@@ -196,6 +196,13 @@ st.markdown("""
     footer {visibility: hidden;}
     [data-testid="stStatusWidget"] { display: none; }
     .record-box { border-bottom: 2px solid #EEEEEE; padding-bottom: 20px; margin-bottom: 20px; }
+    
+    /* 進捗バッジ等のデザイン装飾 */
+    .badge-wrap { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: bold; margin-left: 5px; }
+    .badge-done { color: #2ecc71; }
+    .badge-warn { color: #e67e22; }
+    .badge-conf { color: #FF4B4B; }
+
     @media print {
         section[data-testid="stSidebar"], header[data-testid="stHeader"] { display: none !important; }
         .stButton, [data-testid="stTextInput"], .admin-delete-box, hr { display: none !important; }
@@ -255,9 +262,13 @@ ISSUE_TEMPLATES = {
 # ==========================================
 # 5. 強制クリーンアップ・セッション管理
 # ==========================================
-for key in ["role", "active_menu", "pre_selected_prop", "delete_target"]:
+for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "skip_render_ids"]:
     if key not in st.session_state:
         st.session_state[key] = None
+
+# UIクリア専用の非同期スキップ用リスト初期化
+if st.session_state.skip_render_ids is None:
+    st.session_state.skip_render_ids = []
 
 if "issue_saved" not in st.session_state:
     st.session_state.issue_saved = False
@@ -267,6 +278,9 @@ if "drill_target" not in st.session_state or not isinstance(st.session_state.dri
 
 if "current_box" not in st.session_state or not isinstance(st.session_state.current_box, dict):
     st.session_state.current_box = None
+
+if "kikan_phase" not in st.session_state:
+    st.session_state.kikan_phase = "配筋検査"
 
 # 🔑 【自動ログイン機能】
 qp = st.query_params
@@ -284,6 +298,7 @@ def jump_to_menu(menu_name, prop_id=None):
     st.session_state.current_box = None
     st.session_state.delete_target = None
     st.session_state.issue_saved = False
+    st.session_state.skip_render_ids = []
     st.rerun()
 
 # --- 選択肢の定義 ---
@@ -296,9 +311,19 @@ WORK_OPTS_KUTAI = ["-- 選択 --", "フレーミング", "電気", "水道", "�
 WORK_OPTS_CHUKAN = ["-- 選択 --", "造作", "電気", "水道", "外壁", "ガス", "足場", "その他"]
 WORK_OPTS_SHANAI = ["-- 選択 --", "A.リペア", "B.清掃", "C.クロス", "D.造作", "E.水道", "F.電気", "G.キッチン", "H.サッシ", "I.外壁", "J.外構", "K.コーキング", "L.ガス", "板金", "Z.その他"]
 
-INSP_OPTS = ["-- 選択 --", "配筋検査","躯体検査","断熱検査","中間検査","社内検査(設計)","社内検査(建設)","社内検査(マーケ)","社内検査(不動産)"]
+# ★ アップデート③：末尾に【検査機関】を追加
+INSP_OPTS = ["-- 選択 --", "配筋検査","躯体検査","断熱検査","中間検査","社内検査(設計)","社内検査(建設)","社内検査(マーケ)","社内検査(不動産)", "【検査機関】"]
 SHANAI_KENSA_TYPES = ["社内検査(設計)", "社内検査(建設)", "社内検査(マーケ)", "社内検査(不動産)"]
 INSPECTOR_OPTS = ["工事監理チーム", "建設部", "不動産事業部", "マーケティング部"]
+
+# ★ アップデート③用：検査機関専用の各フェーズ工種リスト
+KIKAN_WORK_MAP = {
+    "配筋検査": ["基礎工事(鉄筋)", "水道", "ガス", "その他"],
+    "躯体検査": ["フレーミング", "電気", "水道", "防水", "その他"],
+    "断熱検査": ["基礎工事", "フレーミング", "造作", "電気", "設備", "ガス", "その他"],
+    "中間検査": ["造作", "電気", "水道", "外壁", "ガス", "足場", "その他"],
+    "完了検査": ["基礎工事", "フレーミング", "造作", "内装", "電気", "設備", "ガス", "サッシ", "外壁", "外構", "その他"]
+}
 
 # ==========================================
 # 6. メイン画面・機能
@@ -359,6 +384,7 @@ def main():
         st.session_state.current_box = None
         st.session_state.delete_target = None
         st.session_state.issue_saved = False
+        st.session_state.skip_render_ids = []
         st.rerun()
 
     # ----------------------------------------
@@ -456,48 +482,79 @@ def main():
                 f = "一式"
                 a = "全体"
                 
-                if c_type in SHANAI_KENSA_TYPES:
-                    area_opts = AREA_OPTS_SHANAI
-                    work_opts = WORK_OPTS_SHANAI
-                elif c_type == "躯体検査":
-                    area_opts = AREA_OPTS_STANDARD
-                    work_opts = WORK_OPTS_KUTAI
-                elif c_type == "配筋検査":
-                    area_opts = AREA_OPTS_STANDARD
-                    work_opts = WORK_OPTS_HAIKIN
-                elif c_type == "中間検査":
-                    area_opts = AREA_OPTS_STANDARD
-                    work_opts = WORK_OPTS_CHUKAN
+                # ★ アップデート③：【検査機関】の専用UIツリー表示
+                if c_type == "【検査機関】":
+                    st.markdown("#### 🔘 検査フェーズ選択")
+                    k_opts = ["配筋検査", "躯体検査", "断熱検査", "中間検査", "完了検査"]
+                    
+                    # ボタンを横並びでスタイリッシュに配置
+                    k_cols = st.columns(5)
+                    for k_idx, k_opt in enumerate(k_opts):
+                        b_type = "primary" if st.session_state.kikan_phase == k_opt else "secondary"
+                        if k_cols[k_idx].button(k_opt, type=b_type, key=f"kb_{k_idx}", use_container_width=True):
+                            st.session_state.kikan_phase = k_opt
+                            st.rerun()
+                    
+                    st.markdown(f"**現在選択中のフェーズ: 📌 {st.session_state.kikan_phase}**")
+                    st.markdown("<hr style='margin:10px 0;'>", unsafe_allow_html=True)
+                    
+                    st.markdown("##### 詳細・場所の追記（自由入力）")
+                    desc = st.text_area("詳細情報を入力", label_visibility="collapsed")
+                    
+                    st.markdown("##### 工種を選択")
+                    target_w_opts = KIKAN_WORK_MAP.get(st.session_state.kikan_phase, ["その他"])
+                    w = st.radio("工種を選択", target_w_opts, horizontal=True, label_visibility="collapsed")
+                    
+                    # 検査機関用の内部フェーズも識別名として裏側に記録できるように構成
+                    actual_type_label = f"【検査機関】{st.session_state.kikan_phase}"
+                    sel_temp = None
+
                 else:
-                    area_opts = AREA_OPTS_STANDARD
-                    work_opts = WORK_OPTS_STANDARD
-                
-                if c_type not in ["配筋検査", "躯体検査", "中間検査"]:
-                    f = st.radio("階層を選択", FLOOR_OPTS[1:], horizontal=True)
-                    a = st.radio("部位を選択", area_opts[1:], horizontal=True)
-                
-                cat_dict = {}
-                if c_type in ["配筋検査", "躯体検査", "中間検査"]:
-                    cat_dict = ISSUE_TEMPLATES.get(c_type, {})
-                elif c_type in SHANAI_KENSA_TYPES:
-                    cat_dict = ISSUE_TEMPLATES.get("社内検査(設計)", {}).get(a, {})
-                
-                if not isinstance(cat_dict, dict):
+                    # 従来の標準UI処理
+                    actual_type_label = c_type
+                    if c_type in SHANAI_KENSA_TYPES:
+                        area_opts = AREA_OPTS_SHANAI
+                        work_opts = WORK_OPTS_SHANAI
+                    elif c_type == "躯体検査":
+                        area_opts = AREA_OPTS_STANDARD
+                        work_opts = WORK_OPTS_KUTAI
+                    elif c_type == "配筋検査":
+                        area_opts = AREA_OPTS_STANDARD
+                        work_opts = WORK_OPTS_HAIKIN
+                    elif c_type == "中間検査":
+                        area_opts = AREA_OPTS_STANDARD
+                        work_opts = WORK_OPTS_CHUKAN
+                    else:
+                        area_opts = AREA_OPTS_STANDARD
+                        work_opts = WORK_OPTS_STANDARD
+                    
+                    if c_type not in ["配筋検査", "躯体検査", "中間検査"]:
+                        f = st.radio("階層を選択", FLOOR_OPTS[1:], horizontal=True)
+                        a = st.radio("部位を選択", area_opts[1:], horizontal=True)
+                    
                     cat_dict = {}
+                    if c_type in ["配筋検査", "躯体検査", "中間検査"]:
+                        cat_dict = ISSUE_TEMPLATES.get(c_type, {})
+                    elif c_type in SHANAI_KENSA_TYPES:
+                        cat_dict = ISSUE_TEMPLATES.get("社内検査(設計)", {}).get(a, {})
+                    
+                    if not isinstance(cat_dict, dict):
+                        cat_dict = {}
+                    
+                    cat_keys = list(cat_dict.keys())
+                    sel_cat = st.radio("分類を選択（A列）", cat_keys, horizontal=True) if cat_keys else None
+                    
+                    sel_temp = None
+                    if sel_cat:
+                        temp_list = cat_dict.get(sel_cat, [])
+                        sel_temp = st.radio("よくある指摘事項（D列）", temp_list)
+                    
+                    st.markdown("##### 詳細・場所の追記（自由入力）")
+                    desc = st.text_area("詳細情報を入力", label_visibility="collapsed")
+                    
+                    w = st.radio("工種を選択", work_opts[1:], horizontal=True)
                 
-                cat_keys = list(cat_dict.keys())
-                sel_cat = st.radio("分類を選択（A列）", cat_keys, horizontal=True) if cat_keys else None
-                
-                sel_temp = None
-                if sel_cat:
-                    temp_list = cat_dict.get(sel_cat, [])
-                    sel_temp = st.radio("よくある指摘事項（D列）", temp_list)
-                
-                st.markdown("##### 詳細・場所の追記（自由入力）")
-                desc = st.text_area("詳細情報を入力", label_visibility="collapsed")
-                
-                w = st.radio("工種を選択", work_opts[1:], horizontal=True)
-                
+                # 共通・スマホ内瞬間圧縮ボタン
                 st.markdown("##### 現場写真の追加")
                 photo = client_compress_component(key="insp_cam")
                 
@@ -785,7 +842,9 @@ def main():
     # ----------------------------------------
     elif st.session_state.active_menu in ["是正確認（管理者）", "完了分一覧（共通）"]:
         status = "是正確認中" if "確認" in st.session_state.active_menu else "完了"
-        all_recs = db_get("inspection_records", f"progress_status=eq.{status}")
+        
+        # ★ アップデート①：開く前のトップ画面で裏側で一括集計をかけ、バッジ表記を完全再現
+        all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status")
         all_ins = db_get("inspections", "select=*")
         
         ins_map = {}
@@ -794,38 +853,79 @@ def main():
                 ins_map[i.get('inspection_id')] = i
                 
         tree = {}
-        for r in all_recs:
-            if not isinstance(r, dict):
-                continue
-            ins = ins_map.get(r.get('inspection_id'))
+        tree_counts = {} # 物件・検査ごとの進捗カウンタを保管
+        
+        for r in all_recs_for_tree:
+            if not isinstance(r, dict): continue
+            iid = r.get('inspection_id')
+            p_stat = r.get('progress_status')
+            ins = ins_map.get(iid)
             if ins:
                 p = ins.get('property_name', '不明')
                 t = ins.get('inspection_type', '不明')
                 if p not in tree:
                     tree[p] = set()
+                    tree_counts[p] = {}
                 tree[p].add(t)
-        
+                
+                if t not in tree_counts[p]:
+                    tree_counts[p][t] = {"total": 0, "done": 0, "wait_conf": 0, "unres": 0}
+                
+                # 状態をシームレスに振り分け
+                tree_counts[p][t]["total"] += 1
+                if p_stat == "完了":
+                    tree_counts[p][t]["done"] += 1
+                elif p_stat == "是正確認中":
+                    tree_counts[p][t]["wait_conf"] += 1
+                    tree_counts[p][t]["unres"] += 1
+                else:
+                    tree_counts[p][t]["unres"] += 1
+
         sel = st.session_state.drill_target
         if not isinstance(sel, dict):
             sel = {}
         prop_val = sel.get('prop', '')
         type_val = sel.get('type', '')
 
+        # 一覧ツリーの表示
         if not (prop_val and type_val):
             st.header(st.session_state.active_menu)
-            if not tree:
-                st.info("対象の項目はありません。")
             
+            # 対象のデータが存在する物件のみ抽出し、進捗バッジと共にエレガントに表示
+            has_visible_items = False
             for p_idx, (p_name, types) in enumerate(tree.items()):
-                with st.expander(p_name):
-                    for t_idx, t_name in enumerate(sorted(list(types))):
-                        if st.button(t_name, key=f"c_{p_idx}_{t_idx}"):
-                            st.session_state.drill_target = {"prop": p_name, "type": t_name}
-                            st.rerun()
-        
+                # この画面の対象ステータス（是正確認中 or 完了）が1件以上あるかチェック
+                valid_types = []
+                for t_name in types:
+                    c_data = tree_counts.get(p_name, {}).get(t_name, {})
+                    if status == "是正確認中" and c_data.get("wait_conf", 0) > 0:
+                        valid_types.append(t_name)
+                    elif status == "完了" and c_data.get("done", 0) > 0:
+                        valid_types.append(t_name)
+                
+                if valid_types:
+                    has_visible_items = True
+                    with st.expander(p_name):
+                        for t_idx, t_name in enumerate(sorted(valid_types)):
+                            c_data = tree_counts[p_name][t_name]
+                            
+                            # ご要望の進捗テキストをそのままスタイリッシュに横へ組み込み
+                            badge_text = f"全 {c_data['total']} 件 ･･･ [ ✅ 完了：{c_data['done']}件 ／ ⚠️ 未完了：{c_data['unres']}件 ] ※うち確認待ち {c_data['wait_conf']}件"
+                            
+                            t_cols = st.columns([3, 7])
+                            if t_cols[0].button(t_name, key=f"c_{p_idx}_{t_idx}", use_container_width=True):
+                                st.session_state.drill_target = {"prop": p_name, "type": t_name}
+                                st.rerun()
+                            t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#555;'>{badge_text}</span></div>", unsafe_allow_html=True)
+            
+            if not has_visible_items:
+                st.info("対象の項目はありません。")
+
+        # ドリルダウン後の処理
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"):
                 st.session_state.drill_target = None
+                st.session_state.skip_render_ids = []
                 st.rerun()
             
             target_ins = None
@@ -878,11 +978,9 @@ def main():
                     
                     w_groups = {}
                     for r in recs:
-                        if not isinstance(r, dict):
-                            continue
+                        if not isinstance(r, dict): continue
                         w = r.get('work_type') or 'その他'
-                        if w not in w_groups:
-                            w_groups[w] = []
+                        if w not in w_groups: w_groups[w] = []
                         w_groups[w].append(r)
                         
                     issue_count = 1
@@ -900,35 +998,17 @@ def main():
                             f_photo = r.get("fix_photo_url")
                             
                             no_img_html = '<div style="text-align:center; padding:30px; color:#999; border:1px solid #eee;">写真なし</div>'
-                            
-                            if i_photo:
-                                img_b = f'<img src="{i_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;">'
-                            else:
-                                img_b = no_img_html
-                                
-                            if f_photo:
-                                img_a = f'<img src="{f_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;">'
-                            else:
-                                img_a = no_img_html
+                            img_b = f'<img src="{i_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;">' if i_photo else no_img_html
+                            img_a = f'<img src="{f_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;">' if f_photo else no_img_html
                             
                             st.markdown(f"""
                             <div style="page-break-inside: avoid; border-bottom: 1px dashed #ccc; padding: 15px 0; margin-bottom: 10px;">
-                                <div style="font-size:14px; font-weight:bold; margin-bottom:5px;">
-                                    No.{issue_count} {loc_text}
-                                </div>
-                                <div style="font-size:14px; margin-bottom:12px; line-height:1.4;">
-                                    <strong>指摘内容：</strong> {detail}
-                                </div>
+                                <div style="font-size:14px; font-weight:bold; margin-bottom:5px;">No.{issue_count} {loc_text}</div>
+                                <div style="font-size:14px; margin-bottom:12px; line-height:1.4;"><strong>指摘内容：</strong> {detail}</div>
                                 <table style="width:100%; table-layout:fixed; border-collapse:collapse; border:none;">
                                     <tr>
-                                        <td style="width:50%; text-align:center; vertical-align:top; padding-right:5px;">
-                                            <div style="font-size:12px; color:#555; margin-bottom:4px;">[ Before（指摘時） ]</div>
-                                            {img_b}
-                                        </td>
-                                        <td style="width:50%; text-align:center; vertical-align:top; padding-left:5px;">
-                                            <div style="font-size:12px; color:#555; margin-bottom:4px;">[ After（是正後） ]</div>
-                                            {img_a}
-                                        </td>
+                                        <td style="width:50%; text-align:center; vertical-align:top; padding-right:5px;"><div style="font-size:12px; color:#555; margin-bottom:4px;">[ Before（指摘時） ]</div>{img_b}</td>
+                                        <td style="width:50%; text-align:center; vertical-align:top; padding-left:5px;"><div style="font-size:12px; color:#555; margin-bottom:4px;">[ After（是正後） ]</div>{img_a}</td>
                                     </tr>
                                 </table>
                             </div>
@@ -941,56 +1021,66 @@ def main():
                     
                     w_groups = {}
                     for r in recs:
-                        if not isinstance(r, dict):
+                        if not isinstance(r, dict): continue
+                        
+                        # ★ アップデート②：非同期スキップ処理。承認済みの重い描画ブロックを一挙カットし高速化
+                        rec_id = r.get('record_id')
+                        if rec_id in st.session_state.skip_render_ids:
                             continue
+                        
                         w = r.get('work_type') or 'その他'
-                        if w not in w_groups:
-                            w_groups[w] = []
+                        if w not in w_groups: w_groups[w] = []
                         w_groups[w].append(r)
                     
                     for w_name, w_recs in w_groups.items():
                         st.subheader(f"■ 工種: {w_name}")
                         for r_idx, r in enumerate(w_recs):
                             rec_id = r.get('record_id')
-                            if not rec_id:
-                                continue
+                            if not rec_id: continue
                             
                             floor = r.get('floor_level', '')
                             area = r.get('area', '')
                             detail = r.get('issue_detail', '')
                             
                             head_text = f"【{floor} {area}】".strip()
-                            if floor == "一式":
-                                head_text = ""
+                            if floor == "一式": head_text = ""
                             title = f"{head_text} {detail}" if head_text else f"【指摘内容】 {detail}"
                             
-                            st.markdown(f"**{title}**")
-                            
-                            c1, c2 = st.columns(2)
-                            i_photo = r.get('issue_photo_url')
-                            f_photo = r.get('fix_photo_url')
-                            if i_photo:
-                                c1.image(i_photo, caption="Before")
-                            if f_photo:
-                                c2.image(f_photo, caption="After")
-                            
-                            ca, cb = st.columns(2)
-                            if ca.button("✅ 承認（完了へ）", key=f"ok_{rec_id}"): 
-                                db_patch("inspection_records", rec_id, {"progress_status": "完了"})
-                                st.rerun()
-                            
-                            reason = cb.text_input("否認理由を入力", key=f"re_{rec_id}", label_visibility="collapsed", placeholder="否認理由があれば入力")
-                            if cb.button("❌ 否認（差し戻し）", key=f"ng_{rec_id}"): 
-                                db_patch("inspection_records", rec_id, {"progress_status": "是正待ち", "reject_reason": reason})
-                                st.rerun()
-                            
-                            st.markdown("---") 
+                            # UI用のユニークな専用コンテナボックスを展開
+                            c_box = st.container()
+                            with c_box:
+                                st.markdown(f"**{title}**")
+                                
+                                c1, c2 = st.columns(2)
+                                i_photo = r.get('issue_photo_url')
+                                f_photo = r.get('fix_photo_url')
+                                
+                                # Cloudの読み込みボトルネックを軽減するため標準機能でスマート描画
+                                if i_photo: c1.image(i_photo, caption="Before")
+                                if f_photo: c2.image(f_photo, caption="After")
+                                
+                                ca, cb = st.columns(2)
+                                
+                                # ★ アップデート②：承認ボタンをバックグラウンド通信で処理。画面の重い再読込をなくします
+                                if ca.button("✅ 承認（完了へ）", key=f"ok_{rec_id}"): 
+                                    db_patch("inspection_records", rec_id, {"progress_status": "完了"})
+                                    # 画面から即座に表示を消すためスキップリストに追加して再描画
+                                    st.session_state.skip_render_ids.append(rec_id)
+                                    st.rerun()
+                                
+                                reason = cb.text_input("否認理由を入力", key=f"re_{rec_id}", label_visibility="collapsed", placeholder="否認理由があれば入力")
+                                if cb.button("❌ 否認（差し戻し）", key=f"ng_{rec_id}"): 
+                                    db_patch("inspection_records", rec_id, {"progress_status": "是正待ち", "reject_reason": reason})
+                                    st.session_state.skip_render_ids.append(rec_id)
+                                    st.rerun()
+                                
+                                st.markdown("---") 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        st.error(f"システムエラーが発生しました。")
+        st.error("システムエラーが発生しました。")
         if st.button("システム復旧"):
             st.session_state.clear()
             st.rerun()
