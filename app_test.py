@@ -168,12 +168,12 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 """
 
 # 一時領域にコンポーネントを配置して読み込む
-temp_dir = os.path.join(tempfile.gettempdir(), "fast_camera_comp_final_v3")
+temp_dir = os.path.join(tempfile.gettempdir(), "fast_camera_comp_final_v4")
 os.makedirs(temp_dir, exist_ok=True)
 with open(os.path.join(temp_dir, "index.html"), "w", encoding="utf-8") as f:
     f.write(CLIENT_COMPRESS_HTML)
 
-_client_compress_func = components.declare_component("fast_camera_final_v3", path=temp_dir)
+_client_compress_func = components.declare_component("fast_camera_final_v4", path=temp_dir)
 
 def client_compress_component(key):
     return _client_compress_func(key=key)
@@ -311,12 +311,10 @@ WORK_OPTS_KUTAI = ["-- 選択 --", "フレーミング", "電気", "水道", "�
 WORK_OPTS_CHUKAN = ["-- 選択 --", "造作", "電気", "水道", "外壁", "ガス", "足場", "その他"]
 WORK_OPTS_SHANAI = ["-- 選択 --", "A.リペア", "B.清掃", "C.クロス", "D.造作", "E.水道", "F.電気", "G.キッチン", "H.サッシ", "I.外壁", "J.外構", "K.コーキング", "L.ガス", "板金", "Z.その他"]
 
-# ★ アップデート③：末尾に【検査機関】を追加
 INSP_OPTS = ["-- 選択 --", "配筋検査","躯体検査","断熱検査","中間検査","社内検査(設計)","社内検査(建設)","社内検査(マーケ)","社内検査(不動産)", "【検査機関】"]
 SHANAI_KENSA_TYPES = ["社内検査(設計)", "社内検査(建設)", "社内検査(マーケ)", "社内検査(不動産)"]
 INSPECTOR_OPTS = ["工事監理チーム", "建設部", "不動産事業部", "マーケティング部"]
 
-# ★ アップデート③用：検査機関専用の各フェーズ工種リスト
 KIKAN_WORK_MAP = {
     "配筋検査": ["基礎工事(鉄筋)", "水道", "ガス", "その他"],
     "躯体検査": ["フレーミング", "電気", "水道", "防水", "その他"],
@@ -482,12 +480,11 @@ def main():
                 f = "一式"
                 a = "全体"
                 
-                # ★ アップデート③：【検査機関】の専用UIツリー表示
+                # ★ アップデート②：保存時、裏側で【検査機関】のフェーズ名を「area（部位）」に確実に割り当てる
                 if c_type == "【検査機関】":
                     st.markdown("#### 🔘 検査フェーズ選択")
                     k_opts = ["配筋検査", "躯体検査", "断熱検査", "中間検査", "完了検査"]
                     
-                    # ボタンを横並びでスタイリッシュに配置
                     k_cols = st.columns(5)
                     for k_idx, k_opt in enumerate(k_opts):
                         b_type = "primary" if st.session_state.kikan_phase == k_opt else "secondary"
@@ -505,13 +502,11 @@ def main():
                     target_w_opts = KIKAN_WORK_MAP.get(st.session_state.kikan_phase, ["その他"])
                     w = st.radio("工種を選択", target_w_opts, horizontal=True, label_visibility="collapsed")
                     
-                    # 検査機関用の内部フェーズも識別名として裏側に記録できるように構成
-                    actual_type_label = f"【検査機関】{st.session_state.kikan_phase}"
+                    # 報告書合成時に参照できるよう、フェーズ名をそのまま属性へ割り当てます
+                    a = st.session_state.kikan_phase
                     sel_temp = None
 
                 else:
-                    # 従来の標準UI処理
-                    actual_type_label = c_type
                     if c_type in SHANAI_KENSA_TYPES:
                         area_opts = AREA_OPTS_SHANAI
                         work_opts = WORK_OPTS_SHANAI
@@ -554,7 +549,6 @@ def main():
                     
                     w = st.radio("工種を選択", work_opts[1:], horizontal=True)
                 
-                # 共通・スマホ内瞬間圧縮ボタン
                 st.markdown("##### 現場写真の追加")
                 photo = client_compress_component(key="insp_cam")
                 
@@ -694,7 +688,9 @@ def main():
     # ----------------------------------------
     elif st.session_state.active_menu == "是正実施（協力業者）":
         st.header("是正実施")
-        all_recs = db_get("inspection_records", "progress_status=eq.是正待ち")
+        
+        # ★ アップデート①：是正実施側も完全に共通の全数集計をかけ、進捗バッジを展開
+        all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status")
         all_ins = db_get("inspections", "select=*")
         
         ins_map = {}
@@ -703,33 +699,74 @@ def main():
                 ins_map[i.get('inspection_id')] = i
                 
         tree = {}
-        for r in all_recs:
-            if not isinstance(r, dict):
-                continue
-            ins = ins_map.get(r.get('inspection_id'))
+        tree_counts = {}
+        
+        for r in all_recs_for_tree:
+            if not isinstance(r, dict): continue
+            iid = r.get('inspection_id')
+            p_stat = r.get('progress_status')
+            ins = ins_map.get(iid)
             if ins:
                 p = ins.get('property_name', '不明')
                 t = ins.get('inspection_type', '不明')
                 if p not in tree:
-                    tree[p] = {}
-                tree[p][t] = tree[p].get(t, 0) + 1
+                    tree[p] = set()
+                    tree_counts[p] = {}
+                tree[p].add(t)
                 
-        for p_idx, (p_name, types) in enumerate(tree.items()):
-            with st.expander(p_name):
-                for t_idx, (t_name, count) in enumerate(types.items()):
-                    if st.button(f"{t_name} ({count}件)", key=f"f_{p_idx}_{t_idx}"):
-                        st.session_state.drill_target = {"prop": p_name, "type": t_name}
-                        st.rerun()
-        
+                if t not in tree_counts[p]:
+                    tree_counts[p][t] = {"total": 0, "done": 0, "wait_conf": 0, "unres": 0, "wait_fix": 0}
+                
+                tree_counts[p][t]["total"] += 1
+                if p_stat == "完了":
+                    tree_counts[p][t]["done"] += 1
+                elif p_stat == "是正確認中":
+                    tree_counts[p][t]["wait_conf"] += 1
+                    tree_counts[p][t]["unres"] += 1
+                elif p_stat == "是正待ち":
+                    tree_counts[p][t]["wait_fix"] += 1
+                    tree_counts[p][t]["unres"] += 1
+                else:
+                    tree_counts[p][t]["unres"] += 1
+                
         sel = st.session_state.drill_target
         if not isinstance(sel, dict):
             sel = {}
         prop_val = sel.get('prop', '')
         type_val = sel.get('type', '')
         
+        # ツリー一覧表示
+        if not (prop_val and type_val):
+            has_visible_items = False
+            for p_idx, (p_name, types) in enumerate(tree.items()):
+                valid_types = []
+                for t_name in types:
+                    if tree_counts.get(p_name, {}).get(t_name, {}).get("wait_fix", 0) > 0:
+                        valid_types.append(t_name)
+                
+                if valid_types:
+                    has_visible_items = True
+                    with st.expander(p_name):
+                        for t_idx, t_name in enumerate(sorted(valid_types)):
+                            c_data = tree_counts[p_name][t_name]
+                            
+                            # バッジテキストを美しく合成
+                            badge_text = f"全 {c_data['total']} 件 ･･･ [ ✅ 完了：{c_data['done']}件 ／ ⚠️ 未完了：{c_data['unres']}件 ] ※うち是正報告待ち {c_data['wait_fix']}件"
+                            
+                            t_cols = st.columns([3, 7])
+                            if t_cols[0].button(t_name, key=f"f_{p_idx}_{t_idx}", use_container_width=True):
+                                st.session_state.drill_target = {"prop": p_name, "type": t_name}
+                                st.rerun()
+                            t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#555;'>{badge_text}</span></div>", unsafe_allow_html=True)
+            
+            if not has_visible_items:
+                st.info("対象の項目はありません。")
+        
+        # ドリルダウン後
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"):
                 st.session_state.drill_target = None
+                st.session_state.skip_render_ids = []
                 st.rerun()
             
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
@@ -744,11 +781,15 @@ def main():
                 
                 w_groups = {}
                 for r in recs:
-                    if not isinstance(r, dict):
+                    if not isinstance(r, dict): continue
+                    
+                    # ★ アップデート③：業者側も完了報告済み項目を描画カットし高速化
+                    rec_id = r.get('record_id')
+                    if rec_id in st.session_state.skip_render_ids:
                         continue
+                    
                     w = r.get('work_type') or 'その他'
-                    if w not in w_groups:
-                        w_groups[w] = []
+                    if w not in w_groups: w_groups[w] = []
                     w_groups[w].append(r)
                 
                 if type_val in SHANAI_KENSA_TYPES:
@@ -766,76 +807,77 @@ def main():
                     st.subheader(f"■ 工種: {w_name}")
                     for r_idx, r in enumerate(w_recs):
                         rec_id = r.get('record_id')
-                        if not rec_id:
-                            continue 
+                        if not rec_id: continue 
                         
                         floor = r.get('floor_level', '')
                         area = r.get('area', '')
                         detail = r.get('issue_detail', '')
                         
                         head_text = f"【{floor} {area}】".strip()
-                        if floor == "一式":
-                            head_text = ""
+                        if floor == "一式": head_text = ""
                         title = f"{head_text} {detail}" if head_text else f"【指摘内容】 {detail}"
                         
-                        st.markdown('<div class="record-box">', unsafe_allow_html=True)
-                        st.markdown(f"**{title}**")
-                        
-                        if r.get('reject_reason'):
-                            st.error(f"否認理由: {r.get('reject_reason')}")
-                        
-                        if st.session_state.role == "admin":
-                            if st.checkbox("⚙️ 是正内容編集 (管理者専用)", key=f"edit_chk_{rec_id}"):
-                                st.markdown("#### 📝 データ編集")
-                                new_detail = st.text_area("指摘内容を変更", value=detail, key=f"edit_d_{rec_id}")
-                                
-                                current_w = r.get('work_type', '')
-                                idx_w = edit_w_opts.index(current_w) if current_w in edit_w_opts else 0
-                                new_w = st.selectbox("工種を変更", edit_w_opts, index=idx_w, key=f"edit_w_{rec_id}")
-                                
-                                new_photo = client_compress_component(key=f"edit_cam_{rec_id}")
-                                
-                                if new_photo and isinstance(new_photo, str) and "base64," in new_photo:
-                                    st.image(new_photo, caption="差し替えプレビュー", use_container_width=True)
-                                
-                                col_u, col_d = st.columns(2)
-                                if col_u.button("💾 更新を保存", key=f"edit_save_{rec_id}"):
-                                    up_data = {"work_type": new_w, "issue_detail": new_detail}
-                                    if new_photo and "base64," in new_photo:
-                                        up_data["issue_photo_url"] = process_photo(new_photo)
-                                    db_patch("inspection_records", rec_id, up_data)
-                                    st.success("更新しました！")
-                                    st.rerun()
-                                if col_d.button("🗑️ この指摘を削除", key=f"edit_del_{rec_id}"):
-                                    db_delete_record(rec_id)
-                                    st.rerun()
-                                st.markdown("<br>", unsafe_allow_html=True)
+                        # 業者側も専用コンテナボックスで囲んでスマート消去
+                        c_box = st.container()
+                        with c_box:
+                            st.markdown('<div class="record-box">', unsafe_allow_html=True)
+                            st.markdown(f"**{title}**")
+                            
+                            if r.get('reject_reason'):
+                                st.error(f"否認理由: {r.get('reject_reason')}")
+                            
+                            if st.session_state.role == "admin":
+                                if st.checkbox("⚙️ 是正内容編集 (管理者専用)", key=f"edit_chk_{rec_id}"):
+                                    st.markdown("#### 📝 データ編集")
+                                    new_detail = st.text_area("指摘内容を変更", value=detail, key=f"edit_d_{rec_id}")
+                                    
+                                    current_w = r.get('work_type', '')
+                                    idx_w = edit_w_opts.index(current_w) if current_w in edit_w_opts else 0
+                                    new_w = st.selectbox("工種を変更", edit_w_opts, index=idx_w, key=f"edit_w_{rec_id}")
+                                    
+                                    new_photo = client_compress_component(key=f"edit_cam_{rec_id}")
+                                    
+                                    if new_photo and isinstance(new_photo, str) and "base64," in new_photo:
+                                        st.image(new_photo, caption="差し替えプレビュー", use_container_width=True)
+                                    
+                                    col_u, col_d = st.columns(2)
+                                    if col_u.button("💾 更新を保存", key=f"edit_save_{rec_id}"):
+                                        up_data = {"work_type": new_w, "issue_detail": new_detail}
+                                        if new_photo and "base64," in new_photo:
+                                            up_data["issue_photo_url"] = process_photo(new_photo)
+                                        db_patch("inspection_records", rec_id, up_data)
+                                        st.success("更新しました！")
+                                        st.rerun()
+                                    if col_d.button("🗑️ この指摘を削除", key=f"edit_del_{rec_id}"):
+                                        db_delete_record(rec_id)
+                                        st.rerun()
+                                    st.markdown("<br>", unsafe_allow_html=True)
 
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            st.markdown("**【指摘箇所（Before）】**")
-                            if r.get('issue_photo_url'): 
-                                st.image(r.get('issue_photo_url'), use_container_width=True)
-                            else:
-                                st.write("写真なし")
+                            c1, c2 = st.columns(2)
+                            with c1:
+                                st.markdown("**【指摘箇所（Before）】**")
+                                if r.get('issue_photo_url'): 
+                                    st.image(r.get('issue_photo_url'), use_container_width=True)
+                                else:
+                                    st.write("写真なし")
+                                    
+                            with c2:
+                                st.markdown("**【是正写真（After）】**")
+                                up = client_compress_component(key=f"fix_cam_{rec_id}")
                                 
-                        with c2:
-                            st.markdown("**【是正写真（After）】**")
-                            up = client_compress_component(key=f"fix_cam_{rec_id}")
+                                if up and isinstance(up, str) and "base64," in up:
+                                    st.image(up, caption="アップロード画像プレビュー", use_container_width=True)
+                                
+                                # ★ アップデート③：バックグラウンド処理。アップロード完了後に画面のダウントラフィックを回避
+                                if st.button("✅ 完了報告", key=f"s_{rec_id}"):
+                                    if up and "base64," in up: 
+                                        db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "fix_photo_url": process_photo(up)})
+                                        st.session_state.skip_render_ids.append(rec_id)
+                                        st.rerun()
+                                    else: 
+                                        st.error("写真が必要です（準備完了するまでお待ちください）")
                             
-                            if up and isinstance(up, str) and "base64," in up:
-                                st.image(up, caption="アップロード画像プレビュー", use_container_width=True)
-                            
-                            if st.button("✅ 完了報告", key=f"s_{rec_id}"):
-                                if up and "base64," in up: 
-                                    db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "fix_photo_url": process_photo(up)})
-                                    st.rerun()
-                                else: 
-                                    st.error("写真が必要です（準備完了するまでお待ちください）")
-                        
-                        st.markdown('</div>', unsafe_allow_html=True)
-            else:
-                st.info("対象の項目がありません。")
+                            st.markdown('</div>', unsafe_allow_html=True)
 
     # ----------------------------------------
     # メニュー: 5. 是正確認 / 6. 完了分一覧
@@ -843,7 +885,6 @@ def main():
     elif st.session_state.active_menu in ["是正確認（管理者）", "完了分一覧（共通）"]:
         status = "是正確認中" if "確認" in st.session_state.active_menu else "完了"
         
-        # ★ アップデート①：開く前のトップ画面で裏側で一括集計をかけ、バッジ表記を完全再現
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status")
         all_ins = db_get("inspections", "select=*")
         
@@ -853,7 +894,7 @@ def main():
                 ins_map[i.get('inspection_id')] = i
                 
         tree = {}
-        tree_counts = {} # 物件・検査ごとの進捗カウンタを保管
+        tree_counts = {} 
         
         for r in all_recs_for_tree:
             if not isinstance(r, dict): continue
@@ -871,7 +912,6 @@ def main():
                 if t not in tree_counts[p]:
                     tree_counts[p][t] = {"total": 0, "done": 0, "wait_conf": 0, "unres": 0}
                 
-                # 状態をシームレスに振り分け
                 tree_counts[p][t]["total"] += 1
                 if p_stat == "完了":
                     tree_counts[p][t]["done"] += 1
@@ -887,14 +927,11 @@ def main():
         prop_val = sel.get('prop', '')
         type_val = sel.get('type', '')
 
-        # 一覧ツリーの表示
         if not (prop_val and type_val):
             st.header(st.session_state.active_menu)
             
-            # 対象のデータが存在する物件のみ抽出し、進捗バッジと共にエレガントに表示
             has_visible_items = False
             for p_idx, (p_name, types) in enumerate(tree.items()):
-                # この画面の対象ステータス（是正確認中 or 完了）が1件以上あるかチェック
                 valid_types = []
                 for t_name in types:
                     c_data = tree_counts.get(p_name, {}).get(t_name, {})
@@ -909,7 +946,6 @@ def main():
                         for t_idx, t_name in enumerate(sorted(valid_types)):
                             c_data = tree_counts[p_name][t_name]
                             
-                            # ご要望の進捗テキストをそのままスタイリッシュに横へ組み込み
                             badge_text = f"全 {c_data['total']} 件 ･･･ [ ✅ 完了：{c_data['done']}件 ／ ⚠️ 未完了：{c_data['unres']}件 ] ※うち確認待ち {c_data['wait_conf']}件"
                             
                             t_cols = st.columns([3, 7])
@@ -921,7 +957,6 @@ def main():
             if not has_visible_items:
                 st.info("対象の項目はありません。")
 
-        # ドリルダウン後の処理
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"):
                 st.session_state.drill_target = None
@@ -947,6 +982,14 @@ def main():
                 comp_cnt = len([r for r in recs_all if r.get('progress_status') == '完了'])
                 unres_cnt = total_cnt - comp_cnt
                 
+                # ★ アップデート②：【検査機関】の報告書タイトルを内部フェーズ名付きで美しく合成します
+                report_title = type_val
+                if type_val == "【検査機関】" and recs_all:
+                    # 裏側で確実に記憶させてある「area（部位）」からフェーズ名を抽出
+                    phase_attr = recs_all[0].get('area', '')
+                    if phase_attr and phase_attr != "全体":
+                        report_title = f"【検査機関】{phase_attr}"
+
                 if status == "完了":
                     if st.session_state.role == "admin":
                         st.markdown(f"""<div class="admin-delete-box" style="background-color:#FFF0F0; padding:15px; border:2px solid #FF4B4B; border-radius:10px; margin-bottom:20px;">
@@ -971,7 +1014,7 @@ def main():
 
                     st.markdown(f"""<div style="background:white; padding:0; font-family:sans-serif; width:100%;">
                         <div style="text-align:center; margin-bottom:5px; font-size:24px; font-weight:bold;">{prop_val}</div>
-                        <div style="text-align:center; margin-top:0; font-size:20px; font-weight:bold;">{type_val}報告書</div>
+                        <div style="text-align:center; margin-top:0; font-size:20px; font-weight:bold;">{report_title} 報告書</div>
                         <div style="text-align:right; font-size:12px; color:#555; margin-bottom:10px; border-bottom:2px solid #000; padding-bottom:5px;">
                             <strong>検査日:</strong> {ins_date_str} &nbsp;&nbsp; <strong>検査員:</strong> {inspector_str} &nbsp;&nbsp; <strong>指摘総数:</strong> {total_cnt}件
                         </div></div>""", unsafe_allow_html=True)
@@ -991,8 +1034,13 @@ def main():
                         for idx, r in enumerate(w_recs):
                             floor = r.get('floor_level', '')
                             area = r.get('area', '')
-                            loc_text = f"【{floor} {area}】" if floor != "一式" else ""
-                            detail = r.get('issue_detail', '')
+                            
+                            # 検査機関の内部フェーズはヘッダータイトルに出したので個別行からは綺麗に消去
+                            if type_val == "【検査機関】":
+                                loc_text = ""
+                            else:
+                                loc_text = f"【{floor} {area}】" if floor != "一式" else ""
+                                detail = r.get('issue_detail', '')
                             
                             i_photo = r.get("issue_photo_url")
                             f_photo = r.get("fix_photo_url")
@@ -1019,11 +1067,12 @@ def main():
                     conf_cnt = len(recs)
                     st.info(f"📊 **【進捗】 全 {total_cnt} 件 ･･･ [ ✅ 完了：{comp_cnt}件 ／ ⚠️ 未完了：{unres_cnt}件 ]** \n※うち、現在確認待ちが **{conf_cnt}件** あります。")
                     
+                    # 確認待ち画面のヘッダータイトルにも合成処理を適用
+                    st.markdown(f"<h3 style='margin-top:0;'>📋 {report_title}</h3>", unsafe_allow_html=True)
+                    
                     w_groups = {}
                     for r in recs:
                         if not isinstance(r, dict): continue
-                        
-                        # ★ アップデート②：非同期スキップ処理。承認済みの重い描画ブロックを一挙カットし高速化
                         rec_id = r.get('record_id')
                         if rec_id in st.session_state.skip_render_ids:
                             continue
@@ -1042,11 +1091,14 @@ def main():
                             area = r.get('area', '')
                             detail = r.get('issue_detail', '')
                             
-                            head_text = f"【{floor} {area}】".strip()
-                            if floor == "一式": head_text = ""
+                            if type_val == "【検査機関】":
+                                head_text = ""
+                            else:
+                                head_text = f"【{floor} {area}】".strip()
+                                if floor == "一式": head_text = ""
+                                
                             title = f"{head_text} {detail}" if head_text else f"【指摘内容】 {detail}"
                             
-                            # UI用のユニークな専用コンテナボックスを展開
                             c_box = st.container()
                             with c_box:
                                 st.markdown(f"**{title}**")
@@ -1055,16 +1107,12 @@ def main():
                                 i_photo = r.get('issue_photo_url')
                                 f_photo = r.get('fix_photo_url')
                                 
-                                # Cloudの読み込みボトルネックを軽減するため標準機能でスマート描画
                                 if i_photo: c1.image(i_photo, caption="Before")
                                 if f_photo: c2.image(f_photo, caption="After")
                                 
                                 ca, cb = st.columns(2)
-                                
-                                # ★ アップデート②：承認ボタンをバックグラウンド通信で処理。画面の重い再読込をなくします
                                 if ca.button("✅ 承認（完了へ）", key=f"ok_{rec_id}"): 
                                     db_patch("inspection_records", rec_id, {"progress_status": "完了"})
-                                    # 画面から即座に表示を消すためスキップリストに追加して再描画
                                     st.session_state.skip_render_ids.append(rec_id)
                                     st.rerun()
                                 
