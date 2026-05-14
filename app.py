@@ -870,7 +870,7 @@ def main():
                                     else: st.error("写真が必要です（準備完了するまでお待ちください）")
                             st.markdown('</div>', unsafe_allow_html=True)
 
-    # ----------------------------------------
+   # ----------------------------------------
     # メニュー: 5. 是正確認 / 6. 完了分一覧
     # ----------------------------------------
     elif st.session_state.active_menu in ["是正確認（管理者）", "完了分一覧（共通）"]:
@@ -936,15 +936,21 @@ def main():
             ins_date_str = target_ins.get('inspection_date', '-') if target_ins else '-'
             inspector_str = target_ins.get('inspector', '-') if target_ins else '-'
             
+            recs_all = []
             if t_ids:
                 recs_all = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})")
+            
+            report_title = type_val
+            if type_val == "【検査機関】" and recs_all:
+                phase_attr = recs_all[0].get('area', '')
+                if phase_attr and phase_attr != "全体":
+                    report_title = f"【検査機関】{phase_attr}"
+
+            if t_ids:
                 recs = [r for r in recs_all if r.get('progress_status') == status]
                 total_cnt = len(recs_all)
                 comp_cnt = len([r for r in recs_all if r.get('progress_status') == '完了'])
                 unres_cnt = total_cnt - comp_cnt
-
-                # ★ アプローチ②効果：選択した項目名（type_val）が素直にそのままタイトルになるため美しく直感的
-                report_title = type_val
 
                 if status == "完了":
                     if st.session_state.role == "admin":
@@ -1033,53 +1039,43 @@ def main():
                                 if f_photo: c2.image(f_photo, caption="After")
                                 
                                 ca, cb = st.columns(2)
-                                # ★ 爆速化処理：承認・否認と同時に即時クリア
                                 if ca.button("✅ 承認（完了へ）", key=f"ok_{rec_id}"): 
                                     db_patch("inspection_records", rec_id, {"progress_status": "完了"})
                                     st.session_state.skip_render_ids.append(rec_id); st.rerun()
                                 
                                 reason = cb.text_input("否認理由を入力", key=f"re_{rec_id}", label_visibility="collapsed", placeholder="否認理由があれば入力")
                                 if cb.button("❌ 否認（差し戻し）", key=f"ng_{rec_id}"): 
-                                    db_patch("inspection_records", rec_id, {"progress_status": "進捗状況：是正待ち", "reject_reason": reason})
+                                    db_patch("inspection_records", rec_id, {"progress_status": "是正待ち", "reject_reason": reason})
                                     st.session_state.skip_render_ids.append(rec_id); st.rerun()
                                 st.markdown("---") 
-
-                # =========================================================
-                # ★ ここを挿入：2ステップ確認式・一括承認ボタン
-                # =========================================================
-                if recs:
-                    st.markdown("<br><br>", unsafe_allow_html=True)
                     
-                    # ステップ1：準備ボタン
-                    if not st.session_state.get("show_bulk_confirm"):
-                        if st.button("📋 表示中の全項目を一括で承認する", use_container_width=True):
-                            st.session_state.show_bulk_confirm = True
-                            st.rerun()
-                    
-                    # ステップ2：確認メッセージと最終実行ボタン
-                    else:
-                        st.error("⚠️ **【最終確認】** 表示中の全項目を一括で「完了」にします。本当によろしいですか？")
-                        c_yes, c_no = st.columns(2)
-                        
-                        if c_yes.button("✅ はい、承認を確定します", type="primary", use_container_width=True):
-                            with st.spinner("一括処理中..."):
-                                for r in recs:
-                                    rid = r.get('record_id')
-                                    if rid:
-                                        db_patch("inspection_records", rid, {"progress_status": "完了"})
-                            
-                            st.success("🎉 すべて承認しました！")
-                            st.session_state.show_bulk_confirm = False
-                            st.session_state.skip_render_ids = [] # 全件消えるのでスキップリストをリセット
-                            st.rerun()
-                            
-                        if c_no.button("キャンセル", use_container_width=True):
-                            st.session_state.show_bulk_confirm = False
-                            st.rerun()
-                # =========================================================
-
-if __name__ == "__main__":
-# ・・・以下、末尾まで続く
+                    # =========================================================
+                    # ★ 修正完備：最終データの下に配置する「一括承認ボタン」
+                    # =========================================================
+                    if recs:
+                        st.markdown("<br><br>", unsafe_allow_html=True)
+                        if not st.session_state.get("show_bulk_confirm"):
+                            if st.button("📋 表示中の全項目を一括で承認する", use_container_width=True):
+                                st.session_state.show_bulk_confirm = True
+                                st.rerun()
+                        else:
+                            st.error("⚠️ **【最終確認】** 表示中の全項目を一括で「完了」にします。本当によろしいですか？")
+                            c_yes, c_no = st.columns(2)
+                            if c_yes.button("✅ はい、承認を確定します", type="primary", use_container_width=True):
+                                with st.spinner("一括処理中..."):
+                                    for r in recs:
+                                        rid = r.get('record_id')
+                                        if rid:
+                                            db_patch("inspection_records", rid, {"progress_status": "完了"})
+                                st.success("🎉 すべて承認しました！")
+                                st.session_state.show_bulk_confirm = False
+                                st.session_state.skip_render_ids = [] 
+                                st.rerun()
+                                
+                            if c_no.button("キャンセル", use_container_width=True):
+                                st.session_state.show_bulk_confirm = False
+                                st.rerun()
+                    # =========================================================
 
 if __name__ == "__main__":
     try:
