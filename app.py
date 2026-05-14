@@ -47,9 +47,6 @@ def db_patch(table, record_id, data):
 def db_delete_record(record_id):
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
 
-def db_delete_inspection_data(inspection_id):
-    requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{inspection_id}", headers=HEADERS)
-
 def db_delete_property(prop_id):
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?property_id=eq.{prop_id}", headers=HEADERS)
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?property_id=eq.{prop_id}", headers=HEADERS)
@@ -148,12 +145,12 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 </html>
 """
 
-temp_dir = os.path.join(tempfile.gettempdir(), "fast_camera_final_v6")
+temp_dir = os.path.join(tempfile.gettempdir(), "fast_camera_final_v9")
 os.makedirs(temp_dir, exist_ok=True)
 with open(os.path.join(temp_dir, "index.html"), "w", encoding="utf-8") as f:
     f.write(CLIENT_COMPRESS_HTML)
 
-_client_compress_func = components.declare_component("fast_camera_final_v6", path=temp_dir)
+_client_compress_func = components.declare_component("fast_camera_final_v9", path=temp_dir)
 
 def client_compress_component(key):
     return _client_compress_func(key=key)
@@ -186,7 +183,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 4. 定型文データ（フリー項目・完全完備版マスター）
+# 4. 定型文データ（フリー項目完備・完全版マスター）
 # ==========================================
 ISSUE_TEMPLATES = {
     "配筋検査": {
@@ -317,7 +314,7 @@ ISSUE_TEMPLATES = {
             "UB入口枠": ["UB入口下枠湾曲", "UB入口下枠ビス浮き", "UB入口縦枠ビス浮き", "UB入口枠ビス忘れ", "UB入口枠ビスの頭のつぶれているビスは取替え", "UB入口下枠、枠、巾木下隙間あり（コーキング　白）", "UB入口下枠下隙間あり（コーキング　白）"], 
             "サッシ関係": ["サッシの鍵がかからない。建付け調整。", "サッシ開閉固い。建付け調整", "サッシ固定ビスなし コーキング処理なし", "サッシ固定シールはみ出し", "サッシ枠とクロスの取合いボンドコーク処理", "サッシ枠キズ"], 
             "洗面台・洗濯パン": ["洗面化粧台と壁の隙間コーキング不良", "洗濯機パンと壁の隙間コーキング不良", "洗面化粧台の扉調整", "洗面台鏡のキズ"], 
-            "その他": ["水漏れ原因究明の上、是正", "照明電球種類間違い（洗面室は、昼白色）", "給湯リモコンをスイッチの通りに合わせる", "涙目位置是正 (扉が当たってしまっている)", "洗面台扉段差", "分電盤のカバー取付不良", "換気扇の作動不良、異音", "タオル掛けがたつき"],
+            "その他": ["水漏れ原因究明の上、是正", "照明電球種類間違い（洗面室は、昼白色）", "給湯リモコンをスイッチの通りに合わせる", "涙目位置正 (扉が当たってしまっている)", "洗面台扉段差", "分電盤のカバー取付不良", "換気扇の作動不良、異音", "タオル掛けがたつき"],
             "フリー項目": []
         },
         "UB": {
@@ -367,7 +364,6 @@ ISSUE_TEMPLATES = {
             "その他": ["オーバーハングゆがみ", "ベントキャップキズ、へこみ", "巾木仕上り不良", "ゴミボックス未施工", "オーバーフロー管カバー未設置", "タテトイ未施工", "パニックオープン未施工", "笠木の角が鋭利"],
             "フリー項目": []
         },
-        # 👇 ★要望対応：部位で「フリー項目」を選んだ時の専用ツリー
         "フリー項目": {
             "フリー項目": []
         }
@@ -377,8 +373,8 @@ ISSUE_TEMPLATES = {
 # ==========================================
 # 5. セッション管理 & 選択肢リスト
 # ==========================================
-# 👇 ★末尾に "show_bulk_confirm" を追加します
-for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "skip_render_ids", "show_bulk_confirm"]:
+# ★ 超省データ対策：キャッシュ用変数 "cached_records" と "cached_target_id" を追加
+for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "skip_render_ids", "show_bulk_confirm", "edit_saved_records", "cached_records", "cached_target_id"]:
     if key not in st.session_state:
         st.session_state[key] = None
 
@@ -402,6 +398,7 @@ elif qp.get("mode") == "partner":
     st.session_state.role = "partner"
     st.session_state.active_menu = "是正実施（協力業者）"
 
+# メニュー移動時にキャッシュを完全リセットして再フェッチを促す
 def jump_to_menu(menu_name, prop_id=None):
     st.session_state.active_menu = menu_name
     st.session_state.pre_selected_prop = prop_id
@@ -410,6 +407,10 @@ def jump_to_menu(menu_name, prop_id=None):
     st.session_state.delete_target = None
     st.session_state.issue_saved = False
     st.session_state.skip_render_ids = []
+    st.session_state.show_bulk_confirm = False
+    st.session_state.edit_saved_records = False
+    st.session_state.cached_records = None
+    st.session_state.cached_target_id = None
     st.rerun()
 
 # --- 選択肢の定義 ---
@@ -422,11 +423,8 @@ WORK_OPTS_HAIKIN = ["-- 選択 --", "基礎工事(鉄筋)", "水道", "ガス", 
 WORK_OPTS_KUTAI = ["-- 選択 --", "フレーミング", "電気", "水道", "防水", "その他"]
 WORK_OPTS_CHUKAN = ["-- 選択 --", "造作", "電気", "水道", "外壁", "ガス", "足場", "その他"]
 WORK_OPTS_SHANAI = ["-- 選択 --", "A.リペア", "B.清掃", "C.クロス", "D.造作", "E.水道", "F.電気", "G.キッチン", "H.サッシ", "I.外壁", "J.外構", "K.コーキング", "L.ガス", "板金", "Z.その他"]
-
-# ★ アプローチ②専用：シンプルに統一した共通工種リスト
 WORK_OPTS_KIKAN = ["基礎工事", "フレーミング", "防水", "造作", "内装", "電気", "設備", "ガス", "サッシ", "外壁", "足場", "外構", "その他"]
 
-# ★ アプローチ②専用：独立した検査機関の各種検査を網羅
 INSP_OPTS = [
     "-- 選択 --", 
     "配筋検査", "躯体検査", "断熱検査", "中間検査", 
@@ -469,9 +467,10 @@ def main():
         st.query_params.clear()
         st.rerun()
 
+    # 極小データ通信：写真情報を含まない軽量カウント通信
     confirm_cnt = 0
     if st.session_state.role == "admin":
-        wait_conf_recs = db_get("inspection_records", "progress_status=eq.確認待ち")
+        wait_conf_recs = db_get("inspection_records", "select=record_id&progress_status=eq.確認待ち")
         confirm_cnt = len(wait_conf_recs)
 
     def format_menu(m):
@@ -497,6 +496,10 @@ def main():
         st.session_state.delete_target = None
         st.session_state.issue_saved = False
         st.session_state.skip_render_ids = []
+        st.session_state.show_bulk_confirm = False
+        st.session_state.edit_saved_records = False
+        st.session_state.cached_records = None
+        st.session_state.cached_target_id = None
         st.rerun()
 
     # ----------------------------------------
@@ -573,6 +576,8 @@ def main():
                     st.session_state.current_box = {"id": nid, "prop_id": prop_id, "name": prop_name, "type": ins_type, "inspector": inspector}
                     st.session_state.pre_selected_prop = None
                     st.session_state.issue_saved = False
+                    st.session_state.edit_saved_records = False
+                    st.session_state.cached_records = None
                     st.rerun()
                 else:
                     st.error("物件と検査種類を選んでください")
@@ -587,8 +592,131 @@ def main():
             
             st.subheader(f"{c_name} / {c_type}")
             
-            if not st.session_state.issue_saved:
-                # ★ アプローチ②導入：検査機関専用の極限シンプル画面
+            # =========================================================
+            # セッション中の保存データ確認・修正モード（完全完備版エディター）
+            # =========================================================
+            if st.session_state.get("edit_saved_records"):
+                st.markdown("#### ✏️ 今回保存した指摘データの確認・修正")
+                if st.button("＜ 検査登録に戻る", key="back_top", use_container_width=True):
+                    st.session_state.edit_saved_records = False
+                    st.rerun()
+                st.markdown("---")
+                
+                saved_recs = db_get("inspection_records", f"inspection_id=eq.{c_id}")
+                if not saved_recs:
+                    st.info("まだ保存された指摘データはありません。")
+                
+                if c_type.startswith("【検査機関】"): edit_w_opts = WORK_OPTS_KIKAN
+                elif c_type in SHANAI_KENSA_TYPES: edit_w_opts = WORK_OPTS_SHANAI
+                elif c_type == "躯体検査": edit_w_opts = WORK_OPTS_KUTAI
+                elif c_type == "配筋検査": edit_w_opts = WORK_OPTS_HAIKIN
+                elif c_type == "中間検査": edit_w_opts = WORK_OPTS_CHUKAN
+                else: edit_w_opts = WORK_OPTS_STANDARD
+
+                for r in saved_recs:
+                    rec_id = r.get('record_id')
+                    if not rec_id: continue
+                    
+                    floor = r.get('floor_level', '')
+                    area = r.get('area', '')
+                    detail = r.get('issue_detail', '')
+                    
+                    head_text = "" if c_type.startswith("【検査機関】") or floor == "一式" else f"【{floor} {area}】".strip()
+                    title = f"{head_text} {detail}" if head_text else f"【指摘内容】 {detail}"
+                    
+                    with st.container():
+                        st.markdown('<div class="record-box">', unsafe_allow_html=True)
+                        st.markdown(f"**{title}**")
+                        
+                        if r.get('issue_photo_url'):
+                            st.image(r.get('issue_photo_url'), width=250)
+                            
+                        with st.expander("⚙️ 内容を修正・差し替え・削除"):
+                            new_f = floor
+                            new_a = area
+                            sel_temp = None
+                            
+                            if not c_type.startswith("【検査機関】"):
+                                if c_type in SHANAI_KENSA_TYPES: a_opts = AREA_OPTS_SHANAI
+                                elif c_type in ["躯体検査", "配筋検査", "中間検査"]: a_opts = AREA_OPTS_STANDARD
+                                else: a_opts = AREA_OPTS_STANDARD
+                                
+                                if c_type not in ["配筋検査", "躯体検査", "中間検査"]:
+                                    f_idx = FLOOR_OPTS.index(floor) if floor in FLOOR_OPTS else 0
+                                    new_f = st.radio("階層を変更", FLOOR_OPTS[1:], index=max(0, f_idx-1), horizontal=True, key=f"ef_{rec_id}")
+                                    
+                                    a_idx = a_opts.index(area) if area in a_opts else 0
+                                    new_a = st.radio("部位を変更", a_opts[1:], index=max(0, a_idx-1), horizontal=True, key=f"ea_{rec_id}")
+                                
+                                cat_dict = {}
+                                if c_type in ["配筋検査", "躯体検査", "中間検査"]:
+                                    cat_dict = ISSUE_TEMPLATES.get(c_type, {})
+                                elif c_type in SHANAI_KENSA_TYPES:
+                                    cat_dict = ISSUE_TEMPLATES.get("社内検査(設計)", {}).get(new_a, {})
+                                
+                                if not isinstance(cat_dict, dict): cat_dict = {}
+                                cat_keys = list(cat_dict.keys())
+                                
+                                sel_cat = st.radio("分類を変更（A列）", cat_keys, horizontal=True, key=f"ecat_{rec_id}") if cat_keys else None
+                                
+                                if sel_cat:
+                                    temp_list = cat_dict.get(sel_cat, [])
+                                    sel_temp = st.radio("よくある指摘事項（D列）", temp_list, key=f"etemp_{rec_id}")
+                            
+                            edit_desc_val = detail
+                            if ":" in detail: edit_desc_val = detail.split(":", 1)[1]
+                            elif "：" in detail: edit_desc_val = detail.split("：", 1)[1]
+                            
+                            st.markdown("##### 詳細・場所の追記を変更")
+                            new_detail = st.text_area("詳細情報を変更", value=edit_desc_val, label_visibility="collapsed", key=f"ed_desc_{rec_id}")
+                            
+                            current_w = r.get('work_type', '')
+                            idx_w = edit_w_opts.index(current_w) if current_w in edit_w_opts else 0
+                            new_w = st.selectbox("工種を変更", edit_w_opts, index=idx_w, key=f"ed_work_{rec_id}")
+                            
+                            st.write("📷 写真を差し替える場合のみ撮影/選択してください")
+                            new_photo = client_compress_component(key=f"ed_cam_{rec_id}")
+                            if new_photo and isinstance(new_photo, str) and "base64," in new_photo:
+                                st.image(new_photo, caption="差し替え用プレビュー", width=200)
+                                
+                            c_save, c_del = st.columns(2)
+                            if c_save.button("💾 この内容で上書き", key=f"ed_save_{rec_id}", type="primary"):
+                                final_desc = ""
+                                if sel_temp:
+                                    final_desc = sel_temp
+                                    if new_detail.strip() != "": final_desc += "：" + new_detail.strip()
+                                else:
+                                    final_desc = new_detail.strip()
+                                    if final_desc == "": final_desc = detail 
+                                
+                                up_data = {
+                                    "floor_level": new_f,
+                                    "area": new_a,
+                                    "work_type": new_w, 
+                                    "issue_detail": final_desc
+                                }
+                                if new_photo and "base64," in new_photo:
+                                    up_data["issue_photo_url"] = process_photo(new_photo)
+                                    
+                                db_patch("inspection_records", rec_id, up_data)
+                                st.success("更新しました！")
+                                st.rerun()
+                                
+                            if c_del.button("🗑️ この指摘を削除", key=f"ed_del_{rec_id}"):
+                                db_delete_record(rec_id)
+                                st.success("削除しました。")
+                                st.rerun()
+                        st.markdown('</div>', unsafe_allow_html=True)
+                        
+                st.markdown("---")
+                if st.button("＜ 検査登録に戻る", key="back_bottom", use_container_width=True):
+                    st.session_state.edit_saved_records = False
+                    st.rerun()
+
+            # =========================================================
+            # 通常の入力・登録フェーズ
+            # =========================================================
+            elif not st.session_state.issue_saved:
                 if c_type.startswith("【検査機関】"):
                     f = "一式"
                     a = "全体"
@@ -601,7 +729,6 @@ def main():
                     w = st.radio("工種を選択", WORK_OPTS_KIKAN, horizontal=True, label_visibility="collapsed")
                     
                 else:
-                    # 従来の社内・標準検査画面
                     f = "一式"
                     a = "全体"
                     if c_type in SHANAI_KENSA_TYPES:
@@ -668,20 +795,45 @@ def main():
                 if st.button("終了"):
                     st.session_state.current_box = None
                     st.rerun()
+
+            # =========================================================
+            # 保存完了直後の選択画面
+            # =========================================================
             else:
                 st.success("保存完了") 
-                if st.button("続けて次を登録"):
-                    st.session_state.issue_saved = False; st.rerun()
-                if st.button("検査全体を終了"):
-                    st.session_state.current_box = None; st.session_state.issue_saved = False; st.rerun()
+                if st.button("続けて次を登録", use_container_width=True):
+                    st.session_state.issue_saved = False
+                    st.rerun()
+                
+                if st.button("✏️ 保存データを確認・修正", use_container_width=True):
+                    st.session_state.edit_saved_records = True
+                    st.rerun()
+                    
+                if st.button("検査全体を終了", use_container_width=True):
+                    st.session_state.current_box = None
+                    st.session_state.issue_saved = False
+                    st.session_state.edit_saved_records = False
+                    st.session_state.cached_records = None
+                    st.rerun()
 
     # ----------------------------------------
     # メニュー: 3. 検査内容確認（管理者）
     # ----------------------------------------
     elif st.session_state.active_menu == "検査内容確認（管理者）":
         st.header("検査内容確認（承認）")
-        all_recs = db_get("inspection_records", "progress_status=eq.確認待ち")
-        all_ins = db_get("inspections", "select=*")
+        
+        # 画面キャッシュ機構による省データ化
+        target_dict = st.session_state.get("drill_target")
+        target_id_str = f"{target_dict.get('prop','')}_{target_dict.get('type','')}" if target_dict else None
+        
+        if st.session_state.cached_records is None or st.session_state.cached_target_id != target_id_str:
+            all_recs = db_get("inspection_records", "progress_status=eq.確認待ち")
+            all_ins = db_get("inspections", "select=*")
+            st.session_state.cached_records = {"recs": all_recs, "ins": all_ins}
+            st.session_state.cached_target_id = target_id_str
+        else:
+            all_recs = st.session_state.cached_records["recs"]
+            all_ins = st.session_state.cached_records["ins"]
         
         ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
         tree = {}
@@ -699,7 +851,9 @@ def main():
             with st.expander(p_name):
                 for t_idx, (t_name, count) in enumerate(types.items()):
                     if st.button(f"{t_name} ({count}件)", key=f"f_{p_idx}_{t_idx}"):
-                        st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.rerun()
+                        st.session_state.drill_target = {"prop": p_name, "type": t_name}
+                        st.session_state.cached_records = None # 選択変更時にリフレッシュ
+                        st.rerun()
         
         sel = st.session_state.drill_target
         if not isinstance(sel, dict): sel = {}
@@ -707,16 +861,21 @@ def main():
         
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"):
-                st.session_state.drill_target = None; st.rerun()
+                st.session_state.drill_target = None
+                st.session_state.cached_records = None
+                st.rerun()
             
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
             if t_ids:
-                recs = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})&progress_status=eq.確認待ち")
+                # 対象データのみ抽出
+                recs = [r for r in all_recs if str(r.get('inspection_id')) in t_ids]
                 st.info(f"この検査（{prop_val} / {type_val}）には、現在 **{len(recs)}件** の確認待ちデータがあります。")
                 if st.button("✅ この検査をすべて承認して業者（是正実施）に送る", type="primary"):
                     for r in recs: db_patch("inspection_records", r['record_id'], {"progress_status": "是正待ち"})
                     st.success("一括承認が完了しました！協力業者へ表示されます。")
-                    st.session_state.drill_target = None; st.rerun()
+                    st.session_state.drill_target = None
+                    st.session_state.cached_records = None
+                    st.rerun()
                 st.markdown("---")
                 
                 w_groups = {}
@@ -743,6 +902,8 @@ def main():
     # ----------------------------------------
     elif st.session_state.active_menu == "是正実施（協力業者）":
         st.header("是正実施")
+        
+        # ツリー用極小データ取得
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status")
         all_ins = db_get("inspections", "select=*")
         
@@ -770,6 +931,8 @@ def main():
         if not isinstance(sel, dict): sel = {}
         prop_val = sel.get('prop', ''); type_val = sel.get('type', '')
         
+        target_id_str = f"fix_{prop_val}_{type_val}" if prop_val else None
+        
         if not (prop_val and type_val):
             has_visible_items = False
             for p_idx, (p_name, types) in enumerate(tree.items()):
@@ -782,17 +945,29 @@ def main():
                             badge_text = f"全 {c_data['total']} 件 ･･･ [ ✅ 完了：{c_data['done']}件 ／ ⚠️ 未完了：{c_data['unres']}件 ] ※うち是正報告待ち {c_data['wait_fix']}件"
                             t_cols = st.columns([3, 7])
                             if t_cols[0].button(t_name, key=f"f_{p_idx}_{t_idx}", use_container_width=True):
-                                st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.rerun()
+                                st.session_state.drill_target = {"prop": p_name, "type": t_name}
+                                st.session_state.cached_records = None
+                                st.rerun()
                             t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#555;'>{badge_text}</span></div>", unsafe_allow_html=True)
             if not has_visible_items: st.info("対象の項目はありません。")
         
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"):
-                st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.rerun()
+                st.session_state.drill_target = None
+                st.session_state.skip_render_ids = []
+                st.session_state.cached_records = None
+                st.rerun()
             
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
             if t_ids:
-                recs_all = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})")
+                # ローカルキャッシュで爆速化
+                if st.session_state.cached_records is None or st.session_state.cached_target_id != target_id_str:
+                    recs_all = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})")
+                    st.session_state.cached_records = recs_all
+                    st.session_state.cached_target_id = target_id_str
+                else:
+                    recs_all = st.session_state.cached_records
+                
                 recs = [r for r in recs_all if r.get('progress_status') == '是正待ち']
                 total_cnt = len(recs_all); wait_cnt = len(recs)
                 st.info(f"📊 **【進捗】 指摘総数：{total_cnt}件 ／ 残り（是正報告待ち）：{wait_cnt}件**")
@@ -845,9 +1020,12 @@ def main():
                                         up_data = {"work_type": new_w, "issue_detail": new_detail}
                                         if new_photo and "base64," in new_photo: up_data["issue_photo_url"] = process_photo(new_photo)
                                         db_patch("inspection_records", rec_id, up_data)
+                                        st.session_state.cached_records = None # リフレッシュ
                                         st.success("更新しました！"); st.rerun()
                                     if col_d.button("🗑️ この指摘を削除", key=f"edit_del_{rec_id}"):
-                                        db_delete_record(rec_id); st.rerun()
+                                        db_delete_record(rec_id)
+                                        st.session_state.cached_records = None
+                                        st.rerun()
                                     st.markdown("<br>", unsafe_allow_html=True)
 
                             c1, c2 = st.columns(2)
@@ -862,19 +1040,25 @@ def main():
                                 if up and isinstance(up, str) and "base64," in up:
                                     st.image(up, caption="アップロード画像プレビュー", use_container_width=True)
                                 
-                                # ★ 爆速化処理：報告完了と同時に画面から即時クリア
+                                # キャッシュ消去で通信を極小化
                                 if st.button("✅ 完了報告", key=f"s_{rec_id}"):
                                     if up and "base64," in up: 
                                         db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "fix_photo_url": process_photo(up)})
+                                        # メモリ上から消してDB再取得を防ぐ
+                                        for idx_item, item in enumerate(st.session_state.cached_records):
+                                            if item.get('record_id') == rec_id:
+                                                st.session_state.cached_records[idx_item]['progress_status'] = "是正確認中"
+                                                break
                                         st.session_state.skip_render_ids.append(rec_id); st.rerun()
                                     else: st.error("写真が必要です（準備完了するまでお待ちください）")
                             st.markdown('</div>', unsafe_allow_html=True)
 
-   # ----------------------------------------
+    # ----------------------------------------
     # メニュー: 5. 是正確認 / 6. 完了分一覧
     # ----------------------------------------
     elif st.session_state.active_menu in ["是正確認（管理者）", "完了分一覧（共通）"]:
         status = "是正確認中" if "確認" in st.session_state.active_menu else "完了"
+        
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status")
         all_ins = db_get("inspections", "select=*")
         
@@ -900,6 +1084,8 @@ def main():
         sel = st.session_state.drill_target
         if not isinstance(sel, dict): sel = {}
         prop_val = sel.get('prop', ''); type_val = sel.get('type', '')
+        
+        target_id_str = f"conf_{prop_val}_{type_val}" if prop_val else None
 
         if not (prop_val and type_val):
             st.header(st.session_state.active_menu)
@@ -919,13 +1105,18 @@ def main():
                             badge_text = f"全 {c_data['total']} 件 ･･･ [ ✅ 完了：{c_data['done']}件 ／ ⚠️ 未完了：{c_data['unres']}件 ] ※うち確認待ち {c_data['wait_conf']}件"
                             t_cols = st.columns([3, 7])
                             if t_cols[0].button(t_name, key=f"c_{p_idx}_{t_idx}", use_container_width=True):
-                                st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.rerun()
+                                st.session_state.drill_target = {"prop": p_name, "type": t_name}
+                                st.session_state.cached_records = None
+                                st.rerun()
                             t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#555;'>{badge_text}</span></div>", unsafe_allow_html=True)
             if not has_visible_items: st.info("対象の項目はありません。")
 
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"):
-                st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.rerun()
+                st.session_state.drill_target = None
+                st.session_state.skip_render_ids = []
+                st.session_state.cached_records = None
+                st.rerun()
             
             target_ins = None; t_ids = []
             for i in all_ins:
@@ -936,21 +1127,20 @@ def main():
             ins_date_str = target_ins.get('inspection_date', '-') if target_ins else '-'
             inspector_str = target_ins.get('inspector', '-') if target_ins else '-'
             
-            recs_all = []
             if t_ids:
-                recs_all = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})")
-            
-            report_title = type_val
-            if type_val == "【検査機関】" and recs_all:
-                phase_attr = recs_all[0].get('area', '')
-                if phase_attr and phase_attr != "全体":
-                    report_title = f"【検査機関】{phase_attr}"
-
-            if t_ids:
+                # ローカルキャッシュでデータ転送量を激減
+                if st.session_state.cached_records is None or st.session_state.cached_target_id != target_id_str:
+                    recs_all = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})")
+                    st.session_state.cached_records = recs_all
+                    st.session_state.cached_target_id = target_id_str
+                else:
+                    recs_all = st.session_state.cached_records
+                
                 recs = [r for r in recs_all if r.get('progress_status') == status]
                 total_cnt = len(recs_all)
                 comp_cnt = len([r for r in recs_all if r.get('progress_status') == '完了'])
                 unres_cnt = total_cnt - comp_cnt
+                report_title = type_val
 
                 if status == "完了":
                     if st.session_state.role == "admin":
@@ -964,7 +1154,10 @@ def main():
                                 for iid in t_ids:
                                     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{iid}", headers=HEADERS)
                                     requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{iid}", headers=HEADERS)
-                                st.success("すべてのデータの削除が完了しました！"); st.session_state.drill_target = None; st.rerun()
+                                st.success("すべてのデータの削除が完了しました！")
+                                st.session_state.drill_target = None
+                                st.session_state.cached_records = None
+                                st.rerun()
                             else: st.error("パスワードが違います")
                         st.markdown("<hr class='admin-delete-box'>", unsafe_allow_html=True)
 
@@ -1041,21 +1234,26 @@ def main():
                                 ca, cb = st.columns(2)
                                 if ca.button("✅ 承認（完了へ）", key=f"ok_{rec_id}"): 
                                     db_patch("inspection_records", rec_id, {"progress_status": "完了"})
+                                    # メモリ上キャッシュを書き換えて無駄なダウンロードをゼロ化
+                                    for idx_item, item in enumerate(st.session_state.cached_records):
+                                        if item.get('record_id') == rec_id:
+                                            st.session_state.cached_records[idx_item]['progress_status'] = "完了"
+                                            break
                                     st.session_state.skip_render_ids.append(rec_id); st.rerun()
                                 
                                 reason = cb.text_input("否認理由を入力", key=f"re_{rec_id}", label_visibility="collapsed", placeholder="否認理由があれば入力")
                                 if cb.button("❌ 否認（差し戻し）", key=f"ng_{rec_id}"): 
                                     db_patch("inspection_records", rec_id, {"progress_status": "是正待ち", "reject_reason": reason})
+                                    for idx_item, item in enumerate(st.session_state.cached_records):
+                                        if item.get('record_id') == rec_id:
+                                            st.session_state.cached_records[idx_item]['progress_status'] = "是正待ち"
+                                            break
                                     st.session_state.skip_render_ids.append(rec_id); st.rerun()
                                 st.markdown("---") 
                     
-                    # =========================================================
-                    # ★ 修正完備：最終データの下に配置する「一括承認ボタン」
-                    # =========================================================
                     if recs:
                         st.markdown("<br><br>", unsafe_allow_html=True)
                         if not st.session_state.get("show_bulk_confirm"):
-                            # 👇 type="primary" を追加して画面幅いっぱいのメインカラーで強くアピール！
                             if st.button("🚀 表示中の全項目を一括で承認する", type="primary", use_container_width=True):
                                 st.session_state.show_bulk_confirm = True
                                 st.rerun()
@@ -1068,6 +1266,10 @@ def main():
                                         rid = r.get('record_id')
                                         if rid:
                                             db_patch("inspection_records", rid, {"progress_status": "完了"})
+                                            # キャッシュも全完了に更新
+                                            for idx_item, item in enumerate(st.session_state.cached_records):
+                                                if item.get('record_id') == rid:
+                                                    st.session_state.cached_records[idx_item]['progress_status'] = "完了"
                                 st.success("🎉 すべて承認しました！")
                                 st.session_state.show_bulk_confirm = False
                                 st.session_state.skip_render_ids = [] 
@@ -1076,7 +1278,6 @@ def main():
                             if c_no.button("キャンセル", use_container_width=True):
                                 st.session_state.show_bulk_confirm = False
                                 st.rerun()
-                    # =========================================================
 
 if __name__ == "__main__":
     try:
