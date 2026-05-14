@@ -1055,7 +1055,8 @@ def main():
                     if recs:
                         st.markdown("<br><br>", unsafe_allow_html=True)
                         if not st.session_state.get("show_bulk_confirm"):
-                            if st.button("📋 表示中の全項目を一括で承認する", use_container_width=True):
+                            # 👇 type="primary" を追加して画面幅いっぱいのメインカラーで強くアピール！
+                            if st.button("🚀 表示中の全項目を一括で承認する", type="primary", use_container_width=True):
                                 st.session_state.show_bulk_confirm = True
                                 st.rerun()
                         else:
