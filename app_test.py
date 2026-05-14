@@ -51,9 +51,6 @@ def db_delete_property(prop_id):
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?property_id=eq.{prop_id}", headers=HEADERS)
     requests.delete(f"{SUPABASE_URL}/rest/v1/properties?property_id=eq.{prop_id}", headers=HEADERS)
 
-# =========================================================
-# ★ 究極のインフラ防衛線：Storageバケットへの直接送信エンジン
-# =========================================================
 def upload_to_storage(base64_str):
     """Base64画像を受け取り、Supabase Storageへ保存してパブリックURLを返す"""
     if not base64_str or not isinstance(base64_str, str):
@@ -82,7 +79,7 @@ def upload_to_storage(base64_str):
         return base64_str
 
 # ==========================================
-# 📱 2. スマホ内・瞬間圧縮コンポーネント（長辺600px極小化）
+# 📱 2. スマホ内・瞬間圧縮コンポーネント
 # ==========================================
 CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 <html lang="ja">
@@ -97,15 +94,13 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
             background-color: #FF4B4B; color: white; border-radius: 8px;
             font-size: 16px; font-weight: bold; text-align: center; cursor: pointer; 
             box-sizing: border-box; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            transition: background-color 0.3s ease, transform 0.1s ease; 
         }
-        .upload-btn:active { transform: translateY(2px); box-shadow: 0 2px 3px rgba(0,0,0,0.1); }
         input[type="file"] { display: none; }
     </style>
 </head>
 <body>
     <label class="upload-btn" id="upload-label">
-        <i class="fa-solid fa-camera" id="btn-icon"></i> <span id="btn-text">現場で撮影 ／ アルバムから選択</span>
+        <i class="fa-solid fa-camera" id="btn-icon"></i> <span id="btn-text">現場写真を撮影 ／ 選択</span>
         <input type="file" accept="image/*" id="file-input">
     </label>
     <script>
@@ -142,11 +137,11 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
                     canvas.width = width; canvas.height = height;
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, width, height);
-                    const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.4);
+                    const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.5);
 
                     uploadLabel.style.backgroundColor = '#2ecc71';
                     btnIcon.className = 'fa-solid fa-check';
-                    btnText.innerHTML = '&nbsp;写真セット完了';
+                    btnText.innerHTML = '&nbsp;セット完了';
                     sendToStreamlit(compressedDataUrl);
                 };
                 img.src = event.target.result;
@@ -158,12 +153,12 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 </html>
 """
 
-temp_dir = os.path.join(tempfile.gettempdir(), "fast_camera_final_v12")
+temp_dir = os.path.join(tempfile.gettempdir(), "fast_camera_final_v15")
 os.makedirs(temp_dir, exist_ok=True)
 with open(os.path.join(temp_dir, "index.html"), "w", encoding="utf-8") as f:
     f.write(CLIENT_COMPRESS_HTML)
 
-_client_compress_func = components.declare_component("fast_camera_final_v12", path=temp_dir)
+_client_compress_func = components.declare_component("fast_camera_final_v15", path=temp_dir)
 
 def client_compress_component(key):
     return _client_compress_func(key=key)
@@ -386,7 +381,7 @@ ISSUE_TEMPLATES = {
 # ==========================================
 # 5. セッション管理 & 選択肢リスト
 # ==========================================
-for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "skip_render_ids", "show_bulk_confirm", "edit_saved_records", "cached_records", "cached_target_id"]:
+for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "skip_render_ids", "show_bulk_confirm", "edit_saved_records", "cached_records", "cached_target_id", "temp_photo"]:
     if key not in st.session_state:
         st.session_state[key] = None
 
@@ -415,6 +410,7 @@ def jump_to_menu(menu_name, prop_id=None):
     st.session_state.edit_saved_records = False
     st.session_state.cached_records = None
     st.session_state.cached_target_id = None
+    st.session_state.temp_photo = None
     st.rerun()
 
 # --- 選択肢の定義 ---
@@ -522,7 +518,7 @@ def main():
                 st.markdown("---")
 
     # ----------------------------------------
-    # メニュー: 2. 検査実施
+    # メニュー: 2. 検査実施 (同期ズレ解消ロジック完備)
     # ----------------------------------------
     elif st.session_state.active_menu == "検査実施（管理者）":
         if not st.session_state.current_box:
@@ -543,7 +539,7 @@ def main():
                     nid = str(uuid.uuid4())
                     db_post("inspections", {"inspection_id": nid, "property_id": prop_id, "property_name": prop_name, "inspection_type": ins_type, "inspection_date": str(ins_date), "inspector": inspector})
                     st.session_state.current_box = {"id": nid, "prop_id": prop_id, "name": prop_name, "type": ins_type, "inspector": inspector}
-                    st.session_state.pre_selected_prop = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.rerun()
+                    st.session_state.pre_selected_prop = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None; st.rerun()
                 else: st.error("物件と検査種類を選んでください")
         else:
             cb = st.session_state.current_box
@@ -606,7 +602,6 @@ def main():
                                 if final_desc == "": final_desc = detail 
                                 up_data = {"floor_level": new_f, "area": new_a, "work_type": new_w, "issue_detail": final_desc}
                                 
-                                # ★ 修正時もStorageへシームレスにアップロード保存
                                 if new_photo and "base64," in new_photo: 
                                     up_data["issue_photo_url"] = upload_to_storage(new_photo)
                                     
@@ -645,32 +640,37 @@ def main():
                     w = st.radio("工種を選択", work_opts[1:], horizontal=True)
                 
                 st.markdown("##### 現場写真の追加")
-                photo = client_compress_component(key="insp_cam")
-                if photo and isinstance(photo, str) and "base64," in photo: st.image(photo, use_container_width=True)
+                # ★ カメラコンポーネントからのデータを確実にセッションに退避する同期ロジック
+                photo_input = client_compress_component(key="insp_cam")
+                if photo_input:
+                    st.session_state.temp_photo = photo_input
+
+                if st.session_state.temp_photo and isinstance(st.session_state.temp_photo, str) and "base64," in st.session_state.temp_photo:
+                    st.image(st.session_state.temp_photo, use_container_width=True, caption="セット完了プレビュー")
 
                 if st.button("この内容で保存"):
                     final_desc = (sel_temp + ("：" + desc.strip() if desc.strip() != "" else "")) if sel_temp else desc.strip()
-                    if w and final_desc != "" and photo is not None:
+                    # 判定にはコンポーネントの直接の戻り値ではなく、退避済みのセッションデータを使用
+                    active_photo = st.session_state.temp_photo
+                    if w and final_desc != "" and active_photo is not None:
                         initial_status = "確認待ち" if c_inspector == "工事監理チーム" else "是正待ち"
-                        
-                        # ★ 新規登録の画像をStorageへダイレクト送信しURL化
-                        saved_photo_url = upload_to_storage(photo)
+                        saved_photo_url = upload_to_storage(active_photo)
                         
                         db_post("inspection_records", {"record_id": str(uuid.uuid4()), "inspection_id": c_id, "property_id": c_prop_id, "floor_level": f, "area": a, "work_type": w, "issue_detail": final_desc, "issue_photo_url": saved_photo_url, "progress_status": initial_status})
-                        st.session_state.issue_saved = True; st.rerun()
-                    else: st.error("工種・内容・写真はすべて必須です（写真がセットされるまでお待ちください）")
-                if st.button("終了"): st.session_state.current_box = None; st.rerun()
+                        st.session_state.issue_saved = True; st.session_state.temp_photo = None; st.rerun()
+                    else: st.error("工種・内容・写真はすべて必須です（写真が『セット完了』になるまでお待ちください）")
+                if st.button("終了"): st.session_state.current_box = None; st.session_state.temp_photo = None; st.rerun()
             else:
                 st.success("保存完了") 
-                if st.button("続けて次を登録", use_container_width=True): st.session_state.issue_saved = False; st.rerun()
+                if st.button("続けて次を登録", use_container_width=True): st.session_state.issue_saved = False; st.session_state.temp_photo = None; st.rerun()
                 if st.button("✏️ 保存データを確認・修正", use_container_width=True): st.session_state.edit_saved_records = True; st.rerun()
-                if st.button("検査全体を終了", use_container_width=True): st.session_state.current_box = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.rerun()
+                if st.button("検査全体を終了", use_container_width=True): st.session_state.current_box = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None; st.rerun()
 
     # ----------------------------------------
-    # メニュー: 3. 検査内容確認（管理者）
+    # メニュー: 3. 検査内容確認（管理者専用・自由編集機能搭載）
     # ----------------------------------------
     elif st.session_state.active_menu == "検査内容確認（管理者）":
-        st.header("検査内容確認（承認）")
+        st.header("検査内容確認 ＆ 最終修正")
         
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status&progress_status=eq.確認待ち")
         all_ins = db_get("inspections", "select=*")
@@ -715,6 +715,8 @@ def main():
                     st.success("一括承認が完了しました！協力業者へ表示されます。"); st.session_state.drill_target = None; st.session_state.cached_records = None; st.rerun()
                 st.markdown("---")
                 
+                edit_w_opts = WORK_OPTS_KIKAN if type_val.startswith("【検査機関】") else WORK_OPTS_SHANAI if type_val in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if type_val == "躯体検査" else WORK_OPTS_HAIKIN if type_val == "配筋検査" else WORK_OPTS_CHUKAN if type_val == "中間検査" else WORK_OPTS_STANDARD
+                
                 w_groups = {}
                 for r in recs:
                     if not isinstance(r, dict): continue
@@ -725,16 +727,41 @@ def main():
                 for w_name, w_recs in w_groups.items():
                     st.subheader(f"■ 工種: {w_name}")
                     for r in w_recs:
+                        rec_id = r.get('record_id')
+                        if not rec_id: continue
                         floor = r.get('floor_level', ''); area = r.get('area', ''); detail = r.get('issue_detail', '')
                         head_text = "" if type_val.startswith("【検査機関】") or floor == "一式" else f"【{floor} {area}】".strip()
                         title = f"{head_text} {detail}" if head_text else f"【指摘内容】 {detail}"
+                        
                         st.markdown('<div class="record-box">', unsafe_allow_html=True)
                         st.markdown(f"**{title}**")
                         if r.get('issue_photo_url'): st.image(r.get('issue_photo_url'), width=300)
+                        
+                        # --- ★ 管理者による直前修正機能 ---
+                        with st.expander("✏️ 指摘内容・写真を直前修正する"):
+                            new_f = st.selectbox("階層", FLOOR_OPTS[1:], index=FLOOR_OPTS[1:].index(floor) if floor in FLOOR_OPTS else 0, key=f"vf_{rec_id}")
+                            new_a = st.selectbox("部位", AREA_OPTS_STANDARD[1:], index=AREA_OPTS_STANDARD[1:].index(area) if area in AREA_OPTS_STANDARD else 0, key=f"va_{rec_id}")
+                            new_d = st.text_area("指摘詳細を変更", value=detail, key=f"vd_{rec_id}")
+                            idx_w = edit_w_opts.index(r.get('work_type', '')) if r.get('work_type', '') in edit_w_opts else 0
+                            new_w = st.selectbox("工種を変更", edit_w_opts, index=idx_w, key=f"vw_{rec_id}")
+                            st.write("📷 写真を差し替える場合のみ撮影/選択してください")
+                            new_p = client_compress_component(key=f"vp_{rec_id}")
+                            if new_p and isinstance(new_p, str) and "base64," in new_p: st.image(new_p, caption="差し替えプレビュー", width=200)
+                            
+                            if st.button("💾 この内容で修正保存", key=f"vsave_{rec_id}"):
+                                up_data = {"floor_level": new_f, "area": new_a, "issue_detail": new_d.strip(), "work_type": new_w}
+                                if new_p and "base64," in new_p: up_data["issue_photo_url"] = upload_to_storage(new_p)
+                                db_patch("inspection_records", rec_id, up_data); st.session_state.cached_records = None; st.success("修正を反映しました"); st.rerun()
+
+                        c1, c2 = st.columns(2)
+                        if c1.button("✅ 個別承認（業者へ送る）", key=f"vok_{rec_id}", type="primary"):
+                            db_patch("inspection_records", rec_id, {"progress_status": "是正待ち"}); st.session_state.cached_records = None; st.rerun()
+                        if c2.button("🗑️ 指摘を削除", key=f"vdel_{rec_id}"):
+                            db_delete_record(rec_id); st.session_state.cached_records = None; st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
 
     # ----------------------------------------
-    # メニュー: 4. 是正実施
+    # メニュー: 4. 是正実施（完全ロジック復元）
     # ----------------------------------------
     elif st.session_state.active_menu == "是正実施（協力業者）":
         st.header("是正実施")
@@ -834,11 +861,7 @@ def main():
                                     col_u, col_d = st.columns(2)
                                     if col_u.button("💾 更新を保存", key=f"edit_save_{rec_id}"):
                                         up_data = {"work_type": new_w, "issue_detail": new_detail}
-                                        
-                                        # ★ 管理者編集時も確実にStorage保存へ転送
-                                        if new_photo and "base64," in new_photo: 
-                                            up_data["issue_photo_url"] = upload_to_storage(new_photo)
-                                            
+                                        if new_photo and "base64," in new_photo: up_data["issue_photo_url"] = upload_to_storage(new_photo)
                                         db_patch("inspection_records", rec_id, up_data); st.session_state.cached_records = None; st.success("更新しました！"); st.rerun()
                                     if col_d.button("🗑️ この指摘を削除", key=f"edit_del_{rec_id}"): db_delete_record(rec_id); st.session_state.cached_records = None; st.rerun()
                                     st.markdown("<br>", unsafe_allow_html=True)
@@ -856,9 +879,7 @@ def main():
                                 
                                 if st.button("✅ 完了報告", key=f"s_{rec_id}"):
                                     if up and "base64," in up: 
-                                        # ★ 是正報告の写真もStorageへアップロードしURL文字列保存
                                         fix_url = upload_to_storage(up)
-                                        
                                         db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "fix_photo_url": fix_url})
                                         st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                         st.session_state.skip_render_ids.append(rec_id); st.rerun()
@@ -866,7 +887,7 @@ def main():
                             st.markdown('</div>', unsafe_allow_html=True)
 
     # ----------------------------------------
-    # メニュー: 5. 是正確認 / 6. 完了分一覧
+    # メニュー: 5. 是正確認 / 6. 完了分一覧（完全ロジック復元）
     # ----------------------------------------
     elif st.session_state.active_menu in ["是正確認（管理者）", "完了分一覧（共通）"]:
         status = "是正確認中" if "確認" in st.session_state.active_menu else "完了"
