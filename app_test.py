@@ -148,12 +148,12 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 </html>
 """
 
-temp_dir = os.path.join(tempfile.gettempdir(), "fast_camera_final_v7")
+temp_dir = os.path.join(tempfile.gettempdir(), "fast_camera_final_v8")
 os.makedirs(temp_dir, exist_ok=True)
 with open(os.path.join(temp_dir, "index.html"), "w", encoding="utf-8") as f:
     f.write(CLIENT_COMPRESS_HTML)
 
-_client_compress_func = components.declare_component("fast_camera_final_v7", path=temp_dir)
+_client_compress_func = components.declare_component("fast_camera_final_v8", path=temp_dir)
 
 def client_compress_component(key):
     return _client_compress_func(key=key)
@@ -360,7 +360,6 @@ ISSUE_TEMPLATES = {
 # ==========================================
 # 5. セッション管理 & 選択肢リスト
 # ==========================================
-# ★ 新設フラグ "edit_saved_records" を追加し、セッション中の編集モードを管理します
 for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "skip_render_ids", "show_bulk_confirm", "edit_saved_records"]:
     if key not in st.session_state:
         st.session_state[key] = None
@@ -393,6 +392,7 @@ def jump_to_menu(menu_name, prop_id=None):
     st.session_state.delete_target = None
     st.session_state.issue_saved = False
     st.session_state.skip_render_ids = []
+    st.session_state.show_bulk_confirm = False
     st.session_state.edit_saved_records = False
     st.rerun()
 
@@ -410,7 +410,7 @@ WORK_OPTS_KIKAN = ["基礎工事", "フレーミング", "防水", "造作", "�
 
 INSP_OPTS = [
     "-- 選択 --", 
-    "配筋検査", "躯体検査", "断熱検査", "中間検査", 
+    "配筋検査", "躯体検査", "断判検査", "中間検査", 
     "社内検査(設計)", "社内検査(建設)", "社内検査(マーケ)", "社内検査(不動産)",
     "【検査機関】配筋検査", "【検査機関】躯体検査", "【検査機関】断熱検査", "【検査機関】中間検査", "【検査機関】完了検査"
 ]
@@ -478,6 +478,7 @@ def main():
         st.session_state.delete_target = None
         st.session_state.issue_saved = False
         st.session_state.skip_render_ids = []
+        st.session_state.show_bulk_confirm = False
         st.session_state.edit_saved_records = False
         st.rerun()
 
@@ -571,7 +572,7 @@ def main():
             st.subheader(f"{c_name} / {c_type}")
             
             # =========================================================
-            # ★ 新設機能：セッション中の保存データ確認・修正画面
+            # ★ 完備版：セッション中の保存データ確認・修正モード
             # =========================================================
             if st.session_state.get("edit_saved_records"):
                 st.markdown("#### ✏️ 今回保存した指摘データの確認・修正")
@@ -580,12 +581,10 @@ def main():
                     st.rerun()
                 st.markdown("---")
                 
-                # 今回の検査セッションIDに紐づく全レコードを取得
                 saved_recs = db_get("inspection_records", f"inspection_id=eq.{c_id}")
                 if not saved_recs:
                     st.info("まだ保存された指摘データはありません。")
                 
-                # 正しい工種リストを展開
                 if c_type.startswith("【検査機関】"): edit_w_opts = WORK_OPTS_KIKAN
                 elif c_type in SHANAI_KENSA_TYPES: edit_w_opts = WORK_OPTS_SHANAI
                 elif c_type == "躯体検査": edit_w_opts = WORK_OPTS_KUTAI
@@ -608,12 +607,57 @@ def main():
                         st.markdown('<div class="record-box">', unsafe_allow_html=True)
                         st.markdown(f"**{title}**")
                         
-                        # Before画像の表示
                         if r.get('issue_photo_url'):
                             st.image(r.get('issue_photo_url'), width=250)
                             
                         with st.expander("⚙️ 内容を修正・差し替え・削除"):
-                            new_detail = st.text_area("指摘内容を変更", value=detail, key=f"ed_desc_{rec_id}")
+                            new_f = floor
+                            new_a = area
+                            sel_temp = None
+                            
+                            # 登録時と全く同じ階層・部位・辞書連携のツリーを展開
+                            if not c_type.startswith("【検査機関】"):
+                                if c_type in SHANAI_KENSA_TYPES:
+                                    a_opts = AREA_OPTS_SHANAI
+                                elif c_type == "躯体検査":
+                                    a_opts = AREA_OPTS_STANDARD
+                                elif c_type == "配筋検査":
+                                    a_opts = AREA_OPTS_STANDARD
+                                elif c_type == "中間検査":
+                                    a_opts = AREA_OPTS_STANDARD
+                                else:
+                                    a_opts = AREA_OPTS_STANDARD
+                                
+                                if c_type not in ["配筋検査", "躯体検査", "中間検査"]:
+                                    f_idx = FLOOR_OPTS.index(floor) if floor in FLOOR_OPTS else 0
+                                    new_f = st.radio("階層を変更", FLOOR_OPTS[1:], index=max(0, f_idx-1), horizontal=True, key=f"ef_{rec_id}")
+                                    
+                                    a_idx = a_opts.index(area) if area in a_opts else 0
+                                    new_a = st.radio("部位を変更", a_opts[1:], index=max(0, a_idx-1), horizontal=True, key=f"ea_{rec_id}")
+                                
+                                cat_dict = {}
+                                if c_type in ["配筋検査", "躯体検査", "中間検査"]:
+                                    cat_dict = ISSUE_TEMPLATES.get(c_type, {})
+                                elif c_type in SHANAI_KENSA_TYPES:
+                                    cat_dict = ISSUE_TEMPLATES.get("社内検査(設計)", {}).get(new_a, {})
+                                
+                                if not isinstance(cat_dict, dict): cat_dict = {}
+                                cat_keys = list(cat_dict.keys())
+                                
+                                sel_cat = st.radio("分類を変更（A列）", cat_keys, horizontal=True, key=f"ecat_{rec_id}") if cat_keys else None
+                                
+                                if sel_cat:
+                                    temp_list = cat_dict.get(sel_cat, [])
+                                    sel_temp = st.radio("よくある指摘事項（D列）", temp_list, key=f"etemp_{rec_id}")
+                            
+                            # 追記テキストボックスの設定
+                            edit_desc_val = detail
+                            if ":" in detail: edit_desc_val = detail.split(":", 1)[1]
+                            elif "：" in detail: edit_desc_val = detail.split("：", 1)[1]
+                            
+                            st.markdown("##### 詳細・場所の追記を変更")
+                            new_detail = st.text_area("詳細情報を変更", value=edit_desc_val, label_visibility="collapsed", key=f"ed_desc_{rec_id}")
+                            
                             current_w = r.get('work_type', '')
                             idx_w = edit_w_opts.index(current_w) if current_w in edit_w_opts else 0
                             new_w = st.selectbox("工種を変更", edit_w_opts, index=idx_w, key=f"ed_work_{rec_id}")
@@ -625,9 +669,23 @@ def main():
                                 
                             c_save, c_del = st.columns(2)
                             if c_save.button("💾 この内容で上書き", key=f"ed_save_{rec_id}", type="primary"):
-                                up_data = {"work_type": new_w, "issue_detail": new_detail}
+                                final_desc = ""
+                                if sel_temp:
+                                    final_desc = sel_temp
+                                    if new_detail.strip() != "": final_desc += "：" + new_detail.strip()
+                                else:
+                                    final_desc = new_detail.strip()
+                                    if final_desc == "": final_desc = detail 
+                                
+                                up_data = {
+                                    "floor_level": new_f,
+                                    "area": new_a,
+                                    "work_type": new_w, 
+                                    "issue_detail": final_desc
+                                }
                                 if new_photo and "base64," in new_photo:
                                     up_data["issue_photo_url"] = process_photo(new_photo)
+                                    
                                 db_patch("inspection_records", rec_id, up_data)
                                 st.success("更新しました！")
                                 st.rerun()
@@ -727,7 +785,7 @@ def main():
                     st.rerun()
 
             # =========================================================
-            # ★ 保存完了直後の選択画面（確認・修正ボタン完備）
+            # 保存完了直後の選択画面
             # =========================================================
             else:
                 st.success("保存完了") 
@@ -735,7 +793,6 @@ def main():
                     st.session_state.issue_saved = False
                     st.rerun()
                 
-                # 👇 新設：保存データを検査終了前にその場確認・修正モードへ移行
                 if st.button("✏️ 保存データを確認・修正", use_container_width=True):
                     st.session_state.edit_saved_records = True
                     st.rerun()
