@@ -7,6 +7,7 @@ import base64
 import io
 import os
 import tempfile
+import threading
 
 # ==========================================
 # 1. Supabase 接続設定
@@ -29,22 +30,14 @@ def db_get(table, params=""):
         res = requests.get(url, headers=HEADERS)
         if res.status_code == 200:
             data = res.json()
-            if isinstance(data, list):
-                return [d for d in data if isinstance(d, dict)]
-            elif isinstance(data, dict):
-                return [data]
+            if isinstance(data, list): return [d for d in data if isinstance(d, dict)]
+            elif isinstance(data, dict): return [data]
         return []
-    except Exception:
-        return []
+    except Exception: return []
 
-def db_post(table, data):
-    requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, json=data)
-
-def db_patch(table, record_id, data):
-    requests.patch(f"{SUPABASE_URL}/rest/v1/{table}?record_id=eq.{record_id}", headers=HEADERS, json=data)
-
-def db_delete_record(record_id):
-    requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
+def db_post(table, data): requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, json=data)
+def db_patch(table, record_id, data): requests.patch(f"{SUPABASE_URL}/rest/v1/{table}?record_id=eq.{record_id}", headers=HEADERS, json=data)
+def db_delete_record(record_id): requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
 
 def db_delete_property(prop_id):
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?property_id=eq.{prop_id}", headers=HEADERS)
@@ -52,27 +45,33 @@ def db_delete_property(prop_id):
     requests.delete(f"{SUPABASE_URL}/rest/v1/properties?property_id=eq.{prop_id}", headers=HEADERS)
 
 def upload_to_storage(base64_str):
-    if not base64_str or not isinstance(base64_str, str):
-        return None
-    if base64_str.startswith("http://") or base64_str.startswith("https://"):
-        return base64_str
+    if not base64_str or not isinstance(base64_str, str): return None
+    if base64_str.startswith("http://") or base64_str.startswith("https://"): return base64_str
     try:
         encoded = base64_str.split(",", 1)[1] if "," in base64_str else base64_str
         file_data = base64.b64decode(encoded)
         filename = f"{uuid.uuid4()}.jpg"
         url = f"{SUPABASE_URL}/storage/v1/object/photos/{filename}"
-        headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
-            "Content-Type": "image/jpeg",
-        }
-        res = requests.post(url, headers=headers, data=file_data)
-        if res.status_code in [200, 201]:
-            return f"{SUPABASE_URL}/storage/v1/object/public/photos/{filename}"
-        else:
-            return base64_str
-    except Exception:
-        return base64_str
+        res = requests.post(url, headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "image/jpeg"}, data=file_data)
+        if res.status_code in [200, 201]: return f"{SUPABASE_URL}/storage/v1/object/public/photos/{filename}"
+        else: return base64_str
+    except Exception: return base64_str
+
+# 🚀 ゼロ・ラグ保存用：バックグラウンド処理（裏側送信）関数
+def bg_save_inspection(photo_b64, record_data):
+    saved_url = upload_to_storage(photo_b64)
+    if saved_url: record_data["issue_photo_url"] = saved_url
+    db_post("inspection_records", record_data)
+
+def bg_save_correction(rec_id, fix_photo_b64):
+    fix_url = upload_to_storage(fix_photo_b64)
+    db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "fix_photo_url": fix_url})
+
+def bg_patch_record(rec_id, photo_b64, up_data):
+    if photo_b64:
+        url = upload_to_storage(photo_b64)
+        if url: up_data["issue_photo_url"] = url
+    db_patch("inspection_records", rec_id, up_data)
 
 # ==========================================
 # 📱 2. スマート電子黒板カメラ（V8ベース）
@@ -619,7 +618,6 @@ def main():
                             final_desc = (sel_temp + ("：" + new_detail.strip() if new_detail.strip() != "" else "")) if sel_temp else new_detail.strip()
                             if final_desc == "": final_desc = detail 
                             
-                            # 黒板合成用のパラメータ
                             loc_parts = [str(new_f), str(new_a)]
                             if not c_type.startswith("【検査機関】") and sel_cat: loc_parts.append(str(sel_cat))
                             loc_str = " ".join(loc_parts).strip()
@@ -630,15 +628,22 @@ def main():
                                 propName=c_name, inspType=c_type, inspDate=datetime.date.today().strftime("%Y/%m/%d"), 
                                 locationText=loc_str, issueDetail=disp_desc, mode="insp", key=f"ed_cam_{rec_id}"
                             )
-                            if new_photo: st.image(new_photo, caption="差し替え用プレビュー", width=200)
-                                
+                            
+                            # 🚀 ボタンを写真プレビューの上に配置（スクロール排除）
                             c_save, c_del = st.columns(2)
                             if c_save.button("💾 この内容で上書き", key=f"ed_save_{rec_id}", type="primary"):
                                 up_data = {"floor_level": new_f, "area": new_a, "work_type": new_w, "issue_detail": final_desc}
-                                if new_photo: up_data["issue_photo_url"] = upload_to_storage(new_photo)
-                                db_patch("inspection_records", rec_id, up_data); st.success("更新しました！"); st.rerun()
+                                st.toast("🚀 保存処理を裏側で開始しました！", icon="✅")
+                                threading.Thread(target=bg_patch_record, args=(rec_id, new_photo, up_data)).start()
+                                st.rerun()
                                 
-                            if c_del.button("🗑️ この指摘を削除", key=f"ed_del_{rec_id}"): db_delete_record(rec_id); st.success("削除しました。"); st.rerun()
+                            if c_del.button("🗑️ この指摘を削除", key=f"ed_del_{rec_id}"): 
+                                db_delete_record(rec_id); st.rerun()
+                                
+                            if new_photo: 
+                                st.markdown("<p style='font-size:12px; color:gray; margin-top:10px;'>▼ 差し替え用プレビュー (縮小表示)</p>", unsafe_allow_html=True)
+                                st.image(new_photo, width=250)
+                                
                         st.markdown('</div>', unsafe_allow_html=True)
                         
                 st.markdown("---")
@@ -672,7 +677,6 @@ def main():
                 
                 final_desc = (sel_temp + ("：" + desc.strip() if desc.strip() != "" else "")) if sel_temp else desc.strip()
                 
-                # 黒板合成用のパラメータ準備
                 loc_parts = [str(f), str(a)]
                 if not c_type.startswith("【検査機関】") and sel_cat: loc_parts.append(str(sel_cat))
                 loc_str = " ".join(loc_parts).strip()
@@ -686,21 +690,36 @@ def main():
                 if photo_input:
                     st.session_state.temp_photo = photo_input
 
-                if st.session_state.temp_photo:
-                    st.image(st.session_state.temp_photo, use_container_width=True, caption="セット完了プレビュー")
-
-                if st.button("この内容で保存", type="primary"):
+                # 🚀 ボタンを写真プレビューの上に配置（スクロール排除）
+                if st.button("💾 この内容で保存", type="primary"):
                     active_photo = st.session_state.temp_photo
                     if w and final_desc != "" and active_photo is not None:
                         initial_status = "確認待ち" if c_inspector == "工事監理チーム" else "是正待ち"
-                        saved_photo_url = upload_to_storage(active_photo)
+                        record_data = {
+                            "record_id": str(uuid.uuid4()), "inspection_id": c_id, "property_id": c_prop_id, 
+                            "floor_level": f, "area": a, "work_type": w, "issue_detail": final_desc, 
+                            "progress_status": initial_status
+                        }
                         
-                        db_post("inspection_records", {"record_id": str(uuid.uuid4()), "inspection_id": c_id, "property_id": c_prop_id, "floor_level": f, "area": a, "work_type": w, "issue_detail": final_desc, "issue_photo_url": saved_photo_url, "progress_status": initial_status})
-                        st.session_state.issue_saved = True; st.session_state.temp_photo = None; st.rerun()
-                    else: st.error("工種・内容・写真はすべて必須です（写真が『セット完了』になるまでお待ちください）")
+                        # 🚀 ゼロ・ラグ保存（バックグラウンド送信）
+                        st.toast("🚀 保存処理を裏側で開始しました！", icon="✅")
+                        threading.Thread(target=bg_save_inspection, args=(active_photo, record_data)).start()
+                        
+                        st.session_state.issue_saved = True
+                        st.session_state.temp_photo = None
+                        st.rerun()
+                    else: 
+                        st.error("工種・内容・写真はすべて必須です（写真が『セット完了』になるまでお待ちください）")
+                
                 if st.button("終了"): st.session_state.current_box = None; st.session_state.temp_photo = None; st.rerun()
+
+                # 🚀 プレビューは極小化して一番下に控えめに表示
+                if st.session_state.temp_photo:
+                    st.markdown("<p style='font-size:12px; color:gray; margin-top:10px;'>▼ プレビュー (1/4縮小表示)</p>", unsafe_allow_html=True)
+                    st.image(st.session_state.temp_photo, width=250)
+
             else:
-                st.success("保存完了") 
+                st.success("🎉 保存完了（次の入力が可能です）") 
                 if st.button("続けて次を登録", use_container_width=True): st.session_state.issue_saved = False; st.session_state.temp_photo = None; st.rerun()
                 if st.button("✏️ 保存データを確認・修正", use_container_width=True): st.session_state.edit_saved_records = True; st.rerun()
                 if st.button("検査全体を終了", use_container_width=True): st.session_state.current_box = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None; st.rerun()
@@ -775,7 +794,9 @@ def main():
                         
                         st.markdown('<div class="record-box">', unsafe_allow_html=True)
                         st.markdown(f"**{title}**")
-                        if r.get('issue_photo_url'): st.image(r.get('issue_photo_url'), width=300)
+                        
+                        # 管理者確認画面は一覧性を高めるため、デフォルトで画像小さめ
+                        if r.get('issue_photo_url'): st.image(r.get('issue_photo_url'), width=250)
                         
                         with st.expander("✏️ 指摘内容・写真を直前修正する"):
                             f_idx = FLOOR_OPTS[1:].index(floor) if floor in FLOOR_OPTS[1:] else 0
@@ -797,12 +818,16 @@ def main():
                                 propName=prop_val, inspType=type_val, inspDate=datetime.date.today().strftime("%Y/%m/%d"), 
                                 locationText=loc_str, issueDetail=disp_d, mode="insp", key=f"vp_{rec_id}"
                             )
-                            if new_p: st.image(new_p, caption="差し替えプレビュー", width=200)
                             
+                            # 🚀 ボタンを上に配置、非同期処理
                             if st.button("💾 この内容で修正保存", key=f"vsave_{rec_id}"):
                                 up_data = {"floor_level": new_f, "area": new_a, "issue_detail": new_d.strip(), "work_type": new_w}
-                                if new_p: up_data["issue_photo_url"] = upload_to_storage(new_p)
-                                db_patch("inspection_records", rec_id, up_data); st.session_state.cached_records = None; st.success("修正を反映しました"); st.rerun()
+                                st.toast("🚀 修正を裏側で保存中...", icon="✅")
+                                threading.Thread(target=bg_patch_record, args=(rec_id, new_p, up_data)).start()
+                                st.session_state.cached_records = None
+                                st.rerun()
+
+                            if new_p: st.image(new_p, caption="差し替えプレビュー", width=250)
 
                         c1, c2 = st.columns(2)
                         if c1.button("✅ 個別承認（業者へ送る）", key=f"vok_{rec_id}", type="primary"):
@@ -915,25 +940,24 @@ def main():
                                         propName=prop_val, inspType=type_val, inspDate=datetime.date.today().strftime("%Y/%m/%d"), 
                                         locationText=loc_str, issueDetail=disp_d, mode="insp", key=f"edit_cam_{rec_id}"
                                     )
-                                    if new_photo: st.image(new_photo, caption="差し替えプレビュー", use_container_width=True)
                                     
                                     col_u, col_d = st.columns(2)
                                     if col_u.button("💾 更新を保存", key=f"edit_save_{rec_id}"):
                                         up_data = {"work_type": new_w, "issue_detail": new_detail}
-                                        if new_photo: up_data["issue_photo_url"] = upload_to_storage(new_photo)
-                                        db_patch("inspection_records", rec_id, up_data); st.session_state.cached_records = None; st.success("更新しました！"); st.rerun()
+                                        threading.Thread(target=bg_patch_record, args=(rec_id, new_photo, up_data)).start()
+                                        st.session_state.cached_records = None; st.success("更新しました！"); st.rerun()
                                     if col_d.button("🗑️ この指摘を削除", key=f"edit_del_{rec_id}"): db_delete_record(rec_id); st.session_state.cached_records = None; st.rerun()
+                                    if new_photo: st.image(new_photo, caption="差し替えプレビュー", width=250)
                                     st.markdown("<br>", unsafe_allow_html=True)
 
                             c1, c2 = st.columns(2)
                             with c1:
                                 st.markdown("**【指摘箇所（Before）】**")
-                                if r.get('issue_photo_url'): st.image(r.get('issue_photo_url'), use_container_width=True)
+                                if r.get('issue_photo_url'): st.image(r.get('issue_photo_url'), width=250) # ここも小さく
                                 else: st.write("写真なし")
                                     
                             with c2:
                                 st.markdown("**【是正写真（After）】**")
-                                # ★ 是正トレース黒板の呼び出し（mode="fix"）
                                 loc_str = f"{floor} {area} {w}".strip()
                                 disp_d = detail[:80] + "..." if len(detail)>80 else detail
                                 
@@ -941,15 +965,17 @@ def main():
                                     propName=prop_val, inspType=type_val, inspDate=datetime.date.today().strftime("%Y/%m/%d"), 
                                     locationText=loc_str, issueDetail=disp_d, mode="fix", key=f"fix_cam_{rec_id}"
                                 )
-                                if up: st.image(up, caption="アップロード画像プレビュー", use_container_width=True)
                                 
+                                # 🚀 ボタンを上に配置、非同期処理
                                 if st.button("✅ 完了報告", key=f"s_{rec_id}"):
                                     if up: 
-                                        fix_url = upload_to_storage(up)
-                                        db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "fix_photo_url": fix_url})
+                                        st.toast("🚀 報告を裏側で送信中...", icon="✅")
+                                        threading.Thread(target=bg_save_correction, args=(rec_id, up)).start()
                                         st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                         st.session_state.skip_render_ids.append(rec_id); st.rerun()
-                                    else: st.error("写真が必要です（準備完了するまでお待ちください）")
+                                    else: st.error("写真が必要です")
+                                    
+                                if up: st.image(up, caption="アップロード画像プレビュー", width=250)
                             st.markdown('</div>', unsafe_allow_html=True)
 
     # ----------------------------------------
@@ -1113,8 +1139,8 @@ def main():
                                 st.markdown(f"**{title}**")
                                 c1, c2 = st.columns(2)
                                 i_photo = r.get('issue_photo_url'); f_photo = r.get('fix_photo_url')
-                                if i_photo: c1.image(i_photo, caption="Before")
-                                if f_photo: c2.image(f_photo, caption="After")
+                                if i_photo: c1.image(i_photo, caption="Before", width=250)
+                                if f_photo: c2.image(f_photo, caption="After", width=250)
                                 
                                 ca, cb = st.columns(2)
                                 if ca.button("✅ 承認（完了へ）", key=f"ok_{rec_id}"): 
