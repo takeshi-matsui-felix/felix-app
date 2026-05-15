@@ -6,7 +6,7 @@ import os
 
 st.set_page_config(page_title="黒板カメラテスト", layout="centered")
 
-st.title("🚧 V2 電子黒板カメラ (辞書連動テスト)")
+st.title("🚧 V2 電子黒板カメラ (本番連動・完全版テスト)")
 
 # ==========================================
 # 4. 定型文データ（フリー項目完備・完全版マスター）
@@ -197,7 +197,16 @@ ISSUE_TEMPLATES = {
 }
 
 # ==========================================
-# 2. スマホ内部で黒板を合成する特殊コンポーネント
+# 2. 本番環境と同じ選択肢リスト
+# ==========================================
+FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
+AREA_OPTS_STANDARD = ["-- 選択 --", "玄関", "廊下・階段・ENT", "LDK", "キッチン", "洋室", "洗面室", "UB", "トイレ", "バルコニー", "外部", "フリー項目"]
+AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バルコニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
+SHANAI_KENSA_TYPES = ["社内検査(設計)", "社内検査(建設)", "社内検査(マーケ)", "社内検査(不動産)"]
+INSP_OPTS = ["社内検査(建設)", "配筋検査", "躯体検査", "中間検査"] # テスト用に絞っています
+
+# ==========================================
+# 3. スマホ内部で黒板を合成する特殊コンポーネント
 # ==========================================
 CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 <html lang="ja">
@@ -279,43 +288,53 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 </body>
 </html>
 """
-temp_dir = os.path.join(tempfile.gettempdir(), "board_cam_test_v4")
+temp_dir = os.path.join(tempfile.gettempdir(), "board_cam_test_v5")
 os.makedirs(temp_dir, exist_ok=True)
 with open(os.path.join(temp_dir, "index.html"), "w", encoding="utf-8") as f: f.write(CLIENT_COMPRESS_HTML)
-_board_camera = components.declare_component("board_camera_test_v4", path=temp_dir)
+_board_camera = components.declare_component("board_camera_test_v5", path=temp_dir)
+
 
 # ==========================================
-# 3. 入力UI（辞書と連動）
+# 4. 本番環境と同じ【完全な】連動UIロジック
 # ==========================================
+st.markdown("### 🔘 検査内容の入力（辞書連動テスト）")
+
 hidden_property_name = "サンレジデンス名古屋"
-st.info(f"※裏側で物件名「{hidden_property_name}」を記憶している想定です")
+c_type = st.selectbox("検査種類を選択（本番はスタート画面で選択）", INSP_OPTS)
 
 c1, c2 = st.columns(2)
-floor = c1.radio("階層", ["101", "102", "103"], horizontal=True)
-area = c2.radio("部位", ["玄関", "LDK", "洋室"], horizontal=True)
+f = c1.radio("階層", FLOOR_OPTS[1:], horizontal=True)
 
-# 辞書から選択肢を生成
-cat_dict = ISSUE_TEMPLATES.get("社内検査(建設)", {})
-sel_cat = st.radio("分類", list(cat_dict.keys()) if cat_dict else [], horizontal=True)
-sel_temp = st.radio("よくある指摘事項", cat_dict.get(sel_cat, []) if sel_cat else [], horizontal=True)
+# 検査種類によって部位の選択肢を切り替え
+area_opts = AREA_OPTS_SHANAI if c_type in SHANAI_KENSA_TYPES else AREA_OPTS_STANDARD
+a = c2.radio("部位", area_opts[1:], horizontal=True)
+
+# 検査種類と部位によって辞書の中身を切り替え（本番と完全一致のロジック）
+cat_dict = ISSUE_TEMPLATES.get(c_type, {}) if c_type in ["配筋検査", "躯体検査", "中間検査"] else ISSUE_TEMPLATES.get("社内検査(設計)", {}).get(a, {}) if c_type in SHANAI_KENSA_TYPES else {}
+if not isinstance(cat_dict, dict): cat_dict = {}
+
+cat_keys = list(cat_dict.keys())
+sel_cat = st.radio("分類", cat_keys, horizontal=True) if cat_keys else None
+sel_temp = st.radio("よくある指摘事項", cat_dict.get(sel_cat, [])) if sel_cat else None
+
 desc = st.text_area("詳細・場所の追記（自由入力）")
-
-# 最終的な指摘テキストを生成
 final_desc = (sel_temp + ("：" + desc.strip() if desc.strip() != "" else "")) if sel_temp else desc.strip()
 
+
 # ==========================================
-# 4. カメラ呼び出しとプレビュー表示
+# 5. カメラ呼び出しとプレビュー表示
 # ==========================================
+st.markdown("---")
 st.markdown("### 📷 写真を撮影（すべて自動で黒板に入ります）")
+
 p_url = _board_camera(
     prop=hidden_property_name, 
     date=datetime.date.today().strftime("%Y/%m/%d"), 
-    loc=f"{floor} {area}", 
+    loc=f"{f} {a}", 
     desc=final_desc[:15] + "..." if len(final_desc)>15 else final_desc, # 黒板は15文字程度にカット
     key="insp_cam"
 )
 
-# ★抜けていたプレビュー表示処理を追記
 if p_url:
     st.image(p_url, caption="完成した電子黒板プレビュー", use_container_width=True)
-    st.success("✅ 黒板が正常に合成されました！")
+    st.success("✅ 選択した項目が正常に黒板へ連動・合成されました！")
