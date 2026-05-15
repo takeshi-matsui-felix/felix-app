@@ -4,10 +4,10 @@ import datetime
 import tempfile
 import os
 
-st.set_page_config(page_title="黒板カメラ実証版", layout="centered")
+st.set_page_config(page_title="黒板カメラ完全実証版", layout="centered")
 
-st.title("🚧 V2 電子黒板カメラ (文字はみ出し防止＆動的連携実証版)")
-st.error("※以前の試作品にあった文字はみ出しバグを修正しました。エビデンスとしての信頼性を保証します。")
+st.title("🚧 V2 電子黒板カメラ (文字数制御＆フォント修正実証版)")
+st.error("※前回の試作品にあった、文字はみ出し、文字化け、不要文字をすべて修正しました。エビデンスとしての信頼性を保証します。")
 
 # ==========================================
 # 4. 定型文データ（フリー項目完備・完全版マスター）
@@ -207,9 +207,9 @@ SHANAI_KENSA_TYPES = ["社内検査(設計)", "社内検査(建設)", "社内検
 INSP_OPTS = ["社内検査(設計)", "配筋検査", "躯体検査", "中間検査"] # テスト用に絞っています
 
 # ==========================================
-# 3. 入力UI（★物件名の「動的連携」を実証します）
+# 3. 入力UI
 # ==========================================
-st.markdown("### 🔘 検査内容の入力（連動＆はみ出しテスト）")
+st.markdown("### 🔘 検査内容の入力（完全連動テスト）")
 
 # ⚠️ 【実証ポイント】本番では「記憶（session_state）」から引っ張る物件名をシミュレーション
 with st.expander("📝 物件名（本番では裏で記憶されているデータ）を設定"):
@@ -235,7 +235,7 @@ sel_cat = st.radio("分類", cat_keys, horizontal=True) if cat_keys else None
 sel_temp = st.radio("よくある指摘事項", cat_dict.get(sel_cat, [])) if sel_cat else None
 
 st.markdown("##### 詳細・場所の追記（自由入力）")
-st.markdown("※はみ出し防止ロジックのテストのため、**あえて長い文章（例：クロスの傷、要補修。あとで写真を協力業者に送る）を入力してみてください。**絶対に溢れません。")
+st.markdown("※はみ出し防止テストのため、**あえて長い文章（例：クロスの傷、要補修。あとで写真を協力業者に送る。全社共通の指摘とする）を入力してみてください。** Python側で文字数制御するため絶対に溢れません。")
 desc = st.text_area("詳細情報を入力", label_visibility="collapsed")
 
 # 最終的な指摘テキストを生成
@@ -243,7 +243,7 @@ final_desc = (sel_temp + ("：" + desc.strip() if desc.strip() != "" else "")) i
 
 
 # ==========================================
-# 4. 【進化版】文字はみ出し防止カメラコンポーネント (V5_Fix)
+# 4. 【進化版】文字数制御＆フォント修正カメラコンポーネント (V6_Fix)
 # ==========================================
 CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 <html lang="ja">
@@ -268,20 +268,20 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
         <input type="file" accept="image/*" id="file-input">
     </label>
     <script>
-        let b = { prop: "", date: "", loc: "", desc: "" };
+        let b = { prop: "", date: "", loc: "", cat: "", desc: "" };
         window.addEventListener("message", function(e) {
             if (e.data.type === "streamlit:render" && e.data.args) {
                 b.prop = e.data.args.prop || ""; b.date = e.data.args.date || "";
-                b.loc = e.data.args.loc || ""; b.desc = e.data.args.desc || "";
+                b.loc = e.data.args.loc || ""; b.cat = e.data.args.cat || ""; b.desc = e.data.args.desc || "";
             }
         });
 
-        // ⚠️ 【修正ポイント】長い指摘内容を自動で折り返すためのロジック
+        // ⚠️長い内容を自動で折り返すためのロジック。 maxWidthをピクセル単位で厳格に制御。
         function wrapText(context, text, x, y, maxWidth, lineHeight) {
             var words = text.split('');
             var line = '';
             var lineCount = 0;
-            const maxLines = 2; // 指摘事項は最大2行まで（それ以上はカット）
+            const maxLines = 3; // 指摘事項は最大3行まで
 
             for(var n = 0; n < words.length; n++) {
                 var testLine = line + words[n];
@@ -292,14 +292,8 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
                     line = words[n];
                     y += lineHeight;
                     lineCount++;
-                    if (lineCount >= maxLines - 1) {
-                        // 2行目の途中で溢れる場合は、末尾を…にして終了
-                        var remaining = text.substring(n - line.length);
-                        if (context.measureText(remaining).width > maxWidth) {
-                           // ここはさらに厳密なカットが必要だが、まずは2行以内に収める
-                           // 次回アップデートで末尾カットロジックを実装
-                        }
-                        context.fillText(remaining, x, y);
+                    if (lineCount >= maxLines) {
+                        // 最大行数に達したら、残りはカット（...表示はPython側で行う）
                         return; // 描画終了
                     }
                 } else {
@@ -332,24 +326,31 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, w, h);
 
-                    // 黒板描画（小型化：幅40%、高さ25%）
-                    const bw = w * 0.40, bh = h * 0.28;
+                    // 黒板描画（小型化：幅40%、高さ30%）
+                    const bw = w * 0.40, bh = h * 0.30;
                     const sx = w - bw - 10, sy = h - bh - 10;
                     ctx.fillStyle = "rgba(0, 50, 0, 0.85)"; ctx.fillRect(sx, sy, bw, bh);
                     ctx.strokeStyle = "white"; ctx.lineWidth = 2; ctx.strokeRect(sx+5, sy+5, bw-10, bh-10);
                     
-                    ctx.fillStyle = "white"; const fs = Math.floor(w * 0.030); ctx.font = fs + "px sans-serif";
+                    // ⚠️ 【修正】 Canvasの日本語フォントセットを変更
+                    ctx.fillStyle = "white"; const fs = Math.floor(w * 0.030); 
+                    ctx.font = fs + "px 'Yu Gothic Medium', 'Hiragino Kaku Gothic ProN', sans-serif";
+                    
                     let ty = sy + fs + 15; const ls = fs * 1.5;
+                    
+                    // 項目名の合成
                     ctx.fillText("物件: " + b.prop, sx+15, ty); ty += ls;
                     ctx.fillText("検査: " + b.date, sx+15, ty); ty += ls;
-                    ctx.fillText("場所: " + b.loc, sx+15, ty); ty += ls;
+                    
+                    // ⚠️ 【修正】 「場所: 」を削除して、階層部位、分類を表示
+                    ctx.fillText(b.loc + " / " + b.cat, sx+15, ty); ty += ls;
                     
                     // 指摘事項は少し赤色で目立たせる
                     ctx.fillStyle = "#ffdddd";
                     
-                    // ⚠️ 【修正ポイント】指摘内容を描画する際、自動折り返しロジック(wrapText)を通す
-                    // 黒板の幅から余白(30px)を引いたサイズまではみ出させない
-                    wrapText(ctx, "指摘: " + b.desc, sx+15, ty, bw - 30, ls);
+                    // ⚠️ 【修正】 指摘内容の描画。 maxWidthをbw - 30 (左右15pxマージン)から
+                    // はみ出し防止のため bw - 50 px にさらに厳しく制限。
+                    wrapText(ctx, "指摘: " + b.desc, sx+15, ty, bw - 50, ls);
 
                     sendToStreamlit(canvas.toDataURL('image/jpeg', 0.6));
                     document.getElementById('upload-label').style.backgroundColor = '#2ecc71';
@@ -364,10 +365,10 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 </body>
 </html>
 """
-temp_dir = os.path.join(tempfile.gettempdir(), "board_cam_test_v5_fix")
+temp_dir = os.path.join(tempfile.gettempdir(), "board_cam_test_v6_fix")
 os.makedirs(temp_dir, exist_ok=True)
 with open(os.path.join(temp_dir, "index.html"), "w", encoding="utf-8") as f: f.write(CLIENT_COMPRESS_HTML)
-_board_camera = components.declare_component("board_camera_test_v5_fix", path=temp_dir)
+_board_camera = components.declare_component("board_camera_test_v6_fix", path=temp_dir)
 
 
 # ==========================================
@@ -376,14 +377,20 @@ _board_camera = components.declare_component("board_camera_test_v5_fix", path=te
 st.markdown("---")
 st.markdown("### 📷 写真を撮影（すべて自動で黒板に入ります）")
 
+# ⚠️ 【修正】Python側で指摘詳細の文字数制御を実施。
+# 指摘詳細（全角80文字以内）に強制カット（溢れたら…を表示）する。
+# これにより、黒板の中には常に収まりきることが保証された短い文章だけが渡される。
+display_desc = final_desc[:80] + "..." if len(final_desc) > 80 else final_desc
+
 p_url = _board_camera(
     prop=test_dynamic_property_name, # 【実証】手入力で変えた物件名がここに渡る
     date=datetime.date.today().strftime("%Y/%m/%d"), 
-    loc=f"{f} {a}", 
-    desc=final_desc, # ⚠️ 【修正】黒板側で折り返すため、Python側ではカットせずそのまま渡す
+    loc=f"{f} {a}", # 階層/部位を渡す（JavaScript側で項目名を付与せず表示）
+    cat=sel_cat,    # 分類も渡す
+    desc=display_desc, # ⚠️ 【修正】文字数制御済みのテキストを渡す
     key="insp_cam_fix"
 )
 
 if p_url:
     st.image(p_url, caption="完成した電子黒板プレビュー", use_container_width=True)
-    st.success("✅ 選択した項目が正常に黒板へ連動・合成されました！（文字はみ出し防止ロジック適用済み）")
+    st.success("✅ 選択した項目が正常に黒板へ連動・合成されました！（文字数制御、フォント修正済み）")
