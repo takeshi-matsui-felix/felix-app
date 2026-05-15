@@ -52,17 +52,14 @@ def db_delete_property(prop_id):
     requests.delete(f"{SUPABASE_URL}/rest/v1/properties?property_id=eq.{prop_id}", headers=HEADERS)
 
 def upload_to_storage(base64_str):
-    """Base64画像を受け取り、Supabase Storageへ保存してパブリックURLを返す"""
     if not base64_str or not isinstance(base64_str, str):
         return None
     if base64_str.startswith("http://") or base64_str.startswith("https://"):
         return base64_str
-        
     try:
         encoded = base64_str.split(",", 1)[1] if "," in base64_str else base64_str
         file_data = base64.b64decode(encoded)
         filename = f"{uuid.uuid4()}.jpg"
-        
         url = f"{SUPABASE_URL}/storage/v1/object/photos/{filename}"
         headers = {
             "apikey": SUPABASE_KEY,
@@ -70,7 +67,6 @@ def upload_to_storage(base64_str):
             "Content-Type": "image/jpeg",
         }
         res = requests.post(url, headers=headers, data=file_data)
-        
         if res.status_code in [200, 201]:
             return f"{SUPABASE_URL}/storage/v1/object/public/photos/{filename}"
         else:
@@ -79,9 +75,9 @@ def upload_to_storage(base64_str):
         return base64_str
 
 # ==========================================
-# 📱 2. スマホ内・瞬間圧縮コンポーネント
+# 📱 2. スマート電子黒板カメラ（V8ベース）
 # ==========================================
-CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
+SMART_CAMERA_HTML = """<!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
@@ -91,77 +87,106 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
         body { margin: 0; padding: 5px; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background-color: transparent;}
         .upload-btn {
             display: block; width: 100%; max-width: 400px; padding: 18px 20px;
-            background-color: #FF4B4B; color: white; border-radius: 8px;
-            font-size: 16px; font-weight: bold; text-align: center; cursor: pointer; 
+            color: white; border-radius: 8px; font-size: 16px; font-weight: bold; text-align: center; cursor: pointer; 
             box-sizing: border-box; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
         input[type="file"] { display: none; }
     </style>
 </head>
 <body>
-    <label class="upload-btn" id="upload-label">
-        <i class="fa-solid fa-camera" id="btn-icon"></i> <span id="btn-text">現場写真を撮影 ／ 選択</span>
+    <label class="upload-btn" id="upload-label" style="background-color: #28a745;">
+        <i class="fa-solid fa-camera" id="btn-icon"></i> <span id="btn-text">黒板付きで撮影 ／ 選択</span>
         <input type="file" accept="image/*" id="file-input">
     </label>
     <script>
-        function sendReady() { window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1}, "*"); }
-        function setHeight(h) { window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: h}, "*"); }
+        let b = { propName: "", inspType: "", inspDate: "", locationText: "", issueDetail: "", mode: "insp" };
+        window.addEventListener("message", function(e) {
+            if (e.data.type === "streamlit:render" && e.data.args) {
+                b.propName = e.data.args.propName || ""; b.inspType = e.data.args.inspType || ""; 
+                b.inspDate = e.data.args.inspDate || ""; b.locationText = e.data.args.locationText || ""; 
+                b.issueDetail = e.data.args.issueDetail || ""; b.mode = e.data.args.mode || "insp";
+                if(b.mode === 'fix') {
+                    document.getElementById('upload-label').style.backgroundColor = '#007bff';
+                    document.getElementById('btn-text').innerText = '是正写真を撮影';
+                }
+            }
+        });
+
+        function wrapTextAndReturnY(context, text, x, y, maxWidth, lineHeight, maxLines) {
+            if (!text) return y;
+            var words = text.split(''); var line = ''; var lineCount = 0;
+            for(var n = 0; n < words.length; n++) {
+                var testLine = line + words[n];
+                if (context.measureText(testLine).width > maxWidth && n > 0) {
+                    context.fillText(line, x, y); line = words[n]; y += lineHeight; lineCount++;
+                    if (lineCount >= maxLines) return y;
+                } else { line = testLine; }
+            }
+            context.fillText(line, x, y); return y + lineHeight;
+        }
+
         function sendToStreamlit(val) { window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}, "*"); }
-        window.onload = function() { sendReady(); setHeight(80); }; 
 
         const input = document.getElementById('file-input');
-        const uploadLabel = document.getElementById('upload-label');
-        const btnIcon = document.getElementById('btn-icon');
-        const btnText = document.getElementById('btn-text');
-
         input.addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            uploadLabel.style.backgroundColor = '#f39c12';
-            btnIcon.className = 'fa-solid fa-spinner fa-spin';
-            btnText.innerHTML = '&nbsp;高速圧縮中...';
+            const file = e.target.files[0]; if (!file) return;
+            document.getElementById('upload-label').style.backgroundColor = '#f39c12';
+            document.getElementById('btn-icon').className = 'fa-solid fa-spinner fa-spin';
+            document.getElementById('btn-text').innerHTML = '&nbsp;黒板合成中...';
 
             const reader = new FileReader();
             reader.onload = function(event) {
                 const img = new Image();
                 img.onload = function() {
-                    const MAX_SIZE = 600; 
-                    let width = img.width; let height = img.height;
-                    if (width > height) {
-                        if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; }
-                    } else {
-                        if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; }
-                    }
-                    const canvas = document.createElement('canvas');
-                    canvas.width = width; canvas.height = height;
+                    const MAX_SIZE = 800; let w = img.width, h = img.height;
+                    if (w > h) { if (w > MAX_SIZE) { h *= MAX_SIZE / w; w = MAX_SIZE; } }
+                    else { if (h > MAX_SIZE) { w *= MAX_SIZE / h; h = MAX_SIZE; } }
+                    const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
                     const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, width, height);
-                    const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.5);
+                    ctx.drawImage(img, 0, 0, w, h);
 
-                    uploadLabel.style.backgroundColor = '#2ecc71';
-                    btnIcon.className = 'fa-solid fa-check';
-                    btnText.innerHTML = '&nbsp;セット完了';
-                    sendToStreamlit(compressedDataUrl);
+                    const bw = w * 0.40, bh = h * 0.32;
+                    const sx = w - bw - 10, sy = h - bh - 10;
+                    
+                    ctx.fillStyle = (b.mode === 'fix') ? "rgba(0, 40, 80, 0.9)" : "rgba(0, 50, 0, 0.85)";
+                    ctx.fillRect(sx, sy, bw, bh);
+                    ctx.strokeStyle = "white"; ctx.lineWidth = 2; ctx.strokeRect(sx+5, sy+5, bw-10, bh-10);
+                    
+                    ctx.fillStyle = "white"; const fs = Math.floor(w * 0.022); 
+                    ctx.font = fs + "px 'Yu Gothic Medium', 'Hiragino Kaku Gothic ProN', sans-serif";
+                    
+                    let ty = sy + fs + 12; const ls = fs * 1.4; const textX = sx + 10; const dw = bw - 20;
+
+                    ty = wrapTextAndReturnY(ctx, b.propName, textX, ty, dw, ls, 2);
+                    ty = wrapTextAndReturnY(ctx, b.inspType + "  " + b.inspDate, textX, ty, dw, ls, 2);
+                    ty = wrapTextAndReturnY(ctx, b.locationText, textX, ty, dw, ls, 2);
+                    ctx.fillStyle = "#ffdddd";
+                    wrapTextAndReturnY(ctx, b.issueDetail, textX, ty, dw, ls, 3);
+
+                    sendToStreamlit(canvas.toDataURL('image/jpeg', 0.6));
+                    document.getElementById('upload-label').style.backgroundColor = '#2ecc71';
+                    document.getElementById('btn-icon').className = 'fa-solid fa-check';
+                    document.getElementById('btn-text').innerHTML = '&nbsp;セット完了';
                 };
                 img.src = event.target.result;
             };
             reader.readAsDataURL(file);
         });
+        window.onload = function() {
+            window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1}, "*");
+            window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: 80}, "*");
+        };
     </script>
 </body>
 </html>
 """
 
-temp_dir = os.path.join(tempfile.gettempdir(), "fast_camera_final_v16")
+temp_dir = os.path.join(tempfile.gettempdir(), "smart_cam_final")
 os.makedirs(temp_dir, exist_ok=True)
 with open(os.path.join(temp_dir, "index.html"), "w", encoding="utf-8") as f:
-    f.write(CLIENT_COMPRESS_HTML)
+    f.write(SMART_CAMERA_HTML)
 
-_client_compress_func = components.declare_component("fast_camera_final_v16", path=temp_dir)
-
-def client_compress_component(key):
-    return _client_compress_func(key=key)
+_smart_camera = components.declare_component("smart_cam_final", path=temp_dir)
 
 # ==========================================
 # 3. UI設定
@@ -413,7 +438,6 @@ def jump_to_menu(menu_name, prop_id=None):
     st.session_state.temp_photo = None
     st.rerun()
 
-# --- 選択肢の定義 ---
 FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
 AREA_OPTS_STANDARD = ["-- 選択 --", "玄関", "廊下・階段・ENT", "LDK", "キッチン", "洋室", "洗面室", "UB", "トイレ", "バルコニー", "外部", "フリー項目"]
 AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バルコニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
@@ -583,29 +607,35 @@ def main():
                                 if not isinstance(cat_dict, dict): cat_dict = {}
                                 cat_keys = list(cat_dict.keys())
                                 sel_cat = st.radio("分類を変更（A列）", cat_keys, horizontal=True, key=f"ecat_{rec_id}") if cat_keys else None
-                                if sel_cat: sel_temp = st.radio("よくある指摘事項（D列）", cat_dict.get(sel_cat, []), key=f"etemp_{rec_id}")
+                                if sel_cat: sel_temp = st.radio("よくある指摘事項（D列）", cat_dict.get(sel_cat, []), key=f"etemp_{rec_id}", horizontal=True)
                             
                             edit_desc_val = detail.split(":", 1)[1] if ":" in detail else detail.split("：", 1)[1] if "：" in detail else detail
                             st.markdown("##### 詳細・場所の追記を変更")
                             new_detail = st.text_area("詳細情報を変更", value=edit_desc_val, label_visibility="collapsed", key=f"ed_desc_{rec_id}")
                             
-                            # ★ プルダウンからボタンによる直接選択（ラジオボタン横並び仕様）へ完全修正
                             idx_w = edit_w_opts.index(r.get('work_type', '')) if r.get('work_type', '') in edit_w_opts else 0
                             new_w = st.radio("工種を変更", edit_w_opts, index=idx_w, horizontal=True, key=f"ed_work_{rec_id}")
                             
+                            final_desc = (sel_temp + ("：" + new_detail.strip() if new_detail.strip() != "" else "")) if sel_temp else new_detail.strip()
+                            if final_desc == "": final_desc = detail 
+                            
+                            # 黒板合成用のパラメータ
+                            loc_parts = [str(new_f), str(new_a)]
+                            if not c_type.startswith("【検査機関】") and sel_cat: loc_parts.append(str(sel_cat))
+                            loc_str = " ".join(loc_parts).strip()
+                            disp_desc = final_desc[:80] + "..." if len(final_desc) > 80 else final_desc
+                            
                             st.write("📷 写真を差し替える場合のみ撮影/選択してください")
-                            new_photo = client_compress_component(key=f"ed_cam_{rec_id}")
-                            if new_photo and isinstance(new_photo, str) and "base64," in new_photo: st.image(new_photo, caption="差し替え用プレビュー", width=200)
+                            new_photo = _smart_camera(
+                                propName=c_name, inspType=c_type, inspDate=datetime.date.today().strftime("%Y/%m/%d"), 
+                                locationText=loc_str, issueDetail=disp_desc, mode="insp", key=f"ed_cam_{rec_id}"
+                            )
+                            if new_photo: st.image(new_photo, caption="差し替え用プレビュー", width=200)
                                 
                             c_save, c_del = st.columns(2)
                             if c_save.button("💾 この内容で上書き", key=f"ed_save_{rec_id}", type="primary"):
-                                final_desc = (sel_temp + ("：" + new_detail.strip() if new_detail.strip() != "" else "")) if sel_temp else new_detail.strip()
-                                if final_desc == "": final_desc = detail 
                                 up_data = {"floor_level": new_f, "area": new_a, "work_type": new_w, "issue_detail": final_desc}
-                                
-                                if new_photo and "base64," in new_photo: 
-                                    up_data["issue_photo_url"] = upload_to_storage(new_photo)
-                                    
+                                if new_photo: up_data["issue_photo_url"] = upload_to_storage(new_photo)
                                 db_patch("inspection_records", rec_id, up_data); st.success("更新しました！"); st.rerun()
                                 
                             if c_del.button("🗑️ この指摘を削除", key=f"ed_del_{rec_id}"): db_delete_record(rec_id); st.success("削除しました。"); st.rerun()
@@ -616,7 +646,7 @@ def main():
 
             elif not st.session_state.issue_saved:
                 if c_type.startswith("【検査機関】"):
-                    f = "一式"; a = "全体"; sel_temp = None
+                    f = "一式"; a = "全体"; sel_cat = None; sel_temp = None
                     st.markdown("##### 詳細・場所の追記（自由入力）")
                     desc = st.text_area("詳細情報を入力", label_visibility="collapsed", placeholder="具体的な指摘内容や場所を入力してください")
                     st.markdown("##### 工種を選択")
@@ -634,22 +664,32 @@ def main():
                     if not isinstance(cat_dict, dict): cat_dict = {}
                     cat_keys = list(cat_dict.keys())
                     sel_cat = st.radio("分類を選択（A列）", cat_keys, horizontal=True) if cat_keys else None
-                    sel_temp = st.radio("よくある指摘事項（D列）", cat_dict.get(sel_cat, [])) if sel_cat else None
+                    sel_temp = st.radio("よくある指摘事項（D列）", cat_dict.get(sel_cat, []), horizontal=True) if sel_cat else None
                     
                     st.markdown("##### 詳細・場所の追記（自由入力）")
                     desc = st.text_area("詳細情報を入力", label_visibility="collapsed")
                     w = st.radio("工種を選択", work_opts[1:], horizontal=True)
                 
-                st.markdown("##### 現場写真の追加")
-                photo_input = client_compress_component(key="insp_cam")
+                final_desc = (sel_temp + ("：" + desc.strip() if desc.strip() != "" else "")) if sel_temp else desc.strip()
+                
+                # 黒板合成用のパラメータ準備
+                loc_parts = [str(f), str(a)]
+                if not c_type.startswith("【検査機関】") and sel_cat: loc_parts.append(str(sel_cat))
+                loc_str = " ".join(loc_parts).strip()
+                disp_desc = final_desc[:80] + "..." if len(final_desc) > 80 else final_desc
+
+                st.markdown("##### 📷 現場写真の追加（黒板自動合成）")
+                photo_input = _smart_camera(
+                    propName=c_name, inspType=c_type, inspDate=datetime.date.today().strftime("%Y/%m/%d"), 
+                    locationText=loc_str, issueDetail=disp_desc, mode="insp", key="insp_cam"
+                )
                 if photo_input:
                     st.session_state.temp_photo = photo_input
 
-                if st.session_state.temp_photo and isinstance(st.session_state.temp_photo, str) and "base64," in st.session_state.temp_photo:
+                if st.session_state.temp_photo:
                     st.image(st.session_state.temp_photo, use_container_width=True, caption="セット完了プレビュー")
 
-                if st.button("この内容で保存"):
-                    final_desc = (sel_temp + ("：" + desc.strip() if desc.strip() != "" else "")) if sel_temp else desc.strip()
+                if st.button("この内容で保存", type="primary"):
                     active_photo = st.session_state.temp_photo
                     if w and final_desc != "" and active_photo is not None:
                         initial_status = "確認待ち" if c_inspector == "工事監理チーム" else "是正待ち"
@@ -666,7 +706,7 @@ def main():
                 if st.button("検査全体を終了", use_container_width=True): st.session_state.current_box = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None; st.rerun()
 
     # ----------------------------------------
-    # メニュー: 3. 検査内容確認（管理者専用・直前修正も完全ボタン化）
+    # メニュー: 3. 検査内容確認（管理者専用）
     # ----------------------------------------
     elif st.session_state.active_menu == "検査内容確認（管理者）":
         st.header("検査内容確認 ＆ 最終修正")
@@ -737,7 +777,6 @@ def main():
                         st.markdown(f"**{title}**")
                         if r.get('issue_photo_url'): st.image(r.get('issue_photo_url'), width=300)
                         
-                        # --- ★ 管理者による直前修正もすべてボタン（横並びラジオボタン）仕様へ完全修正 ---
                         with st.expander("✏️ 指摘内容・写真を直前修正する"):
                             f_idx = FLOOR_OPTS[1:].index(floor) if floor in FLOOR_OPTS[1:] else 0
                             new_f = st.radio("階層", FLOOR_OPTS[1:], index=f_idx, horizontal=True, key=f"vf_{rec_id}")
@@ -750,13 +789,19 @@ def main():
                             idx_w = edit_w_opts.index(r.get('work_type', '')) if r.get('work_type', '') in edit_w_opts else 0
                             new_w = st.radio("工種を変更", edit_w_opts, index=idx_w, horizontal=True, key=f"vw_{rec_id}")
                             
+                            loc_str = f"{new_f} {new_a}".strip()
+                            disp_d = new_d[:80] + "..." if len(new_d)>80 else new_d
+                            
                             st.write("📷 写真を差し替える場合のみ撮影/選択してください")
-                            new_p = client_compress_component(key=f"vp_{rec_id}")
-                            if new_p and isinstance(new_p, str) and "base64," in new_p: st.image(new_p, caption="差し替えプレビュー", width=200)
+                            new_p = _smart_camera(
+                                propName=prop_val, inspType=type_val, inspDate=datetime.date.today().strftime("%Y/%m/%d"), 
+                                locationText=loc_str, issueDetail=disp_d, mode="insp", key=f"vp_{rec_id}"
+                            )
+                            if new_p: st.image(new_p, caption="差し替えプレビュー", width=200)
                             
                             if st.button("💾 この内容で修正保存", key=f"vsave_{rec_id}"):
                                 up_data = {"floor_level": new_f, "area": new_a, "issue_detail": new_d.strip(), "work_type": new_w}
-                                if new_p and "base64," in new_p: up_data["issue_photo_url"] = upload_to_storage(new_p)
+                                if new_p: up_data["issue_photo_url"] = upload_to_storage(new_p)
                                 db_patch("inspection_records", rec_id, up_data); st.session_state.cached_records = None; st.success("修正を反映しました"); st.rerun()
 
                         c1, c2 = st.columns(2)
@@ -860,17 +905,22 @@ def main():
                                     st.markdown("#### 📝 データ編集")
                                     new_detail = st.text_area("指摘内容を変更", value=detail, key=f"edit_d_{rec_id}")
                                     
-                                    # ★ ここもボタン（横並びラジオボタン）による直接選択仕様へ修正
                                     idx_w = edit_w_opts.index(r.get('work_type', '')) if r.get('work_type', '') in edit_w_opts else 0
                                     new_w = st.radio("工種を変更", edit_w_opts, index=idx_w, horizontal=True, key=f"edit_w_{rec_id}")
                                     
-                                    new_photo = client_compress_component(key=f"edit_cam_{rec_id}")
-                                    if new_photo and isinstance(new_photo, str) and "base64," in new_photo: st.image(new_photo, caption="差し替えプレビュー", use_container_width=True)
+                                    loc_str = f"{floor} {area}".strip()
+                                    disp_d = new_detail[:80] + "..." if len(new_detail)>80 else new_detail
+                                    
+                                    new_photo = _smart_camera(
+                                        propName=prop_val, inspType=type_val, inspDate=datetime.date.today().strftime("%Y/%m/%d"), 
+                                        locationText=loc_str, issueDetail=disp_d, mode="insp", key=f"edit_cam_{rec_id}"
+                                    )
+                                    if new_photo: st.image(new_photo, caption="差し替えプレビュー", use_container_width=True)
                                     
                                     col_u, col_d = st.columns(2)
                                     if col_u.button("💾 更新を保存", key=f"edit_save_{rec_id}"):
                                         up_data = {"work_type": new_w, "issue_detail": new_detail}
-                                        if new_photo and "base64," in new_photo: up_data["issue_photo_url"] = upload_to_storage(new_photo)
+                                        if new_photo: up_data["issue_photo_url"] = upload_to_storage(new_photo)
                                         db_patch("inspection_records", rec_id, up_data); st.session_state.cached_records = None; st.success("更新しました！"); st.rerun()
                                     if col_d.button("🗑️ この指摘を削除", key=f"edit_del_{rec_id}"): db_delete_record(rec_id); st.session_state.cached_records = None; st.rerun()
                                     st.markdown("<br>", unsafe_allow_html=True)
@@ -883,11 +933,18 @@ def main():
                                     
                             with c2:
                                 st.markdown("**【是正写真（After）】**")
-                                up = client_compress_component(key=f"fix_cam_{rec_id}")
-                                if up and isinstance(up, str) and "base64," in up: st.image(up, caption="アップロード画像プレビュー", use_container_width=True)
+                                # ★ 是正トレース黒板の呼び出し（mode="fix"）
+                                loc_str = f"{floor} {area} {w}".strip()
+                                disp_d = detail[:80] + "..." if len(detail)>80 else detail
+                                
+                                up = _smart_camera(
+                                    propName=prop_val, inspType=type_val, inspDate=datetime.date.today().strftime("%Y/%m/%d"), 
+                                    locationText=loc_str, issueDetail=disp_d, mode="fix", key=f"fix_cam_{rec_id}"
+                                )
+                                if up: st.image(up, caption="アップロード画像プレビュー", use_container_width=True)
                                 
                                 if st.button("✅ 完了報告", key=f"s_{rec_id}"):
-                                    if up and "base64," in up: 
+                                    if up: 
                                         fix_url = upload_to_storage(up)
                                         db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "fix_photo_url": fix_url})
                                         st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
