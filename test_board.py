@@ -4,9 +4,9 @@ import datetime
 import tempfile
 import os
 
-st.set_page_config(page_title="黒板カメラ V7", layout="centered")
+st.set_page_config(page_title="黒板カメラ V8", layout="centered")
 
-st.title("🚧 V2 電子黒板カメラ (ラベル撤廃・完全折り返し版)")
+st.title("🚧 V2 電子黒板カメラ (ラベル全撤廃・完全連動版)")
 
 # ==========================================
 # 4. 定型文データ（フリー項目完備・完全版マスター）
@@ -201,7 +201,7 @@ ISSUE_TEMPLATES = {
 # ==========================================
 FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
 AREA_OPTS_STANDARD = ["-- 選択 --", "玄関", "廊下・階段・ENT", "LDK", "キッチン", "洋室", "洗面室", "UB", "トイレ", "バルコニー", "外部", "フリー項目"]
-AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バルバルコニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
+AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バルコニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
 SHANAI_KENSA_TYPES = ["社内検査(設計)", "社内検査(建設)", "社内検査(マーケ)", "社内検査(不動産)"]
 INSP_OPTS = ["社内検査(設計)", "配筋検査", "躯体検査", "中間検査"]
 
@@ -254,18 +254,19 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
         <input type="file" accept="image/*" id="file-input">
     </label>
     <script>
-        let b = { prop: "", insp: "", date: "", loc: "", desc: "" };
+        // ⚠️【対策1】変数名を完全に一新し、ブラウザのキャッシュ衝突を防止
+        let b = { propName: "", inspType: "", inspDate: "", locationText: "", issueDetail: "" };
         window.addEventListener("message", function(e) {
             if (e.data.type === "streamlit:render" && e.data.args) {
-                b.prop = e.data.args.prop || ""; 
-                b.insp = e.data.args.insp || ""; 
-                b.date = e.data.args.date || "";
-                b.loc = e.data.args.loc || ""; 
-                b.desc = e.data.args.desc || "";
+                b.propName = e.data.args.propName || ""; 
+                b.inspType = e.data.args.inspType || ""; 
+                b.inspDate = e.data.args.inspDate || "";
+                b.locationText = e.data.args.locationText || ""; 
+                b.issueDetail = e.data.args.issueDetail || "";
             }
         });
 
-        // ⚠️【全項目適用】はみ出し防止＆改行・次のY座標を返す汎用関数
+        // ⚠️【対策2】指定したピクセル幅で強制的に折り返す強固なロジック
         function wrapTextAndReturnY(context, text, x, y, maxWidth, lineHeight, maxLines) {
             if (!text) return y;
             var words = text.split('');
@@ -280,7 +281,7 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
                     line = words[n];
                     y += lineHeight;
                     lineCount++;
-                    if (lineCount >= maxLines) return y; // 指定行数を超えたらカット
+                    if (lineCount >= maxLines) return y; // 指定行数を超えたらそれ以上描画しない
                 } else {
                     line = testLine;
                 }
@@ -312,35 +313,35 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, w, h);
 
-                    // 黒板の背景と枠線（幅45%, 高さ32%）
-                    const bw = w * 0.45, bh = h * 0.32;
+                    // 黒板の背景と枠線（少し縦長に調整: 幅40%, 高さ32%）
+                    const bw = w * 0.40, bh = h * 0.32;
                     const sx = w - bw - 10, sy = h - bh - 10;
                     ctx.fillStyle = "rgba(0, 50, 0, 0.85)"; ctx.fillRect(sx, sy, bw, bh);
                     ctx.strokeStyle = "white"; ctx.lineWidth = 2; ctx.strokeRect(sx+5, sy+5, bw-10, bh-10);
                     
-                    // フォント設定（サイズを2.4%に縮小）
+                    // ⚠️【対策3】フォントをさらに縮小（画像幅の2.2%）し、モダンなフォントセットを指定
                     ctx.fillStyle = "white"; 
-                    const fs = Math.floor(w * 0.024); 
+                    const fs = Math.floor(w * 0.022); 
                     ctx.font = fs + "px 'Yu Gothic Medium', 'Hiragino Kaku Gothic ProN', sans-serif";
                     
                     let ty = sy + fs + 12; 
                     const ls = fs * 1.4; // 行間
-                    const drawWidth = bw - 20; // 左右10pxの余白を引いた描画可能幅
+                    const drawWidth = bw - 20; // 左右10pxの余白を引いた「絶対に超えない」描画可能幅
                     const textX = sx + 10;
 
                     // 1. 物件名 (ラベルなし、最大2行まではみ出し防止)
-                    ty = wrapTextAndReturnY(ctx, b.prop, textX, ty, drawWidth, ls, 2);
+                    ty = wrapTextAndReturnY(ctx, b.propName, textX, ty, drawWidth, ls, 2);
                     
                     // 2. 検査種類 ＋ 日付 (ラベルなし、最大2行)
-                    let insp_date = b.insp + "  " + b.date;
+                    let insp_date = b.inspType + "  " + b.inspDate;
                     ty = wrapTextAndReturnY(ctx, insp_date, textX, ty, drawWidth, ls, 2);
                     
                     // 3. 階層・部位・分類 (ラベルなし、最大2行)
-                    ty = wrapTextAndReturnY(ctx, b.loc, textX, ty, drawWidth, ls, 2);
+                    ty = wrapTextAndReturnY(ctx, b.locationText, textX, ty, drawWidth, ls, 2);
                     
                     // 4. 指摘事項 (色を変える、最大3行)
                     ctx.fillStyle = "#ffdddd";
-                    wrapTextAndReturnY(ctx, b.desc, textX, ty, drawWidth, ls, 3);
+                    wrapTextAndReturnY(ctx, b.issueDetail, textX, ty, drawWidth, ls, 3);
 
                     sendToStreamlit(canvas.toDataURL('image/jpeg', 0.6));
                     document.getElementById('upload-label').style.backgroundColor = '#2ecc71';
@@ -355,26 +356,31 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 </body>
 </html>
 """
-temp_dir = os.path.join(tempfile.gettempdir(), "board_cam_v7")
+temp_dir = os.path.join(tempfile.gettempdir(), "board_cam_v8_final")
 os.makedirs(temp_dir, exist_ok=True)
-with open(os.path.join(temp_dir, "index.html"), "w", encoding="utf-8") as f: f.write(CLIENT_COMPRESS_HTML)
-_board_camera = components.declare_component("board_cam_v7", path=temp_dir)
+with open(os.path.join(temp_dir, "index.html"), "w", encoding="utf-8") as file: file.write(CLIENT_COMPRESS_HTML)
+_board_camera = components.declare_component("board_cam_v8_final", path=temp_dir)
 
 # ==========================================
 # 5. カメラ呼び出し
 # ==========================================
 st.markdown("---")
 
-# 情報をすべて結合して整理
-loc_str = f"{f} {a} {sel_cat if sel_cat else ''}".strip()
+# ⚠️【対策4】空のデータが渡らないよう、Python側で確実に文字列を連結
+loc_parts = [str(f), str(a)]
+if sel_cat:
+    loc_parts.append(str(sel_cat))
+location_str = " ".join(loc_parts).strip()
+
+display_desc = final_desc[:80] + "..." if len(final_desc) > 80 else final_desc
 
 p_url = _board_camera(
-    prop=test_dynamic_property_name,
-    insp=c_type, # 検査種類を正しく渡す
-    date=datetime.date.today().strftime("%Y/%m/%d"), 
-    loc=loc_str, # 階層・部位・分類を合体して渡す
-    desc=final_desc,
-    key="cam_v7"
+    propName=test_dynamic_property_name,
+    inspType=c_type, 
+    inspDate=datetime.date.today().strftime("%Y/%m/%d"), 
+    locationText=location_str, 
+    issueDetail=display_desc,
+    key="cam_v8"
 )
 
 if p_url:
