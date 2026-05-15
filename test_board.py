@@ -4,10 +4,9 @@ import datetime
 import tempfile
 import os
 
-st.set_page_config(page_title="黒板カメラ完全実証版", layout="centered")
+st.set_page_config(page_title="黒板カメラ V7", layout="centered")
 
-st.title("🚧 V2 電子黒板カメラ (文字数制御＆フォント修正実証版)")
-st.error("※前回の試作品にあった、文字はみ出し、文字化け、不要文字をすべて修正しました。エビデンスとしての信頼性を保証します。")
+st.title("🚧 V2 電子黒板カメラ (ラベル撤廃・完全折り返し版)")
 
 # ==========================================
 # 4. 定型文データ（フリー項目完備・完全版マスター）
@@ -198,35 +197,27 @@ ISSUE_TEMPLATES = {
 }
 
 # ==========================================
-# 2. 本番環境と同じ選択肢リスト
+# 2. 選択肢リスト
 # ==========================================
 FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
 AREA_OPTS_STANDARD = ["-- 選択 --", "玄関", "廊下・階段・ENT", "LDK", "キッチン", "洋室", "洗面室", "UB", "トイレ", "バルコニー", "外部", "フリー項目"]
-AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バルコニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
+AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バルバルコニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
 SHANAI_KENSA_TYPES = ["社内検査(設計)", "社内検査(建設)", "社内検査(マーケ)", "社内検査(不動産)"]
-INSP_OPTS = ["社内検査(設計)", "配筋検査", "躯体検査", "中間検査"] # テスト用に絞っています
+INSP_OPTS = ["社内検査(設計)", "配筋検査", "躯体検査", "中間検査"]
 
 # ==========================================
-# 3. 入力UI
+# 3. 入力UI（すべての変数を連動させます）
 # ==========================================
-st.markdown("### 🔘 検査内容の入力（完全連動テスト）")
+with st.expander("📝 物件名（本番では裏で記憶）"):
+    test_dynamic_property_name = st.text_input("物件名を変更", value="スーパー・ロング・レジデンス名古屋プレミアム")
 
-# ⚠️ 【実証ポイント】本番では「記憶（session_state）」から引っ張る物件名をシミュレーション
-with st.expander("📝 物件名（本番では裏で記憶されているデータ）を設定"):
-    test_dynamic_property_name = st.text_input("物件名を変更してテストしてみてください", value="サンプルレジデンス名古屋")
-
-st.info(f"※システムは現在、物件名「{test_dynamic_property_name}」を裏で記憶しています。これが黒板に入ります。")
-
-c_type = st.selectbox("検査種類を選択（本番はスタート画面で選択）", INSP_OPTS)
+c_type = st.selectbox("検査種類", INSP_OPTS)
 
 c1, c2 = st.columns(2)
 f = c1.radio("階層", FLOOR_OPTS[1:], horizontal=True)
-
-# 検査種類によって部位の選択肢を切り替え
 area_opts = AREA_OPTS_SHANAI if c_type in SHANAI_KENSA_TYPES else AREA_OPTS_STANDARD
 a = c2.radio("部位", area_opts[1:], horizontal=True)
 
-# 検査種類と部位によって辞書の中身を切り替え（本番と完全一致のロジック）
 cat_dict = ISSUE_TEMPLATES.get(c_type, {}) if c_type in ["配筋検査", "躯体検査", "中間検査"] else ISSUE_TEMPLATES.get("社内検査(設計)", {}).get(a, {}) if c_type in SHANAI_KENSA_TYPES else {}
 if not isinstance(cat_dict, dict): cat_dict = {}
 
@@ -234,16 +225,11 @@ cat_keys = list(cat_dict.keys())
 sel_cat = st.radio("分類", cat_keys, horizontal=True) if cat_keys else None
 sel_temp = st.radio("よくある指摘事項", cat_dict.get(sel_cat, [])) if sel_cat else None
 
-st.markdown("##### 詳細・場所の追記（自由入力）")
-st.markdown("※はみ出し防止テストのため、**あえて長い文章（例：クロスの傷、要補修。あとで写真を協力業者に送る。全社共通の指摘とする）を入力してみてください。** Python側で文字数制御するため絶対に溢れません。")
-desc = st.text_area("詳細情報を入力", label_visibility="collapsed")
-
-# 最終的な指摘テキストを生成
+desc = st.text_area("詳細情報を入力", label_visibility="collapsed", placeholder="詳細・場所の追記（自由入力）")
 final_desc = (sel_temp + ("：" + desc.strip() if desc.strip() != "" else "")) if sel_temp else desc.strip()
 
-
 # ==========================================
-# 4. 【進化版】文字数制御＆フォント修正カメラコンポーネント (V6_Fix)
+# 4. 【抜本改修】JavaScript カメラコンポーネント
 # ==========================================
 CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 <html lang="ja">
@@ -268,39 +254,39 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
         <input type="file" accept="image/*" id="file-input">
     </label>
     <script>
-        let b = { prop: "", date: "", loc: "", cat: "", desc: "" };
+        let b = { prop: "", insp: "", date: "", loc: "", desc: "" };
         window.addEventListener("message", function(e) {
             if (e.data.type === "streamlit:render" && e.data.args) {
-                b.prop = e.data.args.prop || ""; b.date = e.data.args.date || "";
-                b.loc = e.data.args.loc || ""; b.cat = e.data.args.cat || ""; b.desc = e.data.args.desc || "";
+                b.prop = e.data.args.prop || ""; 
+                b.insp = e.data.args.insp || ""; 
+                b.date = e.data.args.date || "";
+                b.loc = e.data.args.loc || ""; 
+                b.desc = e.data.args.desc || "";
             }
         });
 
-        // ⚠️長い内容を自動で折り返すためのロジック。 maxWidthをピクセル単位で厳格に制御。
-        function wrapText(context, text, x, y, maxWidth, lineHeight) {
+        // ⚠️【全項目適用】はみ出し防止＆改行・次のY座標を返す汎用関数
+        function wrapTextAndReturnY(context, text, x, y, maxWidth, lineHeight, maxLines) {
+            if (!text) return y;
             var words = text.split('');
             var line = '';
             var lineCount = 0;
-            const maxLines = 3; // 指摘事項は最大3行まで
-
+            
             for(var n = 0; n < words.length; n++) {
                 var testLine = line + words[n];
                 var metrics = context.measureText(testLine);
-                var testWidth = metrics.width;
-                if (testWidth > maxWidth && n > 0) {
+                if (metrics.width > maxWidth && n > 0) {
                     context.fillText(line, x, y);
                     line = words[n];
                     y += lineHeight;
                     lineCount++;
-                    if (lineCount >= maxLines) {
-                        // 最大行数に達したら、残りはカット（...表示はPython側で行う）
-                        return; // 描画終了
-                    }
+                    if (lineCount >= maxLines) return y; // 指定行数を超えたらカット
                 } else {
                     line = testLine;
                 }
             }
             context.fillText(line, x, y);
+            return y + lineHeight;
         }
 
         function sendReady() { window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1}, "*"); }
@@ -313,7 +299,7 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
             const file = e.target.files[0]; if (!file) return;
             document.getElementById('upload-label').style.backgroundColor = '#f39c12';
             document.getElementById('btn-icon').className = 'fa-solid fa-spinner fa-spin';
-            document.getElementById('btn-text').innerHTML = '&nbsp;黒板を合成中...';
+            document.getElementById('btn-text').innerHTML = '&nbsp;黒板合成中...';
 
             const reader = new FileReader();
             reader.onload = function(event) {
@@ -326,31 +312,35 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, w, h);
 
-                    // 黒板描画（小型化：幅40%、高さ30%）
-                    const bw = w * 0.40, bh = h * 0.30;
+                    // 黒板の背景と枠線（幅45%, 高さ32%）
+                    const bw = w * 0.45, bh = h * 0.32;
                     const sx = w - bw - 10, sy = h - bh - 10;
                     ctx.fillStyle = "rgba(0, 50, 0, 0.85)"; ctx.fillRect(sx, sy, bw, bh);
                     ctx.strokeStyle = "white"; ctx.lineWidth = 2; ctx.strokeRect(sx+5, sy+5, bw-10, bh-10);
                     
-                    // ⚠️ 【修正】 Canvasの日本語フォントセットを変更
-                    ctx.fillStyle = "white"; const fs = Math.floor(w * 0.030); 
+                    // フォント設定（サイズを2.4%に縮小）
+                    ctx.fillStyle = "white"; 
+                    const fs = Math.floor(w * 0.024); 
                     ctx.font = fs + "px 'Yu Gothic Medium', 'Hiragino Kaku Gothic ProN', sans-serif";
                     
-                    let ty = sy + fs + 15; const ls = fs * 1.5;
+                    let ty = sy + fs + 12; 
+                    const ls = fs * 1.4; // 行間
+                    const drawWidth = bw - 20; // 左右10pxの余白を引いた描画可能幅
+                    const textX = sx + 10;
+
+                    // 1. 物件名 (ラベルなし、最大2行まではみ出し防止)
+                    ty = wrapTextAndReturnY(ctx, b.prop, textX, ty, drawWidth, ls, 2);
                     
-                    // 項目名の合成
-                    ctx.fillText("物件: " + b.prop, sx+15, ty); ty += ls;
-                    ctx.fillText("検査: " + b.date, sx+15, ty); ty += ls;
+                    // 2. 検査種類 ＋ 日付 (ラベルなし、最大2行)
+                    let insp_date = b.insp + "  " + b.date;
+                    ty = wrapTextAndReturnY(ctx, insp_date, textX, ty, drawWidth, ls, 2);
                     
-                    // ⚠️ 【修正】 「場所: 」を削除して、階層部位、分類を表示
-                    ctx.fillText(b.loc + " / " + b.cat, sx+15, ty); ty += ls;
+                    // 3. 階層・部位・分類 (ラベルなし、最大2行)
+                    ty = wrapTextAndReturnY(ctx, b.loc, textX, ty, drawWidth, ls, 2);
                     
-                    // 指摘事項は少し赤色で目立たせる
+                    // 4. 指摘事項 (色を変える、最大3行)
                     ctx.fillStyle = "#ffdddd";
-                    
-                    // ⚠️ 【修正】 指摘内容の描画。 maxWidthをbw - 30 (左右15pxマージン)から
-                    // はみ出し防止のため bw - 50 px にさらに厳しく制限。
-                    wrapText(ctx, "指摘: " + b.desc, sx+15, ty, bw - 50, ls);
+                    wrapTextAndReturnY(ctx, b.desc, textX, ty, drawWidth, ls, 3);
 
                     sendToStreamlit(canvas.toDataURL('image/jpeg', 0.6));
                     document.getElementById('upload-label').style.backgroundColor = '#2ecc71';
@@ -365,32 +355,27 @@ CLIENT_COMPRESS_HTML = """<!DOCTYPE html>
 </body>
 </html>
 """
-temp_dir = os.path.join(tempfile.gettempdir(), "board_cam_test_v6_fix")
+temp_dir = os.path.join(tempfile.gettempdir(), "board_cam_v7")
 os.makedirs(temp_dir, exist_ok=True)
 with open(os.path.join(temp_dir, "index.html"), "w", encoding="utf-8") as f: f.write(CLIENT_COMPRESS_HTML)
-_board_camera = components.declare_component("board_camera_test_v6_fix", path=temp_dir)
-
+_board_camera = components.declare_component("board_cam_v7", path=temp_dir)
 
 # ==========================================
-# 5. カメラ呼び出しとプレビュー表示
+# 5. カメラ呼び出し
 # ==========================================
 st.markdown("---")
-st.markdown("### 📷 写真を撮影（すべて自動で黒板に入ります）")
 
-# ⚠️ 【修正】Python側で指摘詳細の文字数制御を実施。
-# 指摘詳細（全角80文字以内）に強制カット（溢れたら…を表示）する。
-# これにより、黒板の中には常に収まりきることが保証された短い文章だけが渡される。
-display_desc = final_desc[:80] + "..." if len(final_desc) > 80 else final_desc
+# 情報をすべて結合して整理
+loc_str = f"{f} {a} {sel_cat if sel_cat else ''}".strip()
 
 p_url = _board_camera(
-    prop=test_dynamic_property_name, # 【実証】手入力で変えた物件名がここに渡る
+    prop=test_dynamic_property_name,
+    insp=c_type, # 検査種類を正しく渡す
     date=datetime.date.today().strftime("%Y/%m/%d"), 
-    loc=f"{f} {a}", # 階層/部位を渡す（JavaScript側で項目名を付与せず表示）
-    cat=sel_cat,    # 分類も渡す
-    desc=display_desc, # ⚠️ 【修正】文字数制御済みのテキストを渡す
-    key="insp_cam_fix"
+    loc=loc_str, # 階層・部位・分類を合体して渡す
+    desc=final_desc,
+    key="cam_v7"
 )
 
 if p_url:
     st.image(p_url, caption="完成した電子黒板プレビュー", use_container_width=True)
-    st.success("✅ 選択した項目が正常に黒板へ連動・合成されました！（文字数制御、フォント修正済み）")
