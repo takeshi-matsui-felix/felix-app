@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>施工管理システム - 差し戻し管理</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f8f9fa; color: #333; padding: 30px; }
+        .container { max-width: 500px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h2 { border-bottom: 2px solid #007bff; padding-bottom: 10px; color: #007bff; margin-top: 0; }
+        .form-group { margin-bottom: 20px; text-align: left; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; color: #555; }
+        input[type="text"], textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-radius; box-sizing: border-box; font-size: 14px; }
+        textarea { height: 100px; resize: vertical; }
+        .btn-submit { width: 100%; padding: 12px; background-color: #dc3545; color: white; border: none; border-radius: 4px; font-size: 16px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+        .btn-submit:hover { background-color: #bd2130; }
+        #status-message { margin-top: 20px; padding: 10px; border-radius: 4px; font-weight: bold; text-align: center; display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>📸 施工写真 差し戻し判定</h2>
+    <p style="font-size: 13px; color: #666;">項目を入力してボタンを押すと、担当業者のLINEへリアルタイムで通知されます。</p>
+    
+    <div class="form-group">
+        <label for="vendor-name">対象の協力業者名</label>
+        <input type="text" id="vendor-name" value="松井組（テスト業者）">
+    </div>
+
+    <div class="form-group">
+        <label for="construction-item">工種・場所</label>
+        <input type="text" id="construction-item" value="2階 床配筋検査">
+    </div>
+
+    <div class="form-group">
+        <label for="reject-reason">差し戻しの理由・指示内容</label>
+        <textarea id="reject-reason">鉄筋のピッチが設計図書と異なります。スケール（検査用メジャー）をあてた状態で、再度撮影して再提出してください。</textarea>
+    </div>
+
+    <button id="send-btn" class="btn-submit">❌ 業者へ差し戻し通知をLINE送信</button>
+
+    <div id="status-message"></div>
+</div>
+
+<script>
+    // 松井様の専用環境を完全にセットアップ済み
+    const SUPABASE_URL = 'https://vzuzeymvyftmfuaxrvtb.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ6dXpleW12eWZ0bWZ1YXhydnRiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3Nzk2NDUsImV4cCI6MjA5MjM1NTY0NX0.6XW5qNCkvXx1MhbuQ-8v6WlNyAR1EPp2Emhti2-4b4E';
+    const MY_LINE_ID = 'U2d0a66837b85c3726fd38e1327f95dfd';
+
+    // クライアント初期化
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    document.getElementById('send-btn').addEventListener('click', async () => {
+        const btn = document.getElementById('send-btn');
+        const statusEl = document.getElementById('status-message');
+        
+        // 画面の入力値を取得
+        const vendor = document.getElementById('vendor-name').value;
+        const item = document.getElementById('construction-item').value;
+        const reason = document.getElementById('reject-reason').value;
+
+        // LINE送信用に文章を綺麗に組み立て
+        const lineMessage = `【施工管理システム：写真差し戻し】\n\n`
+                          + `■対象業者：${vendor}\n`
+                          + `■工種・場所：${item}\n`
+                          + `■指摘理由：\n${reason}\n\n`
+                          + `※元画面から施工写真を再アップロードしてください。`;
+
+        // ボタンを連打できないように無効化
+        btn.disabled = true;
+        statusEl.style.display = 'block';
+        statusEl.style.backgroundColor = '#e2e3e5';
+        statusEl.style.color = '#383d41';
+        statusEl.textContent = '⚡ 業者側のLINEへ通知を送信中...';
+
+        try {
+            // Supabaseの最強送信機を起動
+            const { data, error } = await supabaseClient.rpc('send_line_notification', {
+                user_id: MY_LINE_ID,
+                message_text: lineMessage
+            });
+
+            if (error) throw error;
+
+            statusEl.style.backgroundColor = '#d4edda';
+            statusEl.style.color = '#155724';
+            statusEl.textContent = '✅ LINE通知送信完了！ 業者側のスマホへ着信しました。';
+
+        } catch (err) {
+            console.error(err);
+            statusEl.style.backgroundColor = '#f8d7da';
+            statusEl.style.color = '#721c24';
+            statusEl.textContent = '❌ 送信エラー: ' + err.message;
+        } finally {
+            // ボタンを元に戻す
+            btn.disabled = false;
+        }
+    });
+</script>
+</body>
+</html>
