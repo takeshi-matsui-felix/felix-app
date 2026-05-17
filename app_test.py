@@ -29,8 +29,8 @@ LINE_ACCESS_TOKEN = "XwqNwZuN4ruE09xplLcq21zyruMyZDwi1r41J0HyXtD34XRb2D+RL6wskoC
 LINE_CLIENT_ID = "2010108828"
 LINE_CLIENT_SECRET = "2c73ce25e71858bcb09c89c79fa6bbe0"
 
-# 💡 ローカルテスト用に変更済み
-REDIRECT_URI = "http://localhost:8501/"
+# 本番環境（GitHub用）に戻しました
+REDIRECT_URI = "https://felix-app-prbmr4ghbjai7n7hzfyahj.streamlit.app/"
 
 ADMIN_PASSWORD = "2011"
 DELETE_PASSWORD = "5963"
@@ -48,7 +48,6 @@ def db_get(table, params=""):
 
 def db_post(table, data): requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, json=data)
 
-# 💡 バグ修正：テーブルによって検索キー（ID列）を自動で切り替える
 def db_patch(table, record_id, data): 
     pk_col = "partner_id" if table == "partners" else "record_id"
     requests.patch(f"{SUPABASE_URL}/rest/v1/{table}?{pk_col}=eq.{record_id}", headers=HEADERS, json=data)
@@ -483,7 +482,7 @@ def jump_to_menu(menu_name, prop_id=None):
 
 FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
 AREA_OPTS_STANDARD = ["-- 選択 --", "玄関", "廊下・階段・ENT", "LDK", "キッチン", "洋室", "洗面室", "UB", "トイレ", "バルコニー", "外部", "フリー項目"]
-AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バル কুলニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
+AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バルコニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
 WORK_OPTS_STANDARD = ["-- 選択 --", "基礎工事（鉄筋）", "基礎工事（型枠）", "フレーミング", "FM", "造作", "内装", "電気", "設備", "ガス", "清掃", "サッシ", "外壁", "外構", "コーキング", "リペア", "その他"]
 WORK_OPTS_HAIKIN = ["-- 選択 --", "基礎工事(鉄筋)", "水道", "ガス", "その他"]
 WORK_OPTS_KUTAI = ["-- 選択 --", "フレーミング", "電気", "水道", "防水", "その他"]
@@ -502,7 +501,6 @@ def main():
     line_code = qp.get("code")
     state_str = qp.get("state")
     
-    # 端末情報を検知して自動ログイン
     if st.session_state.role is None and "saved_partner_id" in st.session_state:
         saved_id = st.session_state["saved_partner_id"]
         res = db_get("partners", f"partner_id=eq.{saved_id}")
@@ -511,16 +509,14 @@ def main():
             st.session_state.partner_data = res[0]
             st.session_state.active_menu = "是正実施（協力業者）"
 
-    # 🎯 LINE連携から戻ってきた時の【エラー出力強化版】処理
+    # 🎯 LINE連携から戻ってきた時の処理
     if line_code and state_str:
-        # ⚠️ Streamlitの二重実行による「使用済みコード」エラーを完全に防ぐ
         if st.session_state.get("processed_code") != line_code:
             st.session_state["processed_code"] = line_code
             with st.spinner("🔄 LINE連携を解析中..."):
                 line_user_id, error_msg = get_line_profile(line_code)
                 
                 if line_user_id:
-                    # 成功した場合の処理
                     db_patch("partners", state_str, {"line_user_id": line_user_id})
                     res = db_get("partners", f"partner_id=eq.{state_str}")
                     if res:
@@ -532,7 +528,6 @@ def main():
                         st.success("🎉 アカウント登録とLINE連携が完了しました！")
                         st.rerun()
                 else:
-                    # 💥 失敗した場合は、LINEからの生のエラーメッセージを画面に出す
                     st.error("❌ LINE IDの取得に失敗しました。以下のエラーメッセージを確認してください。")
                     st.code(error_msg)
                     st.stop()
@@ -560,7 +555,6 @@ def main():
                 if st.button("🟢 アカウントを作成してLINE連携へ進む", type="primary", use_container_width=True):
                     if new_c_name and new_contact and new_id and new_pw:
                         p_id = str(uuid.uuid4())
-                        # データベースへ登録
                         db_post("partners", {
                             "partner_id": p_id, 
                             "company_name": new_c_name, 
@@ -624,9 +618,6 @@ def main():
     selected_menu = st.sidebar.radio("MENU", menu_opts, index=menu_opts.index(st.session_state.active_menu), format_func=format_menu)
     if selected_menu != st.session_state.active_menu: jump_to_menu(selected_menu, st.session_state.pre_selected_prop)
 
-    # ----------------------------------------
-    # メニュー: 業者アカウント管理
-    # ----------------------------------------
     if st.session_state.active_menu == "業者アカウント管理":
         st.header("🏢 協力業者 アカウント管理")
         st.info("協力業者からの「パスワード忘れ」の対応や、アカウント情報の変更を行います。")
@@ -648,9 +639,6 @@ def main():
                     requests.delete(f"{SUPABASE_URL}/rest/v1/partners?partner_id=eq.{p['partner_id']}", headers=HEADERS)
                     st.rerun()
 
-    # ----------------------------------------
-    # メニュー: 1. 物件登録 (エリア選択追加)
-    # ----------------------------------------
     elif st.session_state.active_menu == "物件登録（管理者）":
         st.header("物件登録")
         name = st.text_input("新規物件名")
@@ -673,9 +661,6 @@ def main():
                 if col_n.button("キャンセル", key=f"no_{prop_id}_{idx}"): st.session_state.delete_target = None; st.rerun()
                 st.markdown("---")
 
-    # ----------------------------------------
-    # メニュー: 2. 検査実施
-    # ----------------------------------------
     elif st.session_state.active_menu == "検査実施（管理者）":
         if not st.session_state.current_box:
             st.header("検査開始")
@@ -776,9 +761,6 @@ def main():
                 if st.button("✏️ 修正", use_container_width=True): st.session_state.edit_saved_records = True; st.rerun()
                 if st.button("終了", use_container_width=True): st.session_state.current_box = None; st.session_state.issue_saved = False; st.rerun()
 
-    # ----------------------------------------
-    # メニュー: 3. 検査内容確認（管理者専用）
-    # ----------------------------------------
     elif st.session_state.active_menu == "検査内容確認（管理者）":
         st.header("検査内容確認 ＆ 最終修正")
         all_recs = db_get("inspection_records", "select=inspection_id,progress_status&progress_status=eq.確認待ち")
@@ -852,9 +834,6 @@ def main():
                         if c2.button("🗑️ 削除", key=f"vdel_{rec_id}"): db_delete_record(rec_id); st.session_state.cached_records = None; st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
 
-    # ----------------------------------------
-    # メニュー: 4. 是正実施
-    # ----------------------------------------
     elif st.session_state.active_menu == "是正実施（協力業者）":
         st.header("是正実施")
         all_recs = db_get("inspection_records", "select=inspection_id,progress_status")
@@ -956,9 +935,6 @@ def main():
                                 if up: st.image(up, width=250)
                             st.markdown('</div>', unsafe_allow_html=True)
 
-    # ----------------------------------------
-    # メニュー: 5. 是正確認 / 6. 完了分一覧
-    # ----------------------------------------
     elif st.session_state.active_menu in ["是正確認（管理者）", "完了分一覧（共通）"]:
         status = "是正確認中" if "確認" in st.session_state.active_menu else "完了"
         all_recs = db_get("inspection_records", "select=inspection_id,progress_status")
@@ -1066,7 +1042,6 @@ def main():
                                 
                                 reason = cb.text_input("否認理由", key=f"re_{rec_id}", label_visibility="collapsed")
                                 
-                                # 🚀 否認（差し戻し）処理 ＋ LINE通知発射！
                                 if cb.button("❌ 否認（差し戻し）", key=f"ng_{rec_id}"): 
                                     db_patch("inspection_records", rec_id, {"progress_status": "是正待ち", "reject_reason": reason})
                                     
