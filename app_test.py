@@ -4,7 +4,9 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="HTML Catcher", layout="centered")
 st.title("HTMLでURLを捕まえるテスト")
 
-# JavaScriptでURLのパラメータを直接画面に書き出すHTML
+# 松井様のテスト用URLを完全に埋め込み（編集不要）
+REDIRECT_URI = "https://felix-app-fu7ewqtabdecfmouhwgxni.streamlit.app/"
+
 html_code = """
 <!DOCTYPE html>
 <html>
@@ -17,7 +19,7 @@ html_code = """
     <script>
         window.onload = function() {
             try {
-                // Streamlitの親ウィンドウのURLを直接覗き込む
+                // 親ウィンドウ（Streamlit）のURLから直接codeを抽出
                 const params = new URLSearchParams(window.parent.location.search);
                 const code = params.get("code");
                 
@@ -31,7 +33,7 @@ html_code = """
                     document.getElementById("result").innerText = "現在のURL: " + window.parent.location.href;
                 }
             } catch (e) {
-                document.getElementById("status").innerText = "⚠️ ブラウザのセキュリティブロック発生";
+                document.getElementById("status").innerText = "⚠️ エラー発生";
                 document.getElementById("result").innerText = e.message;
             }
         };
@@ -42,7 +44,8 @@ html_code = """
 components.html(html_code, height=300)
 
 st.markdown("---")
-login_url = "https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=2010108828&redirect_uri=https%3A%2F%2Ffelix-app-prbmr4ghbjai7n7hzfyahj.streamlit.app%2F&state=html_test&scope=profile%20openid"
+# LINEログイン用のURL（テスト用URLをエンコード済）
+login_url = "https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=2010108828&redirect_uri=https%3A%2F%2Ffelix-app-fu7ewqtabdecfmouhwgxni.streamlit.app%2F&state=html_test&scope=profile%20openid"
 
 st.markdown("**【テスト手順】以下のURLをコピーして、スマホのChromeブラウザで開いてログインしてください。**")
 st.code(login_url)
