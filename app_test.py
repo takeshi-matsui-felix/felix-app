@@ -57,7 +57,8 @@ def main():
     else:
         st.write("以下のリンクからLINEログインを行ってください。")
         encoded_uri = urllib.parse.quote(REDIRECT_URI, safe='')
-        login_url = f"https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id={LINE_CLIENT_ID}&redirect_uri={encoded_uri}&state=f Felix&scope=profile%20openid"
+        # URLの不具合を防ぐためstateのスペースを排除
+        login_url = f"https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id={LINE_CLIENT_ID}&redirect_uri={encoded_uri}&state=felix_test&scope=profile%20openid"
         
         st.markdown(f"## [👉 LINEログインしてIDを表示する]({login_url})")
 
