@@ -6,14 +6,14 @@ import urllib.parse
 LINE_CLIENT_ID = "2010108828"
 LINE_CLIENT_SECRET = "2c73ce25e71858bcb09c89c79fa6bbe0"
 
-# ⚠️ 注意: LINE Developersに登録しているURLと【1文字の狂いもなく（末尾の / も含め）】一致している必要があります。
+# ⚠️ 注意: LINE Developersに登録しているURLと完全一致
 REDIRECT_URI = "https://felix-app-prbmr4ghbjai7n7hzfyahj.streamlit.app/"
 
 def main():
     st.set_page_config(page_title="LINE ID 取得テスト", layout="centered")
-    st.title("LINE ID 表示テスト (最終版)")
+    st.title("LINE ID 表示テスト (Android対応版)")
 
-    # --- セッション管理（二重実行バグを完全に防ぐための要） ---
+    # --- セッション管理 ---
     if "line_user_id" not in st.session_state:
         st.session_state.line_user_id = None
     if "line_display_name" not in st.session_state:
@@ -23,7 +23,6 @@ def main():
     if "error_message" not in st.session_state:
         st.session_state.error_message = None
 
-    # URLパラメータの取得
     qp = st.query_params
     code = qp.get("code")
 
@@ -31,11 +30,9 @@ def main():
     # 1. 認証コード(code)を受け取り、まだ処理していない場合のみ実行
     # ==========================================================
     if code and st.session_state.processed_code != code:
-        # 瞬時に「処理済み」としてロックし、Streamlitの2回目実行を弾く
         st.session_state.processed_code = code
         
         with st.spinner("LINEサーバーと通信中..."):
-            # Token交換API
             token_url = "https://api.line.me/oauth2/v2.1/token"
             payload = {
                 "grant_type": "authorization_code",
@@ -49,25 +46,20 @@ def main():
             if res.status_code == 200:
                 access_token = res.json().get("access_token")
                 
-                # Profile取得API
                 profile_res = requests.get(
                     "https://api.line.me/v2/profile", 
                     headers={"Authorization": f"Bearer {access_token}"}
                 )
                 
                 if profile_res.status_code == 200:
-                    # 取得成功：データをセッションに保存
                     st.session_state.line_user_id = profile_res.json().get("userId")
                     st.session_state.line_display_name = profile_res.json().get("displayName")
                     st.session_state.error_message = None
                 else:
-                    # Profileエラー
                     st.session_state.error_message = f"Profile取得エラー: {profile_res.text}"
             else:
-                # Tokenエラー
                 st.session_state.error_message = f"Token取得エラー({res.status_code}): {res.text}"
         
-        # 処理が終わったらURLから「code」を消去し、画面をリフレッシュする
         st.query_params.clear()
         st.rerun()
 
@@ -99,14 +91,19 @@ def main():
             st.rerun()
 
     # ==========================================================
-    # 4. 初回アクセス時の画面（リンク表示）
+    # 4. 初回アクセス時の画面（タップ専用ボタン化）
     # ==========================================================
     else:
-        st.info("下のリンクをタップして、LINE認証へ進んでください。")
+        st.info("下のボタンをタップして、LINE認証へ進んでください。")
         encoded_uri = urllib.parse.quote(REDIRECT_URI, safe='')
         login_url = f"https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id={LINE_CLIENT_ID}&redirect_uri={encoded_uri}&state=test_mode&scope=profile%20openid"
         
-        st.markdown(f"## [👉 LINEログインしてIDを取得する]({login_url})")
+        # 🟢 修正：スマホで確実に押せる巨大なネイティブボタンに変更
+        st.link_button("👉 LINEログインしてIDを取得する", login_url, type="primary", use_container_width=True)
+        
+        st.markdown("---")
+        st.markdown("**※万が一上のボタンが反応しない場合は、以下のURLをコピーしてChromeブラウザで開いてください。**")
+        st.code(login_url)
 
 if __name__ == "__main__":
     main()
