@@ -534,14 +534,17 @@ def main():
                     requests.delete(f"{SUPABASE_URL}/rest/v1/partners?partner_id=eq.{p['partner_id']}", headers=HEADERS)
                     st.rerun()
 
-    # ----------------------------------------
+   # ----------------------------------------
     # メニュー: 1. 物件登録
     # ----------------------------------------
     elif st.session_state.active_menu == "物件登録（管理者）":
         st.header("物件登録")
         name = st.text_input("新規物件名")
+        # 👇 1. エリアを選択するプルダウンを追加
+        area = st.selectbox("エリアを選択", ["東海エリア", "関東エリア"]) 
         if st.button("登録"):
-            if name: db_post("properties", {"property_id": str(uuid.uuid4()), "property_name": name}); st.success("登録完了")
+            # 👇 2. Supabaseに送信するデータの中に "area" を追加
+            if name: db_post("properties", {"property_id": str(uuid.uuid4()), "property_name": name, "area": area}); st.success("登録完了")
         for idx, p in enumerate(db_get("properties", "select=*")):
             prop_id = p.get('property_id')
             if not prop_id: continue
