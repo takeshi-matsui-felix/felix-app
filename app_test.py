@@ -550,8 +550,7 @@ def main():
                 if new_c_name and new_id and new_pw and new_work_type != "-- 選択 --":
                     p_data = {"company_name": new_c_name, "login_id": new_id, "login_password": new_pw, "work_type": new_work_type}
                     jump_url = get_line_login_url(p_data)
-                    st.markdown(f'<meta http-equiv="refresh" content="0;URL=\'{jump_url}\'">', unsafe_allow_html=True)
-                    st.stop()
+                    components.html(f"<script>window.parent.location.href = '{jump_url}';</script>", height=0)
                 else:
                     st.error("会社名、ID、パスワード、工種をすべて正しく入力してください。")
             
