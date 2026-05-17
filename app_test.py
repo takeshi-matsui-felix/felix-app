@@ -21,8 +21,13 @@ HEADERS = {
     "Prefer": "return=minimal"
 }
 
-# 🔑 LINE APIの設定（松井様からいただいた鍵！）
+# 🔑 LINE APIの設定（個別送信用）
 LINE_ACCESS_TOKEN = "XwqNwZuN4ruE09xplLcq21zyruMyZDwi1r41J0HyXtD34XRb2D+RL6wskoCdRh2qgQ2R6IbbxQJDYKoUSiH+i2a+pgKaTJjwawe6u0XdRDxD0VOOGeMMBKdRq6E6OMTkg3yvurB+BOUB5k98bcaBgwdB04t89/1O/w1cDnyilFU="
+
+# 🔑 LINE ログイン（業者登録連携用）
+LINE_CLIENT_ID = "2010108828"
+LINE_CLIENT_SECRET = "2c73ce25e71858bcb09c89c79fa6bbe0"
+REDIRECT_URI = "https://felix-app-prbmr4ghbjai7n7hzfyahj.streamlit.app/"
 
 ADMIN_PASSWORD = "2011"
 DELETE_PASSWORD = "5963"
@@ -94,6 +99,24 @@ def send_line_push_message(to_user_id, text_message):
         requests.post(url, headers=headers, json=data)
     except Exception as e:
         print(f"LINE送信エラー: {e}")
+
+# 🚀 LINEログイン連携用の関数
+def get_line_login_url():
+    state = str(uuid.uuid4())
+    return f"https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id={LINE_CLIENT_ID}&redirect_uri={requests.utils.quote(REDIRECT_URI)}&state={state}&scope=profile%20openid"
+
+def get_line_profile(code):
+    token_url = "https://api.line.me/oauth2/v2.1/token"
+    res = requests.post(token_url, headers={"Content-Type": "application/x-www-form-urlencoded"}, data={
+        "grant_type": "authorization_code", "code": code, "redirect_uri": REDIRECT_URI,
+        "client_id": LINE_CLIENT_ID, "client_secret": LINE_CLIENT_SECRET
+    })
+    if res.status_code == 200:
+        access_token = res.json().get("access_token")
+        profile_res = requests.get("https://api.line.me/v2/profile", headers={"Authorization": f"Bearer {access_token}"})
+        if profile_res.status_code == 200:
+            return profile_res.json().get("userId")
+    return None
 
 # ==========================================
 # 📱 2. スマート電子黒板カメラ
@@ -233,6 +256,7 @@ st.markdown("""
     .badge-wrap { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: bold; margin-left: 5px; }
 </style>
 """, unsafe_allow_html=True)
+
 
 # ==========================================
 # 4. 定型文データ（フリー項目完備・完全版マスター）
@@ -422,6 +446,7 @@ ISSUE_TEMPLATES = {
     }
 }
 
+
 # ==========================================
 # 4. セッション管理 & 定数
 # ==========================================
@@ -458,33 +483,83 @@ INSPECTOR_OPTS = ["工事監理チーム", "建設部", "不動産事業部", "�
 # 5. メイン画面・機能
 # ==========================================
 def main():
+    # URLパラメータチェック（LINEから戻ってきた場合を検知）
+    qp = st.query_params
+    line_code = qp.get("code")
+    
+    # 端末情報を検知して自動ログイン
+    if st.session_state.role is None and "saved_partner_id" in st.session_state:
+        saved_id = st.session_state["saved_partner_id"]
+        res = db_get("partners", f"partner_id=eq.{saved_id}")
+        if res:
+            st.session_state.role = "partner"
+            st.session_state.partner_data = res[0]
+            st.session_state.active_menu = "是正実施（協力業者）"
+
+    # LINE認証完了時の処理
+    if line_code:
+        with st.spinner("🔄 LINE連携を確定しています..."):
+            line_user_id = get_line_profile(line_code)
+            if line_user_id:
+                if "pending_partner" in st.session_state and st.session_state["pending_partner"]:
+                    p_data = st.session_state["pending_partner"]
+                    p_data["line_user_id"] = line_user_id
+                    p_id = str(uuid.uuid4())
+                    p_data["partner_id"] = p_id
+                    
+                    db_post("partners", p_data)
+                    
+                    st.session_state["saved_partner_id"] = p_id
+                    st.session_state.role = "partner"
+                    st.session_state.partner_data = {"partner_id": p_id, "company_name": p_data["company_name"], "line_user_id": line_user_id}
+                    st.session_state.active_menu = "是正実施（協力業者）"
+                    st.session_state["pending_partner"] = None
+                    st.query_params.clear()
+                    st.success("🎉 アカウント登録とLINE連携が完了しました！")
+                    st.rerun()
+
     if st.session_state.role is None:
         st.markdown("<h1 style='text-align: center;'>Felix検査App</h1>", unsafe_allow_html=True)
-        t1, t2 = st.tabs(["協力業者", "管理者"])
+        t1, t2 = st.tabs(["協力業者（登録・ログイン）", "管理者"])
         
         with t1:
-            st.markdown("### 👷‍♂️ 協力業者ログイン")
-            p_id = st.text_input("ログインID (会社用)")
-            p_pwd = st.text_input("パスワード", type="password")
+            st.markdown("### 👷‍♂️ 協力業者窓口")
+            st.markdown("""
+            <div style="background-color:#F0F8FF; padding:15px; border-radius:8px; border-left:5px solid #0084FF; margin-bottom:15px;">
+                <strong>⚠️ はじめてご利用になる業者様へ</strong><br>
+                以下の必要情報を入力し、最後に「LINE連携して登録」ボタンを押してください。<br>
+                次回以降、この端末でのログイン操作は一切不要（自動ログイン）になります。
+            </div>
+            """, unsafe_allow_html=True)
             
-            with st.expander("📝 (テスト用) 新規アカウントを作る"):
-                new_c_name = st.text_input("会社名 (例: A工務店)")
-                new_id = st.text_input("新規ログインID")
-                new_pw = st.text_input("新規パスワード")
-                if st.button("アカウント登録"):
-                    db_post("partners", {"company_name": new_c_name, "login_id": new_id, "login_password": new_pw})
-                    st.success("作成しました！上の欄からログインしてください。")
-
-            if st.button("ログイン", type="primary", use_container_width=True):
-                res = db_get("partners", f"login_id=eq.{p_id}&login_password=eq.{p_pwd}")
-                if res and len(res) > 0:
-                    st.session_state.role = "partner"; st.session_state.partner_data = res[0]
-                    st.session_state.active_menu = "是正実施（協力業者）"; st.rerun()
-                else: st.error("IDまたはパスワードが違います")
+            new_c_name = st.text_input("会社名 (例: A工務店)", key="reg_c")
+            new_id = st.text_input("新規ログインID (任意の英数字)", key="reg_id")
+            new_pw = st.text_input("新規パスワード", type="password", key="reg_pw")
+            new_work_type = st.selectbox("担当工種（メイン）", ["-- 選択 --", "基礎工事", "フレーミング", "造作", "内装", "電気", "設備", "ガス", "サッシ", "外壁", "外構", "コーキング", "リペア", "その他"])
+            
+            if st.button("🟢 LINE連携してアカウント登録する", type="primary", use_container_width=True):
+                if new_c_name and new_id and new_pw and new_work_type != "-- 選択 --":
+                    st.session_state["pending_partner"] = {"company_name": new_c_name, "login_id": new_id, "login_password": new_pw, "work_type": new_work_type}
+                    st.markdown(f'<meta http-equiv="refresh" content="0;URL=\'{get_line_login_url()}\'">', unsafe_allow_html=True)
+                    st.stop()
+                else:
+                    st.error("会社名、ID、パスワード、工種をすべて正しく入力してください。")
+            
+            st.markdown("---")
+            with st.expander("🔑 すでにアカウントをお持ちの方（再ログイン）"):
+                p_id = st.text_input("ログインID (会社用)")
+                p_pwd = st.text_input("パスワード", type="password")
+                if st.button("ログイン", use_container_width=True):
+                    res = db_get("partners", f"login_id=eq.{p_id}&login_password=eq.{p_pwd}")
+                    if res and len(res) > 0:
+                        st.session_state["saved_partner_id"] = res[0]['partner_id']
+                        st.session_state.role = "partner"; st.session_state.partner_data = res[0]
+                        st.session_state.active_menu = "是正実施（協力業者）"; st.rerun()
+                    else: st.error("IDまたはパスワードが違います")
         
         with t2:
             st.markdown("### 👔 管理者ログイン")
-            pwd = st.text_input("Password", type="password")
+            pwd = st.text_input("Password", type="password", key="admin_pwd")
             if st.button("管理者としてログイン"):
                 if pwd == ADMIN_PASSWORD:
                     st.session_state.role = "admin"; st.query_params.auth = ADMIN_PASSWORD
@@ -534,16 +609,14 @@ def main():
                     requests.delete(f"{SUPABASE_URL}/rest/v1/partners?partner_id=eq.{p['partner_id']}", headers=HEADERS)
                     st.rerun()
 
-   # ----------------------------------------
-    # メニュー: 1. 物件登録
+    # ----------------------------------------
+    # メニュー: 1. 物件登録 (エリア選択追加)
     # ----------------------------------------
     elif st.session_state.active_menu == "物件登録（管理者）":
         st.header("物件登録")
         name = st.text_input("新規物件名")
-        # 👇 1. エリアを選択するプルダウンを追加
         area = st.selectbox("エリアを選択", ["東海エリア", "関東エリア"]) 
         if st.button("登録"):
-            # 👇 2. Supabaseに送信するデータの中に "area" を追加
             if name: db_post("properties", {"property_id": str(uuid.uuid4()), "property_name": name, "area": area}); st.success("登録完了")
         for idx, p in enumerate(db_get("properties", "select=*")):
             prop_id = p.get('property_id')
@@ -958,7 +1031,6 @@ def main():
                                 if cb.button("❌ 否認（差し戻し）", key=f"ng_{rec_id}"): 
                                     db_patch("inspection_records", rec_id, {"progress_status": "是正待ち", "reject_reason": reason})
                                     
-                                    # 業者にLINEで個別通知を飛ばす
                                     partner_id = r.get('partner_id')
                                     if partner_id:
                                         p_info = db_get("partners", f"partner_id=eq.{partner_id}")
@@ -985,4 +1057,4 @@ def main():
 
 if __name__ == "__main__":
     try: main()
-    except Exception as e: st.error("エラー"); st.button("復旧")
+    except Exception as e: st.error("エラーが発生しました。"); st.button("復旧")
