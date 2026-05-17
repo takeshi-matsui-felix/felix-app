@@ -8,8 +8,7 @@ import io
 import os
 import tempfile
 import threading
-import urllib.parse  # 👈 追加: URL変換用の標準機能
-import json          # 👈 追加: データ暗号化用の標準機能
+import urllib.parse
 
 # ==========================================
 # 1. Supabase & LINE 接続設定
@@ -102,14 +101,10 @@ def send_line_push_message(to_user_id, text_message):
     except Exception as e:
         print(f"LINE送信エラー: {e}")
 
-# 🚀 LINEログイン連携用の関数（バグ修正版）
-def get_line_login_url(partner_data_dict):
-    # 業者データを暗号化してLINEの旅行に持たせる（セッション切れ対策）
-    state_json = json.dumps(partner_data_dict)
-    state_b64 = base64.b64encode(state_json.encode("utf-8")).decode("utf-8")
-    
+# 🚀 LINEログイン連携用の関数（堅牢版：partner_idだけを運ぶ）
+def get_line_login_url(partner_id):
     encoded_uri = urllib.parse.quote(REDIRECT_URI)
-    return f"https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id={LINE_CLIENT_ID}&redirect_uri={encoded_uri}&state={state_b64}&scope=profile%20openid"
+    return f"https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id={LINE_CLIENT_ID}&redirect_uri={encoded_uri}&state={partner_id}&scope=profile%20openid"
 
 def get_line_profile(code):
     token_url = "https://api.line.me/oauth2/v2.1/token"
@@ -452,11 +447,10 @@ ISSUE_TEMPLATES = {
     }
 }
 
-
 # ==========================================
 # 4. セッション管理 & 定数
 # ==========================================
-for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "skip_render_ids", "show_bulk_confirm", "edit_saved_records", "cached_records", "cached_target_id", "temp_photo", "partner_data"]:
+for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "skip_render_ids", "show_bulk_confirm", "edit_saved_records", "cached_records", "cached_target_id", "temp_photo", "partner_data", "jump_url"]:
     if key not in st.session_state: st.session_state[key] = None
 if st.session_state.skip_render_ids is None: st.session_state.skip_render_ids = []
 
@@ -475,7 +469,7 @@ def jump_to_menu(menu_name, prop_id=None):
 FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
 AREA_OPTS_STANDARD = ["-- 選択 --", "玄関", "廊下・階段・ENT", "LDK", "キッチン", "洋室", "洗面室", "UB", "トイレ", "バルコニー", "外部", "フリー項目"]
 AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バルコニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
-WORK_OPTS_STANDARD = ["-- 選択 --", "基礎工事（鉄筋）", "基礎工事（型枠）", "フレーミング", "FM", "造作", "内装", "電気", "設備", "ガス", "清固定", "サッシ", "外壁", "外構", "コーキング", "リペア", "その他"]
+WORK_OPTS_STANDARD = ["-- 選択 --", "基礎工事（鉄筋）", "基礎工事（型枠）", "フレーミング", "FM", "造作", "内装", "電気", "設備", "ガス", "清掃", "サッシ", "外壁", "外構", "コーキング", "リペア", "その他"]
 WORK_OPTS_HAIKIN = ["-- 選択 --", "基礎工事(鉄筋)", "水道", "ガス", "その他"]
 WORK_OPTS_KUTAI = ["-- 選択 --", "フレーミング", "電気", "水道", "防水", "その他"]
 WORK_OPTS_CHUKAN = ["-- 選択 --", "造作", "電気", "水道", "外壁", "ガス", "足場", "その他"]
@@ -493,39 +487,26 @@ def main():
     line_code = qp.get("code")
     state_str = qp.get("state")
     
-    # 端末情報を検知して自動ログイン
-    if st.session_state.role is None and "saved_partner_id" in st.session_state:
-        saved_id = st.session_state["saved_partner_id"]
-        res = db_get("partners", f"partner_id=eq.{saved_id}")
-        if res:
-            st.session_state.role = "partner"
-            st.session_state.partner_data = res[0]
-            st.session_state.active_menu = "是正実施（協力業者）"
-
-    # LINE認証完了時（戻ってきた時）の処理
+    # 🎯 LINEから戻ってきた時の確実なアップデート処理
     if line_code and state_str:
         with st.spinner("🔄 LINE連携を確定しています..."):
             try:
-                # 暗号化して持たせた業者データを復元
-                reg_data = json.loads(base64.b64decode(state_str).decode("utf-8"))
                 line_user_id = get_line_profile(line_code)
-                
                 if line_user_id:
-                    p_id = str(uuid.uuid4())
-                    reg_data["partner_id"] = p_id
-                    reg_data["line_user_id"] = line_user_id
+                    # Supabaseに先送りしておいたデータに、LINE IDを書き込む
+                    db_patch("partners", state_str, {"line_user_id": line_user_id})
                     
-                    db_post("partners", reg_data)
-                    
-                    st.session_state["saved_partner_id"] = p_id
-                    st.session_state.role = "partner"
-                    st.session_state.partner_data = {"partner_id": p_id, "company_name": reg_data["company_name"], "line_user_id": line_user_id}
-                    st.session_state.active_menu = "是正実施（協力業者）"
-                    st.query_params.clear()
-                    st.success("🎉 アカウント登録とLINE連携が完了しました！")
-                    st.rerun()
+                    # 再取得してログイン完了させる
+                    res = db_get("partners", f"partner_id=eq.{state_str}")
+                    if res:
+                        st.session_state.role = "partner"
+                        st.session_state.partner_data = res[0]
+                        st.session_state.active_menu = "是正実施（協力業者）"
+                        st.query_params.clear()
+                        st.success("🎉 アカウント登録とLINE連携が完了しました！")
+                        st.rerun()
             except Exception as e:
-                st.error("連携処理中にエラーが発生しました。お手数ですが最初からやり直してください。")
+                st.error(f"連携処理中にエラーが発生しました: {e}")
 
     if st.session_state.role is None:
         st.markdown("<h1 style='text-align: center;'>Felix検査App</h1>", unsafe_allow_html=True)
@@ -536,32 +517,44 @@ def main():
             st.markdown("""
             <div style="background-color:#F0F8FF; padding:15px; border-radius:8px; border-left:5px solid #0084FF; margin-bottom:15px;">
                 <strong>⚠️ はじめてご利用になる業者様へ</strong><br>
-                以下の必要情報を入力し、最後に「LINE連携して登録」ボタンを押してください。<br>
-                次回以降、この端末でのログイン操作は一切不要（自動ログイン）になります。
+                以下の必要情報を入力し、「アカウントを作成」を押した後、表示されるボタンからLINE連携を行ってください。
             </div>
             """, unsafe_allow_html=True)
             
-            new_c_name = st.text_input("会社名 (例: A工務店)", key="reg_c")
-            new_id = st.text_input("新規ログインID (任意の英数字)", key="reg_id")
-            new_pw = st.text_input("新規パスワード", type="password", key="reg_pw")
-            new_work_type = st.selectbox("担当工種（メイン）", ["-- 選択 --", "基礎工事", "フレーミング", "造作", "内装", "電気", "設備", "ガス", "サッシ", "外壁", "外構", "コーキング", "リペア", "その他"])
-            
-            if st.button("🟢 LINE連携してアカウント登録する", type="primary", use_container_width=True):
-                if new_c_name and new_id and new_pw and new_work_type != "-- 選択 --":
-                    p_data = {"company_name": new_c_name, "login_id": new_id, "login_password": new_pw, "work_type": new_work_type}
-                    jump_url = get_line_login_url(p_data)
-                    components.html(f"<script>window.parent.location.href = '{jump_url}';</script>", height=0)
-                else:
-                    st.error("会社名、ID、パスワード、工種をすべて正しく入力してください。")
+            # 🎯 二段階認証フロー（ボタンが押せなくなる問題の完全解決策）
+            if not st.session_state.jump_url:
+                new_c_name = st.text_input("会社名 (例: A工務店)", key="reg_c")
+                new_id = st.text_input("新規ログインID (任意の英数字)", key="reg_id")
+                new_pw = st.text_input("新規パスワード", type="password", key="reg_pw")
+                new_work_type = st.selectbox("担当工種（メイン）", ["-- 選択 --", "基礎工事", "フレーミング", "造作", "内装", "電気", "設備", "ガス", "サッシ", "外壁", "外構", "コーキング", "リペア", "その他"])
+                
+                if st.button("🟢 アカウントを作成してLINE連携へ進む", type="primary", use_container_width=True):
+                    if new_c_name and new_id and new_pw and new_work_type != "-- 選択 --":
+                        p_id = str(uuid.uuid4())
+                        # まず確実にデータベースへ保存する
+                        db_post("partners", {"partner_id": p_id, "company_name": new_c_name, "login_id": new_id, "login_password": new_pw, "work_type": new_work_type})
+                        
+                        # リンクを生成して画面を切り替える
+                        st.session_state.jump_url = get_line_login_url(p_id)
+                        st.rerun()
+                    else:
+                        st.error("会社名、ID、パスワード、工種をすべて正しく入力してください。")
+            else:
+                st.success("✅ アカウントの仮登録が完了しました！")
+                st.markdown("以下のボタンをタップして、LINE連携を完了させてください。")
+                # 強制ジャンプではなく、確実なリンクボタンを表示
+                st.markdown(f'<a href="{st.session_state.jump_url}" target="_self" style="display: block; text-align: center; background-color: #00B900; color: white; padding: 15px; border-radius: 8px; font-weight: bold; text-decoration: none; margin-bottom: 20px;">📲 LINE連携を完了する</a>', unsafe_allow_html=True)
+                if st.button("やり直す"):
+                    st.session_state.jump_url = None
+                    st.rerun()
             
             st.markdown("---")
-            with st.expander("🔑 すでにアカウントをお持ちの方（再ログイン）"):
+            with st.expander("🔑 すでにアカウントをお持ちの方（ログイン）"):
                 p_id = st.text_input("ログインID (会社用)")
                 p_pwd = st.text_input("パスワード", type="password")
                 if st.button("ログイン", use_container_width=True):
                     res = db_get("partners", f"login_id=eq.{p_id}&login_password=eq.{p_pwd}")
                     if res and len(res) > 0:
-                        st.session_state["saved_partner_id"] = res[0]['partner_id']
                         st.session_state.role = "partner"; st.session_state.partner_data = res[0]
                         st.session_state.active_menu = "是正実施（協力業者）"; st.rerun()
                     else: st.error("IDまたはパスワードが違います")
@@ -1066,4 +1059,4 @@ def main():
 
 if __name__ == "__main__":
     try: main()
-    except Exception as e: st.error("エラーが発生しました。"); st.button("復旧")
+    except Exception as e: st.error(f"システムエラーが発生しました: {e}"); st.button("復旧")
