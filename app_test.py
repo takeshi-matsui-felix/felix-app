@@ -101,9 +101,9 @@ def send_line_push_message(to_user_id, text_message):
     except Exception as e:
         print(f"LINE送信エラー: {e}")
 
-# 🚀 LINEログイン連携用の関数（堅牢版：partner_idだけを運ぶ）
+# 🚀 LINEログイン連携用の関数
 def get_line_login_url(partner_id):
-    encoded_uri = urllib.parse.quote(REDIRECT_URI)
+    encoded_uri = urllib.parse.quote(REDIRECT_URI, safe='')
     return f"https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id={LINE_CLIENT_ID}&redirect_uri={encoded_uri}&state={partner_id}&scope=profile%20openid"
 
 def get_line_profile(code):
@@ -447,6 +447,7 @@ ISSUE_TEMPLATES = {
     }
 }
 
+
 # ==========================================
 # 4. セッション管理 & 定数
 # ==========================================
@@ -487,18 +488,25 @@ def main():
     line_code = qp.get("code")
     state_str = qp.get("state")
     
-    # 🎯 LINEから戻ってきた時の確実なアップデート処理
+    # 端末情報を検知して自動ログイン
+    if st.session_state.role is None and "saved_partner_id" in st.session_state:
+        saved_id = st.session_state["saved_partner_id"]
+        res = db_get("partners", f"partner_id=eq.{saved_id}")
+        if res:
+            st.session_state.role = "partner"
+            st.session_state.partner_data = res[0]
+            st.session_state.active_menu = "是正実施（協力業者）"
+
+    # LINE認証から戻ってきたときの処理
     if line_code and state_str:
         with st.spinner("🔄 LINE連携を確定しています..."):
             try:
                 line_user_id = get_line_profile(line_code)
                 if line_user_id:
-                    # Supabaseに先送りしておいたデータに、LINE IDを書き込む
                     db_patch("partners", state_str, {"line_user_id": line_user_id})
-                    
-                    # 再取得してログイン完了させる
                     res = db_get("partners", f"partner_id=eq.{state_str}")
                     if res:
+                        st.session_state["saved_partner_id"] = state_str
                         st.session_state.role = "partner"
                         st.session_state.partner_data = res[0]
                         st.session_state.active_menu = "是正実施（協力業者）"
@@ -514,50 +522,51 @@ def main():
         
         with t1:
             st.markdown("### 👷‍♂️ 協力業者窓口")
-            st.markdown("""
-            <div style="background-color:#F0F8FF; padding:15px; border-radius:8px; border-left:5px solid #0084FF; margin-bottom:15px;">
-                <strong>⚠️ はじめてご利用になる業者様へ</strong><br>
-                以下の必要情報を入力し、「アカウントを作成」を押した後、表示されるボタンからLINE連携を行ってください。
-            </div>
-            """, unsafe_allow_html=True)
             
-            # 🎯 二段階認証フロー（ボタンが押せなくなる問題の完全解決策）
             if not st.session_state.jump_url:
+                st.markdown("""
+                <div style="background-color:#F0F8FF; padding:15px; border-radius:8px; border-left:5px solid #0084FF; margin-bottom:15px;">
+                    <strong>⚠️ はじめてご利用になる業者様へ</strong><br>
+                    会社名とパスワードを入力して「アカウント作成」を押してください。
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # 余計な項目（ログインID・工種）を完全削除！
                 new_c_name = st.text_input("会社名 (例: A工務店)", key="reg_c")
-                new_id = st.text_input("新規ログインID (任意の英数字)", key="reg_id")
                 new_pw = st.text_input("新規パスワード", type="password", key="reg_pw")
-                new_work_type = st.selectbox("担当工種（メイン）", ["-- 選択 --", "基礎工事", "フレーミング", "造作", "内装", "電気", "設備", "ガス", "サッシ", "外壁", "外構", "コーキング", "リペア", "その他"])
                 
                 if st.button("🟢 アカウントを作成してLINE連携へ進む", type="primary", use_container_width=True):
-                    if new_c_name and new_id and new_pw and new_work_type != "-- 選択 --":
+                    if new_c_name and new_pw:
                         p_id = str(uuid.uuid4())
-                        # まず確実にデータベースへ保存する
-                        db_post("partners", {"partner_id": p_id, "company_name": new_c_name, "login_id": new_id, "login_password": new_pw, "work_type": new_work_type})
-                        
-                        # リンクを生成して画面を切り替える
+                        # データベースへ登録
+                        db_post("partners", {"partner_id": p_id, "company_name": new_c_name, "login_password": new_pw})
                         st.session_state.jump_url = get_line_login_url(p_id)
                         st.rerun()
                     else:
-                        st.error("会社名、ID、パスワード、工種をすべて正しく入力してください。")
+                        st.error("会社名とパスワードを入力してください。")
             else:
                 st.success("✅ アカウントの仮登録が完了しました！")
-                st.markdown("以下のボタンをタップして、LINE連携を完了させてください。")
-                # 強制ジャンプではなく、確実なリンクボタンを表示
-                st.markdown(f'<a href="{st.session_state.jump_url}" target="_self" style="display: block; text-align: center; background-color: #00B900; color: white; padding: 15px; border-radius: 8px; font-weight: bold; text-decoration: none; margin-bottom: 20px;">📲 LINE連携を完了する</a>', unsafe_allow_html=True)
+                st.markdown("以下のリンクをタップして、LINE連携を完了させてください。")
+                
+                # HTMLのハックを捨て、一番普通のマークダウンリンク（青文字）を使用！
+                st.markdown(f"### [👉 ここをタップしてLINE連携を完了する]({st.session_state.jump_url})")
+                
                 if st.button("やり直す"):
                     st.session_state.jump_url = None
                     st.rerun()
             
             st.markdown("---")
             with st.expander("🔑 すでにアカウントをお持ちの方（ログイン）"):
-                p_id = st.text_input("ログインID (会社用)")
+                # ログインIDを廃止し、会社名でログインできるように変更！
+                p_name = st.text_input("会社名")
                 p_pwd = st.text_input("パスワード", type="password")
                 if st.button("ログイン", use_container_width=True):
-                    res = db_get("partners", f"login_id=eq.{p_id}&login_password=eq.{p_pwd}")
+                    res = db_get("partners", f"company_name=eq.{p_name}&login_password=eq.{p_pwd}")
                     if res and len(res) > 0:
+                        st.session_state["saved_partner_id"] = res[0]['partner_id']
                         st.session_state.role = "partner"; st.session_state.partner_data = res[0]
                         st.session_state.active_menu = "是正実施（協力業者）"; st.rerun()
-                    else: st.error("IDまたはパスワードが違います")
+                    else: st.error("会社名またはパスワードが違います")
         
         with t2:
             st.markdown("### 👔 管理者ログイン")
@@ -597,15 +606,14 @@ def main():
         
         partners = db_get("partners", "select=*")
         for p in partners:
-            with st.expander(f"👷‍♂️ {p.get('company_name')} (ID: {p.get('login_id')})"):
+            with st.expander(f"👷‍♂️ {p.get('company_name')}"):
                 u_name = st.text_input("会社名", value=p.get('company_name'), key=f"cn_{p['partner_id']}")
-                u_id = st.text_input("ログインID", value=p.get('login_id'), key=f"id_{p['partner_id']}")
                 u_pw = st.text_input("パスワード", value=p.get('login_password'), key=f"pw_{p['partner_id']}")
                 u_line = st.text_input("LINE User ID (システム連携用)", value=p.get('line_user_id'), key=f"line_{p['partner_id']}", help="業者がLINE連携するとここに自動でIDが入ります")
                 
                 c_up, c_del = st.columns(2)
                 if c_up.button("💾 更新する", key=f"up_{p['partner_id']}", type="primary"):
-                    db_patch("partners", p['partner_id'], {"company_name": u_name, "login_id": u_id, "login_password": u_pw, "line_user_id": u_line})
+                    db_patch("partners", p['partner_id'], {"company_name": u_name, "login_password": u_pw, "line_user_id": u_line})
                     st.success("更新しました！"); st.rerun()
                 if c_del.button("🗑️ 削除", key=f"del_{p['partner_id']}"):
                     requests.delete(f"{SUPABASE_URL}/rest/v1/partners?partner_id=eq.{p['partner_id']}", headers=HEADERS)
