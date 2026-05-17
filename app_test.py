@@ -46,11 +46,18 @@ def db_get(table, params=""):
         return []
     except Exception: return []
 
-def db_post(table, data): requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, json=data)
+def db_post(table, data): 
+    res = requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, json=data)
+    if res.status_code not in (200, 201):
+        st.error(f"🚨 Supabase登録エラー: {res.text}")
+        st.stop()
 
 def db_patch(table, record_id, data): 
     pk_col = "partner_id" if table == "partners" else "record_id"
-    requests.patch(f"{SUPABASE_URL}/rest/v1/{table}?{pk_col}=eq.{record_id}", headers=HEADERS, json=data)
+    res = requests.patch(f"{SUPABASE_URL}/rest/v1/{table}?{pk_col}=eq.{record_id}", headers=HEADERS, json=data)
+    if res.status_code not in (200, 204):
+        st.error(f"🚨 Supabase更新エラー: {res.text}")
+        st.stop()
 
 def db_delete_record(record_id): requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
 def db_delete_property(prop_id):
