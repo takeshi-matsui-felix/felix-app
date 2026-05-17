@@ -28,7 +28,9 @@ LINE_ACCESS_TOKEN = "XwqNwZuN4ruE09xplLcq21zyruMyZDwi1r41J0HyXtD34XRb2D+RL6wskoC
 # 🔑 LINE ログイン（業者登録連携用）
 LINE_CLIENT_ID = "2010108828"
 LINE_CLIENT_SECRET = "2c73ce25e71858bcb09c89c79fa6bbe0"
-REDIRECT_URI = "https://felix-app-prbmr4ghbjai7n7hzfyahj.streamlit.app/"
+
+# 💡 ローカルテスト用に変更済み
+REDIRECT_URI = "http://localhost:8501/"
 
 ADMIN_PASSWORD = "2011"
 DELETE_PASSWORD = "5963"
@@ -45,9 +47,12 @@ def db_get(table, params=""):
     except Exception: return []
 
 def db_post(table, data): requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, json=data)
+
+# 💡 バグ修正：テーブルによって検索キー（ID列）を自動で切り替える
 def db_patch(table, record_id, data): 
     pk_col = "partner_id" if table == "partners" else "record_id"
     requests.patch(f"{SUPABASE_URL}/rest/v1/{table}?{pk_col}=eq.{record_id}", headers=HEADERS, json=data)
+
 def db_delete_record(record_id): requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
 def db_delete_property(prop_id):
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?property_id=eq.{prop_id}", headers=HEADERS)
@@ -86,7 +91,7 @@ def bg_patch_record(rec_id, photo_b64, up_data):
         if url: up_data["issue_photo_url"] = url
     db_patch("inspection_records", rec_id, up_data)
 
-# 🚀 LINE通知送信機能（個別狙い撃ち）
+# 🚀 LINE通知送信機能
 def send_line_push_message(to_user_id, text_message):
     if not to_user_id: return
     url = "https://api.line.me/v2/bot/message/push"
@@ -103,23 +108,30 @@ def send_line_push_message(to_user_id, text_message):
     except Exception as e:
         print(f"LINE送信エラー: {e}")
 
-# 🚀 LINEログイン連携用の関数（URL確実ジャンプ用）
+# 🚀 LINEログイン連携用の関数（エラー解析強化版）
 def get_line_login_url(partner_id):
     encoded_uri = urllib.parse.quote(REDIRECT_URI, safe='')
     return f"https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id={LINE_CLIENT_ID}&redirect_uri={encoded_uri}&state={partner_id}&scope=profile%20openid"
 
 def get_line_profile(code):
     token_url = "https://api.line.me/oauth2/v2.1/token"
-    res = requests.post(token_url, headers={"Content-Type": "application/x-www-form-urlencoded"}, data={
-        "grant_type": "authorization_code", "code": code, "redirect_uri": REDIRECT_URI,
-        "client_id": LINE_CLIENT_ID, "client_secret": LINE_CLIENT_SECRET
-    })
-    if res.status_code == 200:
-        access_token = res.json().get("access_token")
-        profile_res = requests.get("https://api.line.me/v2/profile", headers={"Authorization": f"Bearer {access_token}"})
-        if profile_res.status_code == 200:
-            return profile_res.json().get("userId")
-    return None
+    payload = {
+        "grant_type": "authorization_code", 
+        "code": code, 
+        "redirect_uri": REDIRECT_URI,
+        "client_id": LINE_CLIENT_ID, 
+        "client_secret": LINE_CLIENT_SECRET
+    }
+    res = requests.post(token_url, data=payload)
+    if res.status_code != 200:
+        return None, f"Token取得エラー ({res.status_code}): {res.text}"
+        
+    access_token = res.json().get("access_token")
+    profile_res = requests.get("https://api.line.me/v2/profile", headers={"Authorization": f"Bearer {access_token}"})
+    if profile_res.status_code != 200:
+        return None, f"Profile取得エラー ({profile_res.status_code}): {profile_res.text}"
+        
+    return profile_res.json().get("userId"), "成功"
 
 # ==========================================
 # 📱 2. スマート電子黒板カメラ
@@ -453,7 +465,7 @@ ISSUE_TEMPLATES = {
 # ==========================================
 # 4. セッション管理 & 定数
 # ==========================================
-for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "skip_render_ids", "show_bulk_confirm", "edit_saved_records", "cached_records", "cached_target_id", "temp_photo", "partner_data", "jump_url"]:
+for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "skip_render_ids", "show_bulk_confirm", "edit_saved_records", "cached_records", "cached_target_id", "temp_photo", "partner_data", "jump_url", "processed_code"]:
     if key not in st.session_state: st.session_state[key] = None
 if st.session_state.skip_render_ids is None: st.session_state.skip_render_ids = []
 
@@ -471,7 +483,7 @@ def jump_to_menu(menu_name, prop_id=None):
 
 FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
 AREA_OPTS_STANDARD = ["-- 選択 --", "玄関", "廊下・階段・ENT", "LDK", "キッチン", "洋室", "洗面室", "UB", "トイレ", "バルコニー", "外部", "フリー項目"]
-AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バルコニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
+AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バル কুলニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
 WORK_OPTS_STANDARD = ["-- 選択 --", "基礎工事（鉄筋）", "基礎工事（型枠）", "フレーミング", "FM", "造作", "内装", "電気", "設備", "ガス", "清掃", "サッシ", "外壁", "外構", "コーキング", "リペア", "その他"]
 WORK_OPTS_HAIKIN = ["-- 選択 --", "基礎工事(鉄筋)", "水道", "ガス", "その他"]
 WORK_OPTS_KUTAI = ["-- 選択 --", "フレーミング", "電気", "水道", "防水", "その他"]
@@ -499,16 +511,17 @@ def main():
             st.session_state.partner_data = res[0]
             st.session_state.active_menu = "是正実施（協力業者）"
 
-    # 🎯 LINE連携から戻ってきた時の処理
+    # 🎯 LINE連携から戻ってきた時の【エラー出力強化版】処理
     if line_code and state_str:
-        with st.spinner("🔄 LINE連携を確定しています..."):
-            try:
-                line_user_id = get_line_profile(line_code)
+        # ⚠️ Streamlitの二重実行による「使用済みコード」エラーを完全に防ぐ
+        if st.session_state.get("processed_code") != line_code:
+            st.session_state["processed_code"] = line_code
+            with st.spinner("🔄 LINE連携を解析中..."):
+                line_user_id, error_msg = get_line_profile(line_code)
+                
                 if line_user_id:
-                    # 先に保存しておいたSupabaseのレコード（state_strがpartner_id）にLINE IDを追加
+                    # 成功した場合の処理
                     db_patch("partners", state_str, {"line_user_id": line_user_id})
-                    
-                    # 業者データを取得してログイン状態にする
                     res = db_get("partners", f"partner_id=eq.{state_str}")
                     if res:
                         st.session_state["saved_partner_id"] = state_str
@@ -518,8 +531,11 @@ def main():
                         st.query_params.clear()
                         st.success("🎉 アカウント登録とLINE連携が完了しました！")
                         st.rerun()
-            except Exception as e:
-                st.error(f"連携処理中にエラーが発生しました: {e}")
+                else:
+                    # 💥 失敗した場合は、LINEからの生のエラーメッセージを画面に出す
+                    st.error("❌ LINE IDの取得に失敗しました。以下のエラーメッセージを確認してください。")
+                    st.code(error_msg)
+                    st.stop()
 
     if st.session_state.role is None:
         st.markdown("<h1 style='text-align: center;'>Felix検査App</h1>", unsafe_allow_html=True)
@@ -528,7 +544,6 @@ def main():
         with t1:
             st.markdown("### 👷‍♂️ 協力業者窓口")
             
-            # 🎯 マスター（Supabase）に合わせた4項目の登録フォーム
             if not st.session_state.jump_url:
                 st.markdown("""
                 <div style="background-color:#F0F8FF; padding:15px; border-radius:8px; border-left:5px solid #0084FF; margin-bottom:15px;">
@@ -545,7 +560,7 @@ def main():
                 if st.button("🟢 アカウントを作成してLINE連携へ進む", type="primary", use_container_width=True):
                     if new_c_name and new_contact and new_id and new_pw:
                         p_id = str(uuid.uuid4())
-                        # データベースへ登録（マスターに合致！）
+                        # データベースへ登録
                         db_post("partners", {
                             "partner_id": p_id, 
                             "company_name": new_c_name, 
@@ -562,7 +577,6 @@ def main():
                 st.success("✅ アカウントの登録が完了しました！")
                 st.markdown("以下のリンクをタップして、LINE連携を完了させてください。")
                 
-                # HTMLのハックを捨て、一番普通のマークダウンリンク（青文字）を使用！
                 st.markdown(f"### [👉 ここをタップしてLINE連携を完了する]({st.session_state.jump_url})")
                 
                 if st.button("やり直す"):
@@ -571,7 +585,6 @@ def main():
             
             st.markdown("---")
             with st.expander("🔑 すでにアカウントをお持ちの方（ログイン）"):
-                # ログインIDとパスワードでログイン
                 p_id = st.text_input("ログインID")
                 p_pwd = st.text_input("パスワード", type="password")
                 if st.button("ログイン", use_container_width=True):
