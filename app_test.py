@@ -8,6 +8,8 @@ import io
 import os
 import tempfile
 import threading
+import urllib.parse  # 👈 追加: URL変換用の標準機能
+import json          # 👈 追加: データ暗号化用の標準機能
 
 # ==========================================
 # 1. Supabase & LINE 接続設定
@@ -100,10 +102,14 @@ def send_line_push_message(to_user_id, text_message):
     except Exception as e:
         print(f"LINE送信エラー: {e}")
 
-# 🚀 LINEログイン連携用の関数
-def get_line_login_url():
-    state = str(uuid.uuid4())
-    return f"https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id={LINE_CLIENT_ID}&redirect_uri={requests.utils.quote(REDIRECT_URI)}&state={state}&scope=profile%20openid"
+# 🚀 LINEログイン連携用の関数（バグ修正版）
+def get_line_login_url(partner_data_dict):
+    # 業者データを暗号化してLINEの旅行に持たせる（セッション切れ対策）
+    state_json = json.dumps(partner_data_dict)
+    state_b64 = base64.b64encode(state_json.encode("utf-8")).decode("utf-8")
+    
+    encoded_uri = urllib.parse.quote(REDIRECT_URI)
+    return f"https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id={LINE_CLIENT_ID}&redirect_uri={encoded_uri}&state={state_b64}&scope=profile%20openid"
 
 def get_line_profile(code):
     token_url = "https://api.line.me/oauth2/v2.1/token"
@@ -469,7 +475,7 @@ def jump_to_menu(menu_name, prop_id=None):
 FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
 AREA_OPTS_STANDARD = ["-- 選択 --", "玄関", "廊下・階段・ENT", "LDK", "キッチン", "洋室", "洗面室", "UB", "トイレ", "バルコニー", "外部", "フリー項目"]
 AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バルコニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
-WORK_OPTS_STANDARD = ["-- 選択 --", "基礎工事（鉄筋）", "基礎工事（型枠）", "フレーミング", "FM", "造作", "内装", "電気", "設備", "ガス", "清掃", "サッシ", "外壁", "外構", "コーキング", "リペア", "その他"]
+WORK_OPTS_STANDARD = ["-- 選択 --", "基礎工事（鉄筋）", "基礎工事（型枠）", "フレーミング", "FM", "造作", "内装", "電気", "設備", "ガス", "清固定", "サッシ", "外壁", "外構", "コーキング", "リペア", "その他"]
 WORK_OPTS_HAIKIN = ["-- 選択 --", "基礎工事(鉄筋)", "水道", "ガス", "その他"]
 WORK_OPTS_KUTAI = ["-- 選択 --", "フレーミング", "電気", "水道", "防水", "その他"]
 WORK_OPTS_CHUKAN = ["-- 選択 --", "造作", "電気", "水道", "外壁", "ガス", "足場", "その他"]
@@ -483,9 +489,9 @@ INSPECTOR_OPTS = ["工事監理チーム", "建設部", "不動産事業部", "�
 # 5. メイン画面・機能
 # ==========================================
 def main():
-    # URLパラメータチェック（LINEから戻ってきた場合を検知）
     qp = st.query_params
     line_code = qp.get("code")
+    state_str = qp.get("state")
     
     # 端末情報を検知して自動ログイン
     if st.session_state.role is None and "saved_partner_id" in st.session_state:
@@ -496,27 +502,30 @@ def main():
             st.session_state.partner_data = res[0]
             st.session_state.active_menu = "是正実施（協力業者）"
 
-    # LINE認証完了時の処理
-    if line_code:
+    # LINE認証完了時（戻ってきた時）の処理
+    if line_code and state_str:
         with st.spinner("🔄 LINE連携を確定しています..."):
-            line_user_id = get_line_profile(line_code)
-            if line_user_id:
-                if "pending_partner" in st.session_state and st.session_state["pending_partner"]:
-                    p_data = st.session_state["pending_partner"]
-                    p_data["line_user_id"] = line_user_id
+            try:
+                # 暗号化して持たせた業者データを復元
+                reg_data = json.loads(base64.b64decode(state_str).decode("utf-8"))
+                line_user_id = get_line_profile(line_code)
+                
+                if line_user_id:
                     p_id = str(uuid.uuid4())
-                    p_data["partner_id"] = p_id
+                    reg_data["partner_id"] = p_id
+                    reg_data["line_user_id"] = line_user_id
                     
-                    db_post("partners", p_data)
+                    db_post("partners", reg_data)
                     
                     st.session_state["saved_partner_id"] = p_id
                     st.session_state.role = "partner"
-                    st.session_state.partner_data = {"partner_id": p_id, "company_name": p_data["company_name"], "line_user_id": line_user_id}
+                    st.session_state.partner_data = {"partner_id": p_id, "company_name": reg_data["company_name"], "line_user_id": line_user_id}
                     st.session_state.active_menu = "是正実施（協力業者）"
-                    st.session_state["pending_partner"] = None
                     st.query_params.clear()
                     st.success("🎉 アカウント登録とLINE連携が完了しました！")
                     st.rerun()
+            except Exception as e:
+                st.error("連携処理中にエラーが発生しました。お手数ですが最初からやり直してください。")
 
     if st.session_state.role is None:
         st.markdown("<h1 style='text-align: center;'>Felix検査App</h1>", unsafe_allow_html=True)
@@ -539,8 +548,9 @@ def main():
             
             if st.button("🟢 LINE連携してアカウント登録する", type="primary", use_container_width=True):
                 if new_c_name and new_id and new_pw and new_work_type != "-- 選択 --":
-                    st.session_state["pending_partner"] = {"company_name": new_c_name, "login_id": new_id, "login_password": new_pw, "work_type": new_work_type}
-                    st.markdown(f'<meta http-equiv="refresh" content="0;URL=\'{get_line_login_url()}\'">', unsafe_allow_html=True)
+                    p_data = {"company_name": new_c_name, "login_id": new_id, "login_password": new_pw, "work_type": new_work_type}
+                    jump_url = get_line_login_url(p_data)
+                    st.markdown(f'<meta http-equiv="refresh" content="0;URL=\'{jump_url}\'">', unsafe_allow_html=True)
                     st.stop()
                 else:
                     st.error("会社名、ID、パスワード、工種をすべて正しく入力してください。")
