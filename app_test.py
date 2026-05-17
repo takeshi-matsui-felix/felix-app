@@ -570,7 +570,7 @@ def main():
                             "login_password": new_pw
                         })
                         
-                        st.session_state.jump_url = get_line_login_url(p_id)
+                        st.session_state.jump_url = get_line_login_url(new_id)
                         st.rerun()
                     else:
                         st.error("すべての項目を入力してください。")
