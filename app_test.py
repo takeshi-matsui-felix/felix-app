@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import requests
 import urllib.parse
 
@@ -6,11 +7,44 @@ import urllib.parse
 LINE_CLIENT_ID = "2010108828"
 LINE_CLIENT_SECRET = "2c73ce25e71858bcb09c89c79fa6bbe0"
 
-# GitHub本番環境用URL
-REDIRECT_URI = "https://felix-app-prbmr4ghbjai7n7hzfyahj.streamlit.app/" 
-
 def main():
-    st.title("🧪 LINE ID 取得 単体テスト")
+    st.title("🧪 LINE ID 取得 単体テスト (URL自動認識版)")
+
+    # 自身のURLをJavaScriptで自動取得（部分編集を完全に無くすための処理）
+    if "my_url" not in st.session_state:
+        st.session_state.my_url = None
+
+    # URL取得用の目に見えないコンポーネント
+    url_detector = components.html("""
+    <script>
+        const currentUrl = window.parent.location.href.split('?')[0];
+        window.parent.postMessage({
+            isStreamlitMessage: true,
+            type: "streamlit:setComponentValue",
+            value: currentUrl
+        }, "*");
+    </script>
+    """, height=0)
+
+    if url_detector:
+        st.session_state.my_url = url_detector
+
+    # URLが取得できるまで待機
+    if not st.session_state.my_url:
+        st.info("🔄 アプリのURLを自動解析中。しばらくお待ちください...")
+        st.stop()
+
+    # 自動認識したURLを帰り道（REDIRECT_URI）として確定
+    REDIRECT_URI = st.session_state.my_url
+
+    # LINE Developers登録用の案内を表示
+    st.markdown(f"""
+    <div style="background-color:#FFF3CD; padding:15px; border-radius:8px; border-left:5px solid #FFA500; margin-bottom:20px;">
+        <strong>⚠️ テスト前の確認事項</strong><br>
+        LINE Developersの「コールバックURL」に、以下のURLが正しく登録されているか確認してください。<br>
+        <code>{REDIRECT_URI}</code>
+    </div>
+    """, unsafe_allow_html=True)
 
     # URLのパラメータを取得
     qp = st.query_params
@@ -57,6 +91,7 @@ def main():
             
         if st.button("もう一度最初からテストする"):
             st.query_params.clear()
+            st.session_state.my_url = None
             st.rerun()
 
     # 2️⃣ 最初の画面（リンクを押す前）
