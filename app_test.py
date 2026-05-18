@@ -402,6 +402,7 @@ ISSUE_TEMPLATES = {
     }
 }
 
+
 # ==========================================
 # 5. セッション管理 & 選択肢リスト
 # ==========================================
@@ -420,9 +421,9 @@ qp = st.query_params
 if "target_area" not in st.session_state:
     st.session_state.target_area = None
 if qp.get("area") == "tokai":
-    st.session_state.target_area = "東海"
+    st.session_state.target_area = "東海エリア" # エリア名称修正
 elif qp.get("area") == "kanto":
-    st.session_state.target_area = "関東"
+    st.session_state.target_area = "関東エリア" # エリア名称修正
 # ===============================================
 
 if qp.get("auth") == ADMIN_PASSWORD:
@@ -522,8 +523,8 @@ def main():
     if st.session_state.active_menu == "物件登録（管理者）":
         st.header("物件登録")
         
-        # エリア選択の追加
-        input_area = st.selectbox("エリアを選択", ["東海", "関東"])
+        # エリア選択の追加（エリア名称修正）
+        input_area = st.selectbox("エリアを選択", ["東海エリア", "関東エリア"])
         name = st.text_input("新規物件名")
         if st.button("登録"):
             if name:
