@@ -402,6 +402,7 @@ ISSUE_TEMPLATES = {
     }
 }
 
+
 # ==========================================
 # 5. セッション管理 & 選択肢リスト
 # ==========================================
@@ -415,6 +416,16 @@ if "drill_target" not in st.session_state or not isinstance(st.session_state.dri
 if "current_box" not in st.session_state or not isinstance(st.session_state.current_box, dict): st.session_state.current_box = None
 
 qp = st.query_params
+
+# === エリア情報をURLから取得してセッションに記憶 ===
+if "target_area" not in st.session_state:
+    st.session_state.target_area = None
+if qp.get("area") == "tokai":
+    st.session_state.target_area = "東海エリア" # エリア名称修正
+elif qp.get("area") == "kanto":
+    st.session_state.target_area = "関東エリア" # エリア名称修正
+# ===============================================
+
 if qp.get("auth") == ADMIN_PASSWORD:
     st.session_state.role = "admin"
     st.session_state.active_menu = "検査実施（管理者）" if not st.session_state.active_menu else st.session_state.active_menu
@@ -511,17 +522,23 @@ def main():
     # ----------------------------------------
     if st.session_state.active_menu == "物件登録（管理者）":
         st.header("物件登録")
+        
+        # エリア選択の追加（エリア名称修正）
+        input_area = st.selectbox("エリアを選択", ["東海エリア", "関東エリア"])
         name = st.text_input("新規物件名")
         if st.button("登録"):
             if name:
-                db_post("properties", {"property_id": str(uuid.uuid4()), "property_name": name})
-                st.success("登録完了")
+                db_post("properties", {"property_id": str(uuid.uuid4()), "property_name": name, "area": input_area})
+                st.success(f"【{input_area}】に登録完了")
         
         props = db_get("properties", "select=*")
         for idx, p in enumerate(props):
             prop_id = p.get('property_id')
             if not prop_id: continue
-            prop_name = p.get('property_name', '不明')
+            
+            # 一覧にエリアを表示
+            p_area = p.get('area', '未設定')
+            prop_name = f"[{p_area}] {p.get('property_name', '不明')}"
             key_suffix = f"{prop_id}_{idx}"
             
             c1, c2 = st.columns([7, 3])
@@ -842,8 +859,20 @@ def main():
     elif st.session_state.active_menu == "是正実施（協力業者）":
         st.header("是正実施")
         
+        # エリアの表示と制限
+        if st.session_state.role == "partner":
+            if st.session_state.target_area:
+                st.success(f"📍 現在の表示エリア：【 {st.session_state.target_area} 】")
+            else:
+                st.warning("⚠️ URLにエリア指定がありません。正しいURLからアクセスしてください。")
+
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status")
         all_ins = db_get("inspections", "select=*")
+        
+        # エリアマップを作成し、他エリアを弾く
+        all_props = db_get("properties", "select=property_id,area")
+        prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
+        t_area = st.session_state.target_area if st.session_state.role == "partner" else None
         
         ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
         tree = {}; tree_counts = {}
@@ -853,6 +882,11 @@ def main():
             iid = r.get('inspection_id'); p_stat = r.get('progress_status')
             ins = ins_map.get(iid)
             if ins:
+                # エリア制限
+                p_id = ins.get('property_id')
+                if t_area and prop_area_map.get(p_id) != t_area:
+                    continue
+                    
                 p = ins.get('property_name', '不明'); t = ins.get('inspection_type', '不明')
                 if p not in tree: tree[p] = set(); tree_counts[p] = {}
                 tree[p].add(t)
@@ -987,6 +1021,11 @@ def main():
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status")
         all_ins = db_get("inspections", "select=*")
         
+        # エリアマップを作成し、他エリアを弾く
+        all_props = db_get("properties", "select=property_id,area")
+        prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
+        t_area = st.session_state.target_area if st.session_state.role == "partner" else None
+
         ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
         tree = {}; tree_counts = {} 
         
@@ -995,6 +1034,11 @@ def main():
             iid = r.get('inspection_id'); p_stat = r.get('progress_status')
             ins = ins_map.get(iid)
             if ins:
+                # エリア制限
+                p_id = ins.get('property_id')
+                if t_area and prop_area_map.get(p_id) != t_area:
+                    continue
+                    
                 p = ins.get('property_name', '不明'); t = ins.get('inspection_type', '不明')
                 if p not in tree: tree[p] = set(); tree_counts[p] = {}
                 tree[p].add(t)
