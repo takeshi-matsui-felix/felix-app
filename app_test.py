@@ -593,7 +593,6 @@ def main():
                 saved_recs = db_get("inspection_records", f"inspection_id=eq.{c_id}")
                 if not saved_recs: st.info("まだ保存された指摘データはありません。")
                 else:
-                    # 【社内検査のみ追加】部屋（階層）でのソート（絞り込み）フィルター
                     if c_type in SHANAI_KENSA_TYPES:
                         floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in saved_recs if r.get('floor_level')])))
                         sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_edit_floor")
@@ -785,7 +784,6 @@ def main():
                     st.session_state.cached_records = recs; st.session_state.cached_target_id = target_id_str
                 else: recs = st.session_state.cached_records
 
-                # 【社内検査4カテゴリーのみ追加】部屋（階層）でのソート（絞り込み）フィルター
                 if recs and type_val in SHANAI_KENSA_TYPES:
                     floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in recs if r.get('floor_level')])))
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_verify_floor")
@@ -935,6 +933,13 @@ def main():
                 cnt_data = db_get("inspection_records", f"select=record_id&inspection_id=in.({','.join(t_ids)})")
                 total_cnt = len(cnt_data); wait_cnt = len(recs)
                 st.info(f"📊 **【進捗】 指摘総数：{total_cnt}件 ／ 残り（是正報告待ち）：{wait_cnt}件**")
+                
+                # 【是正実施（協力業者）画面】社内検査4カテゴリーの場合のみ、部屋（階層）でのソート（絞り込み）フィルターを追加
+                if recs and type_val in SHANAI_KENSA_TYPES:
+                    floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in recs if r.get('floor_level')])))
+                    sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_partner_fix_floor")
+                    if sel_floor != "すべて表示":
+                        recs = [r for r in recs if r.get('floor_level') == sel_floor]
                 
                 w_groups = {}
                 for r in recs:
@@ -1094,8 +1099,7 @@ def main():
                     st.session_state.cached_records = recs; st.session_state.cached_target_id = target_id_str
                 else: recs = st.session_state.cached_records
                 
-                # 【社内検査4カテゴリーのみ追加】部屋（階層）でのソート（絞り込み）フィルター
-                if recs and st.session_state.role == "admin" and type_val in SHANAI_KENSA_TYPES:
+                if recs and type_val in SHANAI_KENSA_TYPES:
                     floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in recs if r.get('floor_level')])))
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_conf_floor")
                     if sel_floor != "すべて表示":
