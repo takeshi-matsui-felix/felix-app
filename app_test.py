@@ -421,9 +421,9 @@ qp = st.query_params
 if "target_area" not in st.session_state:
     st.session_state.target_area = None
 if qp.get("area") == "tokai":
-    st.session_state.target_area = "東海エリア" # エリア名称修正
+    st.session_state.target_area = "東海エリア"
 elif qp.get("area") == "kanto":
-    st.session_state.target_area = "関東エリア" # エリア名称修正
+    st.session_state.target_area = "関東エリア"
 # ===============================================
 
 if qp.get("auth") == ADMIN_PASSWORD:
@@ -523,7 +523,6 @@ def main():
     if st.session_state.active_menu == "物件登録（管理者）":
         st.header("物件登録")
         
-        # エリア選択の追加（エリア名称修正）
         input_area = st.selectbox("エリアを選択", ["東海エリア", "関東エリア"])
         name = st.text_input("新規物件名")
         if st.button("登録"):
@@ -536,7 +535,6 @@ def main():
             prop_id = p.get('property_id')
             if not prop_id: continue
             
-            # 一覧にエリアを表示
             p_area = p.get('area', '未設定')
             prop_name = f"[{p_area}] {p.get('property_name', '不明')}"
             key_suffix = f"{prop_id}_{idx}"
@@ -594,6 +592,12 @@ def main():
                 
                 saved_recs = db_get("inspection_records", f"inspection_id=eq.{c_id}")
                 if not saved_recs: st.info("まだ保存された指摘データはありません。")
+                else:
+                    # 【社内検査のみ追加】部屋（階層）でのソート（絞り込み）フィルター
+                    floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in saved_recs if r.get('floor_level')])))
+                    sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_edit_floor")
+                    if sel_floor != "すべて表示":
+                        saved_recs = [r for r in saved_recs if r.get('floor_level') == sel_floor]
                 
                 edit_w_opts = WORK_OPTS_KIKAN if c_type.startswith("【検査機関】") else WORK_OPTS_SHANAI if c_type in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if c_type == "躯体検査" else WORK_OPTS_HAIKIN if c_type == "配筋検査" else WORK_OPTS_CHUKAN if c_type == "中間検査" else WORK_OPTS_STANDARD
 
@@ -646,7 +650,6 @@ def main():
                                 locationText=loc_str, issueDetail=disp_desc, mode="insp", key=f"ed_cam_{rec_id}"
                             )
                             
-                            # 🚀 ボタンを写真プレビューの上に配置（スクロール排除）
                             c_save, c_del = st.columns(2)
                             if c_save.button("💾 この内容で上書き", key=f"ed_save_{rec_id}", type="primary"):
                                 up_data = {"floor_level": new_f, "area": new_a, "work_type": new_w, "issue_detail": final_desc}
@@ -707,7 +710,6 @@ def main():
                 if photo_input:
                     st.session_state.temp_photo = photo_input
 
-                # 🚀 ボタンを写真プレビューの上に配置（スクロール排除）
                 if st.button("💾 この内容で保存", type="primary"):
                     active_photo = st.session_state.temp_photo
                     if w and final_desc != "" and active_photo is not None:
@@ -718,7 +720,6 @@ def main():
                             "progress_status": initial_status
                         }
                         
-                        # 🚀 ゼロ・ラグ保存（バックグラウンド送信）
                         st.toast("🚀 保存処理を裏側で開始しました！", icon="✅")
                         threading.Thread(target=bg_save_inspection, args=(active_photo, record_data)).start()
                         
@@ -730,7 +731,6 @@ def main():
                 
                 if st.button("終了"): st.session_state.current_box = None; st.session_state.temp_photo = None; st.rerun()
 
-                # 🚀 プレビューは極小化して一番下に控えめに表示
                 if st.session_state.temp_photo:
                     st.markdown("<p style='font-size:12px; color:gray; margin-top:10px;'>▼ プレビュー (1/4縮小表示)</p>", unsafe_allow_html=True)
                     st.image(st.session_state.temp_photo, width=250)
@@ -784,7 +784,14 @@ def main():
                     st.session_state.cached_records = recs; st.session_state.cached_target_id = target_id_str
                 else: recs = st.session_state.cached_records
 
-                st.info(f"この検査（{prop_val} / {type_val}）には、現在 **{len(recs)}件** の確認待ちデータがあります。")
+                # 【社内検査のみ追加】部屋（階層）でのソート（絞り込み）フィルター
+                if recs:
+                    floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in recs if r.get('floor_level')])))
+                    sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_verify_floor")
+                    if sel_floor != "すべて表示":
+                        recs = [r for r in recs if r.get('floor_level') == sel_floor]
+
+                st.info(f"この検査（{prop_val} / {type_val}）には、現在 **{len(recs)}件** のデータがあります。")
                 if st.button("✅ この検査をすべて承認して業者（是正実施）に送る", type="primary"):
                     for r in recs: db_patch("inspection_records", r['record_id'], {"progress_status": "是正待ち"})
                     st.success("一括承認が完了しました！協力業者へ表示されます。"); st.session_state.drill_target = None; st.session_state.cached_records = None; st.rerun()
@@ -812,7 +819,6 @@ def main():
                         st.markdown('<div class="record-box">', unsafe_allow_html=True)
                         st.markdown(f"**{title}**")
                         
-                        # 管理者確認画面は一覧性を高めるため、デフォルトで画像小さめ
                         if r.get('issue_photo_url'): st.image(r.get('issue_photo_url'), width=250)
                         
                         with st.expander("✏️ 指摘内容・写真を直前修正する"):
@@ -836,7 +842,6 @@ def main():
                                 locationText=loc_str, issueDetail=disp_d, mode="insp", key=f"vp_{rec_id}"
                             )
                             
-                            # 🚀 ボタンを上に配置、非同期処理
                             if st.button("💾 この内容で修正保存", key=f"vsave_{rec_id}"):
                                 up_data = {"floor_level": new_f, "area": new_a, "issue_detail": new_d.strip(), "work_type": new_w}
                                 st.toast("🚀 修正を裏側で保存中...", icon="✅")
@@ -859,7 +864,6 @@ def main():
     elif st.session_state.active_menu == "是正実施（協力業者）":
         st.header("是正実施")
         
-        # エリアの表示と制限
         if st.session_state.role == "partner":
             if st.session_state.target_area:
                 st.success(f"📍 現在の表示エリア：【 {st.session_state.target_area} 】")
@@ -869,7 +873,6 @@ def main():
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status")
         all_ins = db_get("inspections", "select=*")
         
-        # エリアマップを作成し、他エリアを弾く
         all_props = db_get("properties", "select=property_id,area")
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
         t_area = st.session_state.target_area if st.session_state.role == "partner" else None
@@ -882,7 +885,6 @@ def main():
             iid = r.get('inspection_id'); p_stat = r.get('progress_status')
             ins = ins_map.get(iid)
             if ins:
-                # エリア制限
                 p_id = ins.get('property_id')
                 if t_area and prop_area_map.get(p_id) != t_area:
                     continue
@@ -987,11 +989,11 @@ def main():
                             c1, c2 = st.columns(2)
                             with c1:
                                 st.markdown("**【指摘箇所（Before）】**")
-                                if r.get('issue_photo_url'): st.image(r.get('issue_photo_url'), width=250) # ここも小さく
+                                if r.get('issue_photo_url'): st.image(r.get('issue_photo_url'), width=250)
                                 else: st.write("写真なし")
                                     
                             with c2:
-                                st.markdown("**【是正写真（After）】**")
+                                st.markdown("**【是正写真（After）**")
                                 loc_str = f"{floor} {area} {w}".strip()
                                 disp_d = detail[:80] + "..." if len(detail)>80 else detail
                                 
@@ -1000,7 +1002,6 @@ def main():
                                     locationText=loc_str, issueDetail=disp_d, mode="fix", key=f"fix_cam_{rec_id}"
                                 )
                                 
-                                # 🚀 ボタンを上に配置、非同期処理
                                 if st.button("✅ 完了報告", key=f"s_{rec_id}"):
                                     if up: 
                                         st.toast("🚀 報告を裏側で送信中...", icon="✅")
@@ -1016,12 +1017,11 @@ def main():
     # メニュー: 5. 是正確認 / 6. 完了分一覧
     # ----------------------------------------
     elif st.session_state.active_menu in ["是正確認（管理者）", "完了分一覧（共通）"]:
-        status = "是正確認中" if "確認" in st.session_state.active_menu else "完了"
+        status = "踏是正確認中" if "確認" in st.session_state.active_menu else "完了"
         
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status")
         all_ins = db_get("inspections", "select=*")
         
-        # エリアマップを作成し、他エリアを弾く
         all_props = db_get("properties", "select=property_id,area")
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
         t_area = st.session_state.target_area if st.session_state.role == "partner" else None
@@ -1034,7 +1034,6 @@ def main():
             iid = r.get('inspection_id'); p_stat = r.get('progress_status')
             ins = ins_map.get(iid)
             if ins:
-                # エリア制限
                 p_id = ins.get('property_id')
                 if t_area and prop_area_map.get(p_id) != t_area:
                     continue
@@ -1094,6 +1093,13 @@ def main():
                     st.session_state.cached_records = recs; st.session_state.cached_target_id = target_id_str
                 else: recs = st.session_state.cached_records
                 
+                # 【社内検査のみ追加】部屋（階層）でのソート（絞り込み）フィルター
+                if recs and st.session_state.role == "admin":
+                    floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in recs if r.get('floor_level')])))
+                    sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_conf_floor")
+                    if sel_floor != "すべて表示":
+                        recs = [r for r in recs if r.get('floor_level') == sel_floor]
+                
                 stats_data = db_get("inspection_records", f"select=record_id,progress_status&inspection_id=in.({','.join(t_ids)})")
                 total_cnt = len(stats_data)
                 comp_cnt = len([r for r in stats_data if r.get('progress_status') == '完了'])
@@ -1135,7 +1141,7 @@ def main():
                         st.markdown(f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px;'>■ 工種: {w_name}</div>", unsafe_allow_html=True)
                         for idx, r in enumerate(w_recs):
                             floor = r.get('floor_level', ''); area = r.get('area', '')
-                            loc_text = "" if type_val.startswith("【検査機関】") or floor == "一式" else f"【{floor} {area}】"
+                            loc_text = "" if type_val.startswith("【検査機関】") or floor == "one" or floor == "一式" else f"【{floor} {area}】"
                             detail = r.get('issue_detail', '')
                             i_photo = r.get("issue_photo_url"); f_photo = r.get("fix_photo_url")
                             no_img_html = '<div style="text-align:center; padding:30px; color:#999; border:1px solid #eee;">写真なし</div>'
