@@ -24,6 +24,7 @@ HEADERS = {
 ADMIN_PASSWORD = "2011"
 DELETE_PASSWORD = "5963"
 
+# 🚨 エラー検知のためのログ出力機能を追加 🚨
 def db_get(table, params=""):
     url = f"{SUPABASE_URL}/rest/v1/{table}?{params}"
     try:
@@ -32,12 +33,27 @@ def db_get(table, params=""):
             data = res.json()
             if isinstance(data, list): return [d for d in data if isinstance(d, dict)]
             elif isinstance(data, dict): return [data]
+        else:
+            print(f"\n🚨【DB取得エラー】{table}: {res.status_code} - {res.text}\n")
         return []
-    except Exception: return []
+    except Exception as e: 
+        print(f"\n🚨【DB取得例外エラー】: {e}\n")
+        return []
 
-def db_post(table, data): requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, json=data)
-def db_patch(table, record_id, data): requests.patch(f"{SUPABASE_URL}/rest/v1/{table}?record_id=eq.{record_id}", headers=HEADERS, json=data)
-def db_delete_record(record_id): requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
+def db_post(table, data): 
+    res = requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, json=data)
+    if res.status_code not in [200, 201, 204]: 
+        print(f"\n🚨【DB保存エラー】{table}: {res.status_code} - {res.text}\n")
+
+def db_patch(table, record_id, data): 
+    res = requests.patch(f"{SUPABASE_URL}/rest/v1/{table}?record_id=eq.{record_id}", headers=HEADERS, json=data)
+    if res.status_code not in [200, 201, 204]: 
+        print(f"\n🚨【DB更新エラー】{table}: {res.status_code} - {res.text}\n")
+
+def db_delete_record(record_id): 
+    res = requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
+    if res.status_code not in [200, 201, 204]: 
+        print(f"\n🚨【DB削除エラー】inspection_records: {res.status_code} - {res.text}\n")
 
 def db_delete_property(prop_id):
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?property_id=eq.{prop_id}", headers=HEADERS)
@@ -53,9 +69,13 @@ def upload_to_storage(base64_str):
         filename = f"{uuid.uuid4()}.jpg"
         url = f"{SUPABASE_URL}/storage/v1/object/photos/{filename}"
         res = requests.post(url, headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "image/jpeg"}, data=file_data)
-        if res.status_code in [200, 201]: return f"{SUPABASE_URL}/storage/v1/object/public/photos/{filename}"
-        else: return base64_str
-    except Exception: return base64_str
+        if res.status_code not in [200, 201]: 
+            print(f"\n🚨【写真アップロードエラー】: {res.status_code} - {res.text}\n")
+            return base64_str
+        return f"{SUPABASE_URL}/storage/v1/object/public/photos/{filename}"
+    except Exception as e: 
+        print(f"\n🚨【写真例外エラー】: {e}\n")
+        return base64_str
 
 # 🚀 ゼロ・ラグ保存用：バックグラウンド処理（裏側送信）関数
 def bg_save_inspection(photo_b64, record_data):
@@ -934,7 +954,6 @@ def main():
                 total_cnt = len(cnt_data); wait_cnt = len(recs)
                 st.info(f"📊 **【進捗】 指摘総数：{total_cnt}件 ／ 残り（是正報告待ち）：{wait_cnt}件**")
                 
-                # 【是正実施（協力業者）画面】社内検査4カテゴリーの場合のみ、部屋（階層）でのソート（絞り込み）フィルターを追加
                 if recs and type_val in SHANAI_KENSA_TYPES:
                     floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in recs if r.get('floor_level')])))
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_partner_fix_floor")
@@ -1099,7 +1118,7 @@ def main():
                     st.session_state.cached_records = recs; st.session_state.cached_target_id = target_id_str
                 else: recs = st.session_state.cached_records
                 
-                if recs and type_val in SHANAI_KENSA_TYPES:
+                if recs and st.session_state.role == "admin" and type_val in SHANAI_KENSA_TYPES:
                     floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in recs if r.get('floor_level')])))
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_conf_floor")
                     if sel_floor != "すべて表示":
