@@ -24,7 +24,7 @@ HEADERS = {
 ADMIN_PASSWORD = "2011"
 DELETE_PASSWORD = "5963"
 
-# 🚨 エラー検知のためのログ出力機能を追加 🚨
+# 🚨 エラー検知のためのログ出力機能
 def db_get(table, params=""):
     url = f"{SUPABASE_URL}/rest/v1/{table}?{params}"
     try:
@@ -76,6 +76,14 @@ def upload_to_storage(base64_str):
     except Exception as e: 
         print(f"\n🚨【写真例外エラー】: {e}\n")
         return base64_str
+
+# 🆕 Storageの写真一覧を取得する機能（復旧ツール用）
+def get_storage_files():
+    url = f"{SUPABASE_URL}/storage/v1/object/list/photos"
+    res = requests.post(url, headers=HEADERS, json={"prefix": "", "limit": 1000, "sortBy": {"column": "created_at", "order": "desc"}})
+    if res.status_code == 200:
+        return res.json()
+    return []
 
 # 🚀 ゼロ・ラグ保存用：バックグラウンド処理（裏側送信）関数
 def bg_save_inspection(photo_b64, record_data):
@@ -437,14 +445,12 @@ if "current_box" not in st.session_state or not isinstance(st.session_state.curr
 
 qp = st.query_params
 
-# === エリア情報をURLから取得してセッションに記憶 ===
 if "target_area" not in st.session_state:
     st.session_state.target_area = None
 if qp.get("area") == "tokai":
     st.session_state.target_area = "東海エリア"
 elif qp.get("area") == "kanto":
     st.session_state.target_area = "関東エリア"
-# ===============================================
 
 if qp.get("auth") == ADMIN_PASSWORD:
     st.session_state.role = "admin"
@@ -527,7 +533,7 @@ def main():
         return f"{m} 🔴未確認{confirm_cnt}件" if m == "検査内容確認（管理者）" and confirm_cnt > 0 else m
 
     if st.session_state.role == "admin":
-        menu_opts = ["物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正実施（協力業者）", "是正確認（管理者）", "完了分一覧（共通）"]
+        menu_opts = ["物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正実施（協力業者）", "是正確認（管理者）", "完了分一覧（共通）", "データ復旧（管理者）"]
     else:
         menu_opts = ["是正実施（協力業者）", "完了分一覧（共通）"]
         
@@ -1250,6 +1256,80 @@ def main():
                                 
                             if c_no.button("キャンセル", use_container_width=True):
                                 st.session_state.show_bulk_confirm = False; st.rerun()
+
+    # ========================================
+    # 🆕 データ復旧（管理者）メニュー
+    # ========================================
+    elif st.session_state.active_menu == "データ復旧（管理者）":
+        st.header("🚨 迷子データの復旧ツール")
+        st.info("データベースに登録されずに写真フォルダだけに残ってしまった「孤立した写真」を検索し、黒板の文字を見ながら手動で是正画面へ復活させるためのツールです。")
+
+        if st.button("孤立した写真を探す"):
+            with st.spinner("Supabase内を捜索中..."):
+                # 1. DBに登録されている全ての写真URLを取得
+                used_recs = db_get("inspection_records", "select=issue_photo_url")
+                used_urls = [r['issue_photo_url'] for r in used_recs if isinstance(r, dict) and r.get('issue_photo_url')]
+                
+                # 2. Storage内の全てのファイルを取得
+                all_files = get_storage_files()
+                
+                # 3. 孤立した（使われていない）写真だけを抽出
+                orphans = []
+                for f in all_files:
+                    name = f.get('name')
+                    if not name or name == ".emptyFolderPlaceholder": continue
+                    url = f"{SUPABASE_URL}/storage/v1/object/public/photos/{name}"
+                    if url not in used_urls:
+                        orphans.append({"name": name, "url": url, "created_at": f.get('created_at')})
+                
+                st.session_state.orphan_files = orphans
+                
+        if "orphan_files" in st.session_state:
+            orphans = st.session_state.orphan_files
+            st.success(f"**{len(orphans)}件** の孤立した写真が見つかりました！")
+            
+            # 親となる検査データを取得（選択肢用）
+            all_ins = db_get("inspections", "select=*")
+            ins_opts = [{"id": "", "label": "-- 紐付ける検査を選択 --"}]
+            for i in all_ins:
+                if isinstance(i, dict) and i.get('inspection_id'):
+                    label = f"[{i.get('inspection_date')}] {i.get('property_name')} / {i.get('inspection_type')}"
+                    ins_opts.append({"id": i.get('inspection_id'), "label": label, "prop_id": i.get('property_id')})
+
+            for idx, o in enumerate(orphans):
+                st.markdown("---")
+                st.write(f"作成日時: {o['created_at']}")
+                c1, c2 = st.columns([4, 6])
+                with c1:
+                    st.image(o['url'], use_container_width=True)
+                with c2:
+                    st.markdown("### 復元データを入力")
+                    st.write("※写真の黒板を見ながら入力してください")
+                    
+                    sel_ins_label = st.selectbox("紐付ける検査", [opt["label"] for opt in ins_opts], key=f"r_ins_{idx}")
+                    rec_f = st.text_input("階層（例：303）", key=f"r_f_{idx}")
+                    rec_a = st.text_input("部位（例：洋室）", key=f"r_a_{idx}")
+                    rec_w = st.selectbox("工種", WORK_OPTS_SHANAI, key=f"r_w_{idx}")
+                    rec_d = st.text_area("指摘内容", key=f"r_d_{idx}")
+                    
+                    if st.button("💾 この内容で是正画面に復元する", key=f"r_save_{idx}", type="primary"):
+                        sel_ins_obj = next((opt for opt in ins_opts if opt["label"] == sel_ins_label), None)
+                        if sel_ins_obj and sel_ins_obj["id"] and rec_w != "-- 選択 --":
+                            new_data = {
+                                "record_id": str(uuid.uuid4()),
+                                "inspection_id": sel_ins_obj["id"],
+                                "property_id": sel_ins_obj.get("prop_id"),
+                                "floor_level": rec_f,
+                                "area": rec_a,
+                                "work_type": rec_w,
+                                "issue_detail": rec_d,
+                                "issue_photo_url": o['url'],
+                                "progress_status": "是正待ち"  # 直接業者に飛ばす
+                            }
+                            db_post("inspection_records", new_data)
+                            st.success("🎉 復元完了！業者の是正画面に表示されました。")
+                        else:
+                            st.error("検査と工種を正しく選択してください。")
 
 if __name__ == "__main__":
     try:
