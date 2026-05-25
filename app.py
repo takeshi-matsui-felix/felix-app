@@ -24,6 +24,7 @@ HEADERS = {
 ADMIN_PASSWORD = "2011"
 DELETE_PASSWORD = "5963"
 
+# 🚨 エラー検知のためのログ出力機能
 def db_get(table, params=""):
     url = f"{SUPABASE_URL}/rest/v1/{table}?{params}"
     try:
@@ -32,12 +33,27 @@ def db_get(table, params=""):
             data = res.json()
             if isinstance(data, list): return [d for d in data if isinstance(d, dict)]
             elif isinstance(data, dict): return [data]
+        else:
+            print(f"\n🚨【DB取得エラー】{table}: {res.status_code} - {res.text}\n")
         return []
-    except Exception: return []
+    except Exception as e: 
+        print(f"\n🚨【DB取得例外エラー】: {e}\n")
+        return []
 
-def db_post(table, data): requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, json=data)
-def db_patch(table, record_id, data): requests.patch(f"{SUPABASE_URL}/rest/v1/{table}?record_id=eq.{record_id}", headers=HEADERS, json=data)
-def db_delete_record(record_id): requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
+def db_post(table, data): 
+    res = requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, json=data)
+    if res.status_code not in [200, 201, 204]: 
+        print(f"\n🚨【DB保存エラー】{table}: {res.status_code} - {res.text}\n")
+
+def db_patch(table, record_id, data): 
+    res = requests.patch(f"{SUPABASE_URL}/rest/v1/{table}?record_id=eq.{record_id}", headers=HEADERS, json=data)
+    if res.status_code not in [200, 201, 204]: 
+        print(f"\n🚨【DB更新エラー】{table}: {res.status_code} - {res.text}\n")
+
+def db_delete_record(record_id): 
+    res = requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
+    if res.status_code not in [200, 201, 204]: 
+        print(f"\n🚨【DB削除エラー】inspection_records: {res.status_code} - {res.text}\n")
 
 def db_delete_property(prop_id):
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?property_id=eq.{prop_id}", headers=HEADERS)
@@ -53,9 +69,13 @@ def upload_to_storage(base64_str):
         filename = f"{uuid.uuid4()}.jpg"
         url = f"{SUPABASE_URL}/storage/v1/object/photos/{filename}"
         res = requests.post(url, headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "image/jpeg"}, data=file_data)
-        if res.status_code in [200, 201]: return f"{SUPABASE_URL}/storage/v1/object/public/photos/{filename}"
-        else: return base64_str
-    except Exception: return base64_str
+        if res.status_code not in [200, 201]: 
+            print(f"\n🚨【写真アップロードエラー】: {res.status_code} - {res.text}\n")
+            return base64_str
+        return f"{SUPABASE_URL}/storage/v1/object/public/photos/{filename}"
+    except Exception as e: 
+        print(f"\n🚨【写真例外エラー】: {e}\n")
+        return base64_str
 
 # 🚀 ゼロ・ラグ保存用：バックグラウンド処理（裏側送信）関数
 def bg_save_inspection(photo_b64, record_data):
@@ -417,14 +437,12 @@ if "current_box" not in st.session_state or not isinstance(st.session_state.curr
 
 qp = st.query_params
 
-# === エリア情報をURLから取得してセッションに記憶 ===
 if "target_area" not in st.session_state:
     st.session_state.target_area = None
 if qp.get("area") == "tokai":
     st.session_state.target_area = "東海エリア"
 elif qp.get("area") == "kanto":
     st.session_state.target_area = "関東エリア"
-# ===============================================
 
 if qp.get("auth") == ADMIN_PASSWORD:
     st.session_state.role = "admin"
@@ -611,7 +629,9 @@ def main():
                     with st.container():
                         st.markdown('<div class="record-box">', unsafe_allow_html=True)
                         st.markdown(f"**{title}**")
-                        if r.get('issue_photo_url'): st.image(r.get('issue_photo_url'), width=250)
+                        if r.get('issue_photo_url'): 
+                            photo_url = r.get('issue_photo_url')
+                            st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
                             
                         with st.expander("⚙️ 内容を修正・差し替え・削除"):
                             new_f = floor; new_a = area; sel_temp = None
@@ -818,7 +838,9 @@ def main():
                         st.markdown('<div class="record-box">', unsafe_allow_html=True)
                         st.markdown(f"**{title}**")
                         
-                        if r.get('issue_photo_url'): st.image(r.get('issue_photo_url'), width=250)
+                        if r.get('issue_photo_url'): 
+                            photo_url = r.get('issue_photo_url')
+                            st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
                         
                         with st.expander("✏️ 指摘内容・写真を直前修正する"):
                             f_idx = FLOOR_OPTS[1:].index(floor) if floor in FLOOR_OPTS[1:] else 0
@@ -934,7 +956,6 @@ def main():
                 total_cnt = len(cnt_data); wait_cnt = len(recs)
                 st.info(f"📊 **【進捗】 指摘総数：{total_cnt}件 ／ 残り（是正報告待ち）：{wait_cnt}件**")
                 
-                # 【是正実施（協力業者）画面】社内検査4カテゴリーの場合のみ、部屋（階層）でのソート（絞り込み）フィルターを追加
                 if recs and type_val in SHANAI_KENSA_TYPES:
                     floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in recs if r.get('floor_level')])))
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_partner_fix_floor")
@@ -995,8 +1016,11 @@ def main():
                             c1, c2 = st.columns(2)
                             with c1:
                                 st.markdown("**【指摘箇所（Before）】**")
-                                if r.get('issue_photo_url'): st.image(r.get('issue_photo_url'), width=250)
-                                else: st.write("写真なし")
+                                if r.get('issue_photo_url'): 
+                                    photo_url = r.get('issue_photo_url')
+                                    st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
+                                else: 
+                                    st.write("写真なし")
                                     
                             with c2:
                                 st.markdown("**【是正写真（After）**")
@@ -1099,7 +1123,7 @@ def main():
                     st.session_state.cached_records = recs; st.session_state.cached_target_id = target_id_str
                 else: recs = st.session_state.cached_records
                 
-                if recs and type_val in SHANAI_KENSA_TYPES:
+                if recs and st.session_state.role == "admin" and type_val in SHANAI_KENSA_TYPES:
                     floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in recs if r.get('floor_level')])))
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_conf_floor")
                     if sel_floor != "すべて表示":
@@ -1150,8 +1174,10 @@ def main():
                             detail = r.get('issue_detail', '')
                             i_photo = r.get("issue_photo_url"); f_photo = r.get("fix_photo_url")
                             no_img_html = '<div style="text-align:center; padding:30px; color:#999; border:1px solid #eee;">写真なし</div>'
-                            img_b = f'<img src="{i_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;">' if i_photo else no_img_html
-                            img_a = f'<img src="{f_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;">' if f_photo else no_img_html
+                            
+                            # 完了分一覧でもリンクを有効化
+                            img_b = f'<a href="{i_photo}" target="_blank"><img src="{i_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;"></a>' if i_photo else no_img_html
+                            img_a = f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;"></a>' if f_photo else no_img_html
                             
                             st.markdown(f"""
                             <div style="page-break-inside: avoid; border-bottom: 1px dashed #ccc; padding: 15px 0; margin-bottom: 10px;">
@@ -1194,8 +1220,11 @@ def main():
                                 st.markdown(f"**{title}**")
                                 c1, c2 = st.columns(2)
                                 i_photo = r.get('issue_photo_url'); f_photo = r.get('fix_photo_url')
-                                if i_photo: c1.image(i_photo, caption="Before", width=250)
-                                if f_photo: c2.image(f_photo, caption="After", width=250)
+                                
+                                if i_photo: 
+                                    c1.markdown(f'**Before**<br><a href="{i_photo}" target="_blank"><img src="{i_photo}" style="width:100%; max-width:250px; border-radius:4px;"></a>', unsafe_allow_html=True)
+                                if f_photo: 
+                                    c2.markdown(f'**After**<br><a href="{f_photo}" target="_blank"><img src="{f_photo}" style="width:100%; max-width:250px; border-radius:4px;"></a>', unsafe_allow_html=True)
                                 
                                 ca, cb = st.columns(2)
                                 if ca.button("✅ 承認（完了へ）", key=f"ok_{rec_id}"): 
