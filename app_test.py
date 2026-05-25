@@ -24,7 +24,7 @@ HEADERS = {
 ADMIN_PASSWORD = "2011"
 DELETE_PASSWORD = "5963"
 
-# 🚨 エラー検知のためのログ出力機能
+# 🚨 DB操作関数群
 def db_get(table, params=""):
     url = f"{SUPABASE_URL}/rest/v1/{table}?{params}"
     try:
@@ -49,6 +49,16 @@ def db_patch(table, record_id, data):
     res = requests.patch(f"{SUPABASE_URL}/rest/v1/{table}?record_id=eq.{record_id}", headers=HEADERS, json=data)
     if res.status_code not in [200, 201, 204]: 
         print(f"\n🚨【DB更新エラー】{table}: {res.status_code} - {res.text}\n")
+
+def db_patch_property(prop_id, data): 
+    res = requests.patch(f"{SUPABASE_URL}/rest/v1/properties?property_id=eq.{prop_id}", headers=HEADERS, json=data)
+    if res.status_code not in [200, 201, 204]: 
+        print(f"\n🚨【DB更新エラー】properties: {res.status_code} - {res.text}\n")
+
+def db_patch_inspections_by_prop(prop_id, new_name):
+    res = requests.patch(f"{SUPABASE_URL}/rest/v1/inspections?property_id=eq.{prop_id}", headers=HEADERS, json={"property_name": new_name})
+    if res.status_code not in [200, 201, 204]: 
+        print(f"\n🚨【DB更新エラー】inspections: {res.status_code} - {res.text}\n")
 
 def db_delete_record(record_id): 
     res = requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
@@ -77,7 +87,7 @@ def upload_to_storage(base64_str):
         print(f"\n🚨【写真例外エラー】: {e}\n")
         return base64_str
 
-# 🚀 ゼロ・ラグ保存用：バックグラウンド処理（裏側送信）関数
+# 🚀 ゼロ・ラグ保存用：バックグラウンド処理
 def bg_save_inspection(photo_b64, record_data):
     saved_url = upload_to_storage(photo_b64)
     if saved_url: record_data["issue_photo_url"] = saved_url
@@ -426,7 +436,7 @@ ISSUE_TEMPLATES = {
 # ==========================================
 # 5. セッション管理 & 選択肢リスト
 # ==========================================
-for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "skip_render_ids", "show_bulk_confirm", "edit_saved_records", "cached_records", "cached_target_id", "temp_photo"]:
+for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "edit_prop_target", "skip_render_ids", "show_bulk_confirm", "edit_saved_records", "cached_records", "cached_target_id", "temp_photo"]:
     if key not in st.session_state:
         st.session_state[key] = None
 
@@ -457,6 +467,7 @@ def jump_to_menu(menu_name, prop_id=None):
     st.session_state.drill_target = None
     st.session_state.current_box = None
     st.session_state.delete_target = None
+    st.session_state.edit_prop_target = None
     st.session_state.issue_saved = False
     st.session_state.skip_render_ids = []
     st.session_state.show_bulk_confirm = False
@@ -549,20 +560,58 @@ def main():
                 st.success(f"【{input_area}】に登録完了")
         
         props = db_get("properties", "select=*")
+        
+        # すべての検査データを取得して物件ごとの件数をカウント
+        all_ins = db_get("inspections", "select=property_id")
+        prop_ins_counts = {}
+        for ins in all_ins:
+            pid = ins.get('property_id')
+            if pid: prop_ins_counts[pid] = prop_ins_counts.get(pid, 0) + 1
+        
         for idx, p in enumerate(props):
             prop_id = p.get('property_id')
             if not prop_id: continue
             
             p_area = p.get('area', '未設定')
-            prop_name = f"[{p_area}] {p.get('property_name', '不明')}"
+            p_name = p.get('property_name', '不明')
+            ins_count = prop_ins_counts.get(prop_id, 0)
+            
+            # データ件数の表示テキストを作成
+            count_disp = f"（📁 検査データ: {ins_count}件）" if ins_count > 0 else "（⚠️ データなし）"
+            btn_text = f"[{p_area}] {p_name} {count_disp} 検査へ"
             key_suffix = f"{prop_id}_{idx}"
             
-            c1, c2 = st.columns([7, 3])
-            if c1.button(f"{prop_name} 検査へ", key=f"p_{key_suffix}"): jump_to_menu("検査実施（管理者）", prop_id)
-            if c2.button("削除", key=f"d_{key_suffix}"): st.session_state.delete_target = prop_id; st.rerun()
+            c1, c2, c3 = st.columns([6, 2, 2])
+            if c1.button(btn_text, key=f"p_{key_suffix}"): jump_to_menu("検査実施（管理者）", prop_id)
+            if c2.button("✏️ 変更", key=f"e_{key_suffix}"):
+                st.session_state.edit_prop_target = prop_id
+                st.session_state.delete_target = None
+                st.rerun()
+            if c3.button("削除", key=f"d_{key_suffix}"): 
+                st.session_state.delete_target = prop_id
+                st.session_state.edit_prop_target = None
+                st.rerun()
+            
+            # 名称変更UI
+            if st.session_state.edit_prop_target == prop_id:
+                st.warning(f"「{p_name}」の名前を変更します。※過去の検査データもすべて新しい名前に更新されます。")
+                new_name = st.text_input("新しい物件名を入力", value=p_name, key=f"new_name_{key_suffix}")
+                col_y, col_n = st.columns(2)
+                if col_y.button("💾 保存", key=f"save_name_{key_suffix}", type="primary"):
+                    if new_name and new_name != p_name:
+                        db_patch_property(prop_id, {"property_name": new_name})
+                        db_patch_inspections_by_prop(prop_id, new_name)
+                        st.success("物件名を変更しました！")
+                        st.session_state.edit_prop_target = None
+                        st.rerun()
+                if col_n.button("キャンセル", key=f"cancel_name_{key_suffix}"):
+                    st.session_state.edit_prop_target = None
+                    st.rerun()
+                st.markdown("---")
                 
+            # 削除UI
             if st.session_state.delete_target == prop_id:
-                st.warning(f"⚠️ 本当に「{prop_name}」を削除しますか？紐づくすべてのデータが消えます。")
+                st.warning(f"⚠️ 本当に「{p_name}」を削除しますか？紐づくすべてのデータが消えます。")
                 del_pw = st.text_input("削除用パスワードを入力", type="password", key=f"pw_{key_suffix}", placeholder="2011")
                 col_y, col_n = st.columns(2)
                 if col_y.button("Yes (削除実行)", key=f"yes_{key_suffix}"):
@@ -580,11 +629,27 @@ def main():
         if not st.session_state.current_box:
             st.header("検査開始")
             props = db_get("properties", "select=*")
-            opts = [{"property_id": None, "property_name": "-- 選択 --"}] + [p for p in props if p.get('property_id')]
+            
+            # 初期エリアの決定（物件登録画面からジャンプしてきた場合に対応）
+            area_opts = ["-- 選択 --", "東海エリア", "関東エリア"]
+            init_area_idx = 0
+            if st.session_state.pre_selected_prop:
+                pre_prop = next((p for p in props if p.get('property_id') == st.session_state.pre_selected_prop), None)
+                if pre_prop and pre_prop.get('area') in area_opts:
+                    init_area_idx = area_opts.index(pre_prop.get('area'))
+            
+            # カスケード1段目：エリア選択
+            sel_area = st.selectbox("エリアを選択", area_opts, index=init_area_idx)
+            
+            # エリアで物件を絞り込み
+            filtered_props = [p for p in props if p.get('area') == sel_area and p.get('property_id')] if sel_area != "-- 選択 --" else []
+            opts = [{"property_id": None, "property_name": "-- 選択 --"}] + filtered_props
             idx = next((i for i, p in enumerate(opts) if p.get('property_id') == st.session_state.pre_selected_prop), 0)
             
+            # カスケード2段目：物件選択
             target = st.selectbox("物件を選択", opts, index=idx, format_func=lambda x: x.get('property_name', '不明'))
             ins_type = st.selectbox("検査種類を選択", INSP_OPTS)
+            
             c1, c2 = st.columns(2)
             ins_date = c1.date_input("検査日時", datetime.date.today())
             inspector = c2.selectbox("検査員", INSPECTOR_OPTS)
@@ -1175,7 +1240,6 @@ def main():
                             i_photo = r.get("issue_photo_url"); f_photo = r.get("fix_photo_url")
                             no_img_html = '<div style="text-align:center; padding:30px; color:#999; border:1px solid #eee;">写真なし</div>'
                             
-                            # 完了分一覧でもリンクを有効化
                             img_b = f'<a href="{i_photo}" target="_blank"><img src="{i_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;"></a>' if i_photo else no_img_html
                             img_a = f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;"></a>' if f_photo else no_img_html
                             
