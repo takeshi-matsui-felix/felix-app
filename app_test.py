@@ -552,16 +552,23 @@ def main():
     if st.session_state.active_menu == "物件登録（管理者）":
         st.header("物件登録")
         
-        input_area = st.selectbox("エリアを選択", ["東海エリア", "関東エリア"])
-        name = st.text_input("新規物件名")
-        if st.button("登録"):
-            if name:
-                db_post("properties", {"property_id": str(uuid.uuid4()), "property_name": name, "area": input_area})
-                st.success(f"【{input_area}】に登録完了")
+        with st.container():
+            input_area = st.selectbox("エリアを選択", ["東海エリア", "関東エリア"])
+            name = st.text_input("新規物件名")
+            if st.button("登録"):
+                if name:
+                    db_post("properties", {"property_id": str(uuid.uuid4()), "property_name": name, "area": input_area})
+                    st.success(f"【{input_area}】に登録完了")
+                    st.rerun()
+        
+        st.markdown("---")
+        st.subheader("登録済み物件一覧")
+        
+        filter_area = st.radio("一覧のエリア絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True)
         
         props = db_get("properties", "select=*")
+        props = props[::-1]  # 最新の登録を上に表示（リストの逆順）
         
-        # すべての検査データを取得して物件ごとの件数をカウント
         all_ins = db_get("inspections", "select=property_id")
         prop_ins_counts = {}
         for ins in all_ins:
@@ -573,10 +580,11 @@ def main():
             if not prop_id: continue
             
             p_area = p.get('area', '未設定')
+            if filter_area != "すべて表示" and p_area != filter_area: continue
+            
             p_name = p.get('property_name', '不明')
             ins_count = prop_ins_counts.get(prop_id, 0)
             
-            # データ件数の表示テキストを作成
             count_disp = f"（📁 検査データ: {ins_count}件）" if ins_count > 0 else "（⚠️ データなし）"
             btn_text = f"[{p_area}] {p_name} {count_disp} 検査へ"
             key_suffix = f"{prop_id}_{idx}"
@@ -592,7 +600,6 @@ def main():
                 st.session_state.edit_prop_target = None
                 st.rerun()
             
-            # 名称変更UI
             if st.session_state.edit_prop_target == prop_id:
                 st.warning(f"「{p_name}」の名前を変更します。※過去の検査データもすべて新しい名前に更新されます。")
                 new_name = st.text_input("新しい物件名を入力", value=p_name, key=f"new_name_{key_suffix}")
@@ -609,7 +616,6 @@ def main():
                     st.rerun()
                 st.markdown("---")
                 
-            # 削除UI
             if st.session_state.delete_target == prop_id:
                 st.warning(f"⚠️ 本当に「{p_name}」を削除しますか？紐づくすべてのデータが消えます。")
                 del_pw = st.text_input("削除用パスワードを入力", type="password", key=f"pw_{key_suffix}", placeholder="2011")
@@ -630,7 +636,6 @@ def main():
             st.header("検査開始")
             props = db_get("properties", "select=*")
             
-            # 初期エリアの決定（物件登録画面からジャンプしてきた場合に対応）
             area_opts = ["-- 選択 --", "東海エリア", "関東エリア"]
             init_area_idx = 0
             if st.session_state.pre_selected_prop:
@@ -638,15 +643,12 @@ def main():
                 if pre_prop and pre_prop.get('area') in area_opts:
                     init_area_idx = area_opts.index(pre_prop.get('area'))
             
-            # カスケード1段目：エリア選択
             sel_area = st.selectbox("エリアを選択", area_opts, index=init_area_idx)
             
-            # エリアで物件を絞り込み
             filtered_props = [p for p in props if p.get('area') == sel_area and p.get('property_id')] if sel_area != "-- 選択 --" else []
             opts = [{"property_id": None, "property_name": "-- 選択 --"}] + filtered_props
             idx = next((i for i, p in enumerate(opts) if p.get('property_id') == st.session_state.pre_selected_prop), 0)
             
-            # カスケード2段目：物件選択
             target = st.selectbox("物件を選択", opts, index=idx, format_func=lambda x: x.get('property_name', '不明'))
             ins_type = st.selectbox("検査種類を選択", INSP_OPTS)
             
@@ -832,8 +834,13 @@ def main():
     elif st.session_state.active_menu == "検査内容確認（管理者）":
         st.header("検査内容確認 ＆ 最終修正")
         
+        sel_area = st.radio("📍 表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key="area_verify")
+        t_area = sel_area if sel_area != "すべて表示" else None
+        
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status&progress_status=eq.確認待ち")
         all_ins = db_get("inspections", "select=*")
+        all_props = db_get("properties", "select=property_id,area")
+        prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
         
         ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
         tree = {}
@@ -841,6 +848,8 @@ def main():
             if not isinstance(r, dict): continue
             ins = ins_map.get(r.get('inspection_id'))
             if ins:
+                p_id = ins.get('property_id')
+                if t_area and prop_area_map.get(p_id) != t_area: continue
                 p = ins.get('property_name', '不明'); t = ins.get('inspection_type', '不明')
                 if p not in tree: tree[p] = {}
                 tree[p][t] = tree[p].get(t, 0) + 1
@@ -953,15 +962,18 @@ def main():
         if st.session_state.role == "partner":
             if st.session_state.target_area:
                 st.success(f"📍 現在の表示エリア：【 {st.session_state.target_area} 】")
+                t_area = st.session_state.target_area
             else:
                 st.warning("⚠️ URLにエリア指定がありません。正しいURLからアクセスしてください。")
+                t_area = None
+        else:
+            sel_area = st.radio("📍 表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key="area_fix")
+            t_area = sel_area if sel_area != "すべて表示" else None
 
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status")
         all_ins = db_get("inspections", "select=*")
-        
         all_props = db_get("properties", "select=property_id,area")
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
-        t_area = st.session_state.target_area if st.session_state.role == "partner" else None
         
         ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
         tree = {}; tree_counts = {}
@@ -1113,13 +1125,19 @@ def main():
     # ----------------------------------------
     elif st.session_state.active_menu in ["是正確認（管理者）", "完了分一覧（共通）"]:
         status = "是正確認中" if "確認" in st.session_state.active_menu else "完了"
+        st.header(st.session_state.active_menu)
+        
+        if st.session_state.role == "partner":
+            t_area = st.session_state.target_area
+            if t_area: st.success(f"📍 現在の表示エリア：【 {t_area} 】")
+        else:
+            sel_area = st.radio("📍 表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key=f"area_{status}")
+            t_area = sel_area if sel_area != "すべて表示" else None
         
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status")
         all_ins = db_get("inspections", "select=*")
-        
         all_props = db_get("properties", "select=property_id,area")
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
-        t_area = st.session_state.target_area if st.session_state.role == "partner" else None
 
         ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
         tree = {}; tree_counts = {} 
@@ -1149,7 +1167,6 @@ def main():
         target_id_str = f"conf_{prop_val}_{type_val}_{status}" if prop_val else None
 
         if not (prop_val and type_val):
-            st.header(st.session_state.active_menu)
             has_visible_items = False
             for p_idx, (p_name, types) in enumerate(tree.items()):
                 valid_types = []
