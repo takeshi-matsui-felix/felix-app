@@ -77,14 +77,6 @@ def upload_to_storage(base64_str):
         print(f"\n🚨【写真例外エラー】: {e}\n")
         return base64_str
 
-# 🆕 Storageの写真一覧を取得する機能（復旧ツール用）
-def get_storage_files():
-    url = f"{SUPABASE_URL}/storage/v1/object/list/photos"
-    res = requests.post(url, headers=HEADERS, json={"prefix": "", "limit": 1000, "sortBy": {"column": "created_at", "order": "desc"}})
-    if res.status_code == 200:
-        return res.json()
-    return []
-
 # 🚀 ゼロ・ラグ保存用：バックグラウンド処理（裏側送信）関数
 def bg_save_inspection(photo_b64, record_data):
     saved_url = upload_to_storage(photo_b64)
@@ -533,7 +525,7 @@ def main():
         return f"{m} 🔴未確認{confirm_cnt}件" if m == "検査内容確認（管理者）" and confirm_cnt > 0 else m
 
     if st.session_state.role == "admin":
-        menu_opts = ["物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正実施（協力業者）", "是正確認（管理者）", "完了分一覧（共通）", "データ復旧（管理者）"]
+        menu_opts = ["物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正実施（協力業者）", "是正確認（管理者）", "完了分一覧（共通）"]
     else:
         menu_opts = ["是正実施（協力業者）", "完了分一覧（共通）"]
         
@@ -637,7 +629,9 @@ def main():
                     with st.container():
                         st.markdown('<div class="record-box">', unsafe_allow_html=True)
                         st.markdown(f"**{title}**")
-                        if r.get('issue_photo_url'): st.image(r.get('issue_photo_url'), width=250)
+                        if r.get('issue_photo_url'): 
+                            photo_url = r.get('issue_photo_url')
+                            st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
                             
                         with st.expander("⚙️ 内容を修正・差し替え・削除"):
                             new_f = floor; new_a = area; sel_temp = None
@@ -844,7 +838,9 @@ def main():
                         st.markdown('<div class="record-box">', unsafe_allow_html=True)
                         st.markdown(f"**{title}**")
                         
-                        if r.get('issue_photo_url'): st.image(r.get('issue_photo_url'), width=250)
+                        if r.get('issue_photo_url'): 
+                            photo_url = r.get('issue_photo_url')
+                            st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
                         
                         with st.expander("✏️ 指摘内容・写真を直前修正する"):
                             f_idx = FLOOR_OPTS[1:].index(floor) if floor in FLOOR_OPTS[1:] else 0
@@ -1020,8 +1016,11 @@ def main():
                             c1, c2 = st.columns(2)
                             with c1:
                                 st.markdown("**【指摘箇所（Before）】**")
-                                if r.get('issue_photo_url'): st.image(r.get('issue_photo_url'), width=250)
-                                else: st.write("写真なし")
+                                if r.get('issue_photo_url'): 
+                                    photo_url = r.get('issue_photo_url')
+                                    st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
+                                else: 
+                                    st.write("写真なし")
                                     
                             with c2:
                                 st.markdown("**【是正写真（After）**")
@@ -1175,8 +1174,10 @@ def main():
                             detail = r.get('issue_detail', '')
                             i_photo = r.get("issue_photo_url"); f_photo = r.get("fix_photo_url")
                             no_img_html = '<div style="text-align:center; padding:30px; color:#999; border:1px solid #eee;">写真なし</div>'
-                            img_b = f'<img src="{i_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;">' if i_photo else no_img_html
-                            img_a = f'<img src="{f_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;">' if f_photo else no_img_html
+                            
+                            # 完了分一覧でもリンクを有効化
+                            img_b = f'<a href="{i_photo}" target="_blank"><img src="{i_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;"></a>' if i_photo else no_img_html
+                            img_a = f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;"></a>' if f_photo else no_img_html
                             
                             st.markdown(f"""
                             <div style="page-break-inside: avoid; border-bottom: 1px dashed #ccc; padding: 15px 0; margin-bottom: 10px;">
@@ -1219,8 +1220,11 @@ def main():
                                 st.markdown(f"**{title}**")
                                 c1, c2 = st.columns(2)
                                 i_photo = r.get('issue_photo_url'); f_photo = r.get('fix_photo_url')
-                                if i_photo: c1.image(i_photo, caption="Before", width=250)
-                                if f_photo: c2.image(f_photo, caption="After", width=250)
+                                
+                                if i_photo: 
+                                    c1.markdown(f'**Before**<br><a href="{i_photo}" target="_blank"><img src="{i_photo}" style="width:100%; max-width:250px; border-radius:4px;"></a>', unsafe_allow_html=True)
+                                if f_photo: 
+                                    c2.markdown(f'**After**<br><a href="{f_photo}" target="_blank"><img src="{f_photo}" style="width:100%; max-width:250px; border-radius:4px;"></a>', unsafe_allow_html=True)
                                 
                                 ca, cb = st.columns(2)
                                 if ca.button("✅ 承認（完了へ）", key=f"ok_{rec_id}"): 
@@ -1256,80 +1260,6 @@ def main():
                                 
                             if c_no.button("キャンセル", use_container_width=True):
                                 st.session_state.show_bulk_confirm = False; st.rerun()
-
-    # ========================================
-    # 🆕 データ復旧（管理者）メニュー
-    # ========================================
-    elif st.session_state.active_menu == "データ復旧（管理者）":
-        st.header("🚨 迷子データの復旧ツール")
-        st.info("データベースに登録されずに写真フォルダだけに残ってしまった「孤立した写真」を検索し、黒板の文字を見ながら手動で是正画面へ復活させるためのツールです。")
-
-        if st.button("孤立した写真を探す"):
-            with st.spinner("Supabase内を捜索中..."):
-                # 1. DBに登録されている全ての写真URLを取得
-                used_recs = db_get("inspection_records", "select=issue_photo_url")
-                used_urls = [r['issue_photo_url'] for r in used_recs if isinstance(r, dict) and r.get('issue_photo_url')]
-                
-                # 2. Storage内の全てのファイルを取得
-                all_files = get_storage_files()
-                
-                # 3. 孤立した（使われていない）写真だけを抽出
-                orphans = []
-                for f in all_files:
-                    name = f.get('name')
-                    if not name or name == ".emptyFolderPlaceholder": continue
-                    url = f"{SUPABASE_URL}/storage/v1/object/public/photos/{name}"
-                    if url not in used_urls:
-                        orphans.append({"name": name, "url": url, "created_at": f.get('created_at')})
-                
-                st.session_state.orphan_files = orphans
-                
-        if "orphan_files" in st.session_state:
-            orphans = st.session_state.orphan_files
-            st.success(f"**{len(orphans)}件** の孤立した写真が見つかりました！")
-            
-            # 親となる検査データを取得（選択肢用）
-            all_ins = db_get("inspections", "select=*")
-            ins_opts = [{"id": "", "label": "-- 紐付ける検査を選択 --"}]
-            for i in all_ins:
-                if isinstance(i, dict) and i.get('inspection_id'):
-                    label = f"[{i.get('inspection_date')}] {i.get('property_name')} / {i.get('inspection_type')}"
-                    ins_opts.append({"id": i.get('inspection_id'), "label": label, "prop_id": i.get('property_id')})
-
-            for idx, o in enumerate(orphans):
-                st.markdown("---")
-                st.write(f"作成日時: {o['created_at']}")
-                c1, c2 = st.columns([4, 6])
-                with c1:
-                    st.image(o['url'], use_container_width=True)
-                with c2:
-                    st.markdown("### 復元データを入力")
-                    st.write("※写真の黒板を見ながら入力してください")
-                    
-                    sel_ins_label = st.selectbox("紐付ける検査", [opt["label"] for opt in ins_opts], key=f"r_ins_{idx}")
-                    rec_f = st.text_input("階層（例：303）", key=f"r_f_{idx}")
-                    rec_a = st.text_input("部位（例：洋室）", key=f"r_a_{idx}")
-                    rec_w = st.selectbox("工種", WORK_OPTS_SHANAI, key=f"r_w_{idx}")
-                    rec_d = st.text_area("指摘内容", key=f"r_d_{idx}")
-                    
-                    if st.button("💾 この内容で是正画面に復元する", key=f"r_save_{idx}", type="primary"):
-                        sel_ins_obj = next((opt for opt in ins_opts if opt["label"] == sel_ins_label), None)
-                        if sel_ins_obj and sel_ins_obj["id"] and rec_w != "-- 選択 --":
-                            new_data = {
-                                "record_id": str(uuid.uuid4()),
-                                "inspection_id": sel_ins_obj["id"],
-                                "property_id": sel_ins_obj.get("prop_id"),
-                                "floor_level": rec_f,
-                                "area": rec_a,
-                                "work_type": rec_w,
-                                "issue_detail": rec_d,
-                                "issue_photo_url": o['url'],
-                                "progress_status": "是正待ち"  # 直接業者に飛ばす
-                            }
-                            db_post("inspection_records", new_data)
-                            st.success("🎉 復元完了！業者の是正画面に表示されました。")
-                        else:
-                            st.error("検査と工種を正しく選択してください。")
 
 if __name__ == "__main__":
     try:
