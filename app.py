@@ -287,7 +287,7 @@ ISSUE_TEMPLATES = {
             "シューズボックス": ["シューズボックスのラッチ調整不十分", "シューズボックス扉調整。バタンとうるさい", "シューズボックス扉調整。扉傾き", "シューズボックス扉調整。壁に擦る", "シューズボックス扉調整。ボックスに対して斜めっている", "シューズボックス扉バタンとうるさい。涙目設置", "シューズボックスとクロス取り合い隙間をコーキング処理", "シューズボックスリペア", "シューズボックス取付位置是正", "シューズボックス丁番外れ", "シューズボックス建具受け用涙目設置", "シューズボックスの開き勝手が逆", "シューズクローク下端のコーキング未済", "シューズボックス閉時隙間広い。 プッシュ金具の調整"], 
             "玄関ドア外": ["玄関戸の戸当たりなし", "英文字の位置を玄関戸ライン側に是正", "玄関戸固定ビスとコーキング未施工", "玄関戸固定ビス頭コーキング未施工", "玄関戸下のはみだし材除去", "玄関戸固定シールはみ出し。サッシ固定ビスなし。", "玄関戸アングルピース下隙間及び横隙間のシーリング、及び固定ビス頭コーキング未施工"], 
             "玄関ドア扉": ["玄関扉調整（異音あり）", "玄関ドアクローザー調整 (異音あり)", "玄関ドアレバーハンドル調整。", "玄関扉英字カッティングシート剥がれ", "玄関扉英字カッティングシート未施工"], 
-            "玄関ドア内": ["沓摺とフロアタイル取合いコーキング処理（コーキング黒）", "玄関枠下とフロアタイルに隙間あり（コーキング　白）", "玄関枠ビス未施工・ビス打ち不良", "玄関戸枠凹み", "ビス浮き", "玄関ドアと沓摺の間隙間", "沓摺浮き・異音"], 
+            "玄関ドア内": ["沓摺とフロアタイル取合いコーキング処理（コーキング黒）", "玄関枠下とフロアタイルに隙間あり（コーキング　白）", "玄関枠下とフロアタイルに隙間あり（コーキング　黒）", "玄関枠ビス未施工・ビス打ち不良", "玄関戸枠凹み", "ビス浮き", "玄関ドアと沓摺の間隙間", "沓摺浮き・異音"], 
             "巾木": ["巾木下の隙間をコーキング処理（コーキング　白）", "巾木下の隙間をコーキング処理（ボンドコーク　白）", "巾木小口処理", "巾木隙間", "巾木とクロスの取合いボンドコーク処理", "巾木反り"], 
             "フロアタイル": ["フロアタイルと巾木との取合い隙間あり(フロアタイル同色)", "フロアタイルと玄関枠の取合い隙間あり（シーリング　床同色）", "フロアタイルと沓づりの取合い隙間あり（シーリング床同色）", "フロアタイル浮き", "フロアタイル段差", "フロアタイル隙間"], 
             "建具関係": ["建付け調整(トイレドア)", "建付け調整(LDKドア)", "トイレドアレバーハンドル調整", "LDKドアレバーハンドル調整", "LDK入口建具の上部隙間"], 
@@ -436,7 +436,7 @@ ISSUE_TEMPLATES = {
 # ==========================================
 # 5. セッション管理 & 選択肢リスト
 # ==========================================
-for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "edit_prop_target", "skip_render_ids", "show_bulk_confirm", "edit_saved_records", "cached_records", "cached_target_id", "temp_photo"]:
+for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "edit_prop_target", "skip_render_ids", "show_bulk_confirm", "edit_saved_records", "cached_records", "cached_target_id", "temp_photo", "prev_floor", "prev_area"]:
     if key not in st.session_state:
         st.session_state[key] = None
 
@@ -475,6 +475,8 @@ def jump_to_menu(menu_name, prop_id=None):
     st.session_state.cached_records = None
     st.session_state.cached_target_id = None
     st.session_state.temp_photo = None
+    st.session_state.prev_floor = None
+    st.session_state.prev_area = None
     st.rerun()
 
 FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
@@ -662,7 +664,9 @@ def main():
                     nid = str(uuid.uuid4())
                     db_post("inspections", {"inspection_id": nid, "property_id": prop_id, "property_name": prop_name, "inspection_type": ins_type, "inspection_date": str(ins_date), "inspector": inspector})
                     st.session_state.current_box = {"id": nid, "prop_id": prop_id, "name": prop_name, "type": ins_type, "inspector": inspector}
-                    st.session_state.pre_selected_prop = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None; st.rerun()
+                    st.session_state.pre_selected_prop = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None
+                    st.session_state.prev_floor = None; st.session_state.prev_area = None
+                    st.rerun()
                 else: st.error("物件と検査種類を選んでください")
         else:
             cb = st.session_state.current_box
@@ -714,7 +718,11 @@ def main():
                                 if not isinstance(cat_dict, dict): cat_dict = {}
                                 cat_keys = list(cat_dict.keys())
                                 sel_cat = st.radio("分類を変更（A列）", cat_keys, horizontal=True, key=f"ecat_{rec_id}") if cat_keys else None
-                                if sel_cat: sel_temp = st.radio("よくある指摘事項（D列）", cat_dict.get(sel_cat, []), key=f"etemp_{rec_id}", horizontal=True)
+                                
+                                # フリー項目の処理（編集時）
+                                if sel_cat: 
+                                    temp_list = cat_dict.get(sel_cat, []) + ["その他（フリー項目）"]
+                                    sel_temp = st.radio("よくある指摘事項（D列）", temp_list, key=f"etemp_{rec_id}", horizontal=True)
                             
                             edit_desc_val = detail.split(":", 1)[1] if ":" in detail else detail.split("：", 1)[1] if "：" in detail else detail
                             st.markdown("##### 詳細・場所の追記を変更")
@@ -723,7 +731,11 @@ def main():
                             idx_w = edit_w_opts.index(r.get('work_type', '')) if r.get('work_type', '') in edit_w_opts else 0
                             new_w = st.radio("工種を変更", edit_w_opts, index=idx_w, horizontal=True, key=f"ed_work_{rec_id}")
                             
-                            final_desc = (sel_temp + ("：" + new_detail.strip() if new_detail.strip() != "" else "")) if sel_temp else new_detail.strip()
+                            if sel_temp == "その他（フリー項目）":
+                                final_desc = new_detail.strip()
+                            else:
+                                final_desc = (sel_temp + ("：" + new_detail.strip() if new_detail.strip() != "" else "")) if sel_temp else new_detail.strip()
+                                
                             if final_desc == "": final_desc = detail 
                             
                             loc_parts = [str(new_f), str(new_a)]
@@ -757,6 +769,10 @@ def main():
                 if st.button("＜ 検査登録に戻る", key="back_bottom", use_container_width=True): st.session_state.edit_saved_records = False; st.rerun()
 
             elif not st.session_state.issue_saved:
+                # 引き継ぎロジック
+                prev_f = st.session_state.prev_floor
+                prev_a = st.session_state.prev_area
+                
                 if c_type.startswith("【検査機関】"):
                     f = "一式"; a = "全体"; sel_cat = None; sel_temp = None
                     st.markdown("##### 詳細・場所の追記（自由入力）")
@@ -769,20 +785,33 @@ def main():
                     work_opts = WORK_OPTS_SHANAI if c_type in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if c_type == "躯体検査" else WORK_OPTS_HAIKIN if c_type == "配筋検査" else WORK_OPTS_CHUKAN if c_type == "中間検査" else WORK_OPTS_STANDARD
                     
                     if c_type not in ["配筋検査", "躯体検査", "中間検査"]:
-                        f = st.radio("階層を選択", FLOOR_OPTS[1:], horizontal=True)
-                        a = st.radio("部位を選択", area_opts[1:], horizontal=True)
+                        f_idx = FLOOR_OPTS[1:].index(prev_f) if prev_f in FLOOR_OPTS[1:] else 0
+                        f = st.radio("階層を選択", FLOOR_OPTS[1:], index=f_idx, horizontal=True)
+                        
+                        a_idx = area_opts[1:].index(prev_a) if prev_a in area_opts[1:] else 0
+                        a = st.radio("部位を選択", area_opts[1:], index=a_idx, horizontal=True)
                     
                     cat_dict = ISSUE_TEMPLATES.get(c_type, {}) if c_type in ["配筋検査", "躯体検査", "中間検査"] else ISSUE_TEMPLATES.get("社内検査(設計)", {}).get(a, {}) if c_type in SHANAI_KENSA_TYPES else {}
                     if not isinstance(cat_dict, dict): cat_dict = {}
                     cat_keys = list(cat_dict.keys())
                     sel_cat = st.radio("分類を選択（A列）", cat_keys, horizontal=True) if cat_keys else None
-                    sel_temp = st.radio("よくある指摘事項（D列）", cat_dict.get(sel_cat, []), horizontal=True) if sel_cat else None
                     
+                    # フリー項目の追加（新規登録時）
+                    if sel_cat:
+                        temp_list = cat_dict.get(sel_cat, []) + ["その他（フリー項目）"]
+                        sel_temp = st.radio("よくある指摘事項（D列）", temp_list, horizontal=True)
+                    else:
+                        sel_temp = None
+                        
                     st.markdown("##### 詳細・場所の追記（自由入力）")
                     desc = st.text_area("詳細情報を入力", label_visibility="collapsed")
                     w = st.radio("工種を選択", work_opts[1:], horizontal=True)
                 
-                final_desc = (sel_temp + ("：" + desc.strip() if desc.strip() != "" else "")) if sel_temp else desc.strip()
+                # 指摘内容の結合処理
+                if sel_temp == "その他（フリー項目）":
+                    final_desc = desc.strip()
+                else:
+                    final_desc = (sel_temp + ("：" + desc.strip() if desc.strip() != "" else "")) if sel_temp else desc.strip()
                 
                 loc_parts = [str(f), str(a)]
                 if not c_type.startswith("【検査機関】") and sel_cat: loc_parts.append(str(sel_cat))
@@ -812,11 +841,16 @@ def main():
                         
                         st.session_state.issue_saved = True
                         st.session_state.temp_photo = None
+                        
+                        # 📝 ここで引き継ぎ用のデータを記憶させる
+                        st.session_state.prev_floor = f
+                        st.session_state.prev_area = a
+                        
                         st.rerun()
                     else: 
                         st.error("工種・内容・写真はすべて必須です（写真が『セット完了』になるまでお待ちください）")
                 
-                if st.button("終了"): st.session_state.current_box = None; st.session_state.temp_photo = None; st.rerun()
+                if st.button("終了"): st.session_state.current_box = None; st.session_state.temp_photo = None; st.session_state.prev_floor = None; st.session_state.prev_area = None; st.rerun()
 
                 if st.session_state.temp_photo:
                     st.markdown("<p style='font-size:12px; color:gray; margin-top:10px;'>▼ プレビュー (1/4縮小表示)</p>", unsafe_allow_html=True)
@@ -824,9 +858,10 @@ def main():
 
             else:
                 st.success("🎉 保存完了（次の入力が可能です）") 
-                if st.button("続けて次を登録", use_container_width=True): st.session_state.issue_saved = False; st.session_state.temp_photo = None; st.rerun()
+                if st.button("続けて次を登録", use_container_width=True): 
+                    st.session_state.issue_saved = False; st.session_state.temp_photo = None; st.rerun()
                 if st.button("✏️ 保存データを確認・修正", use_container_width=True): st.session_state.edit_saved_records = True; st.rerun()
-                if st.button("検査全体を終了", use_container_width=True): st.session_state.current_box = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None; st.rerun()
+                if st.button("検査全体を終了", use_container_width=True): st.session_state.current_box = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None; st.session_state.prev_floor = None; st.session_state.prev_area = None; st.rerun()
 
     # ----------------------------------------
     # メニュー: 3. 検査内容確認（管理者専用）
