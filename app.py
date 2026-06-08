@@ -1262,7 +1262,7 @@ def main():
                 for w_name, w_recs in w_groups.items():
                     st.markdown(f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px;'>■ 工種: {w_name}</div>", unsafe_allow_html=True)
                     for idx, r in enumerate(w_recs):
-                        floor = r.get('floor_level', ''); area = r.get('area', '')
+                        floor = r.get('floor_level', ''); area = r.get('area')
                         loc_text = "" if type_val.startswith("【検査機関】") or floor == "one" or floor == "一式" else f"【{floor} {area}】"
                         detail = r.get('issue_detail', '')
                         i_photo = r.get("issue_photo_url"); f_photo = r.get("fix_photo_url")
@@ -1291,3 +1291,7 @@ if __name__ == "__main__":
     except Exception as e:
         st.error("システムエラーが発生しました。")
         if st.button("システム復旧"): st.session_state.clear(); st.rerun()
+
+# ==========================================
+# 画面更新のための強制トリガー (2026/06)
+# ==========================================
