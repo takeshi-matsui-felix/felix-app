@@ -890,7 +890,7 @@ def main():
             ins = ins_map.get(r.get('inspection_id'))
             if ins:
                 p_id = ins.get('property_id')
-                if t_area && prop_area_map.get(p_id) != t_area: continue
+                if t_area and prop_area_map.get(p_id) != t_area: continue
                 p = ins.get('property_name', '不明'); t = ins.get('inspection_type', '不明')
                 if p not in tree: tree[p] = {}
                 tree[p][t] = tree[p].get(t, 0) + 1
