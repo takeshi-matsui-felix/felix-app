@@ -8,6 +8,8 @@ import io
 import os
 import tempfile
 import threading
+import json
+import time
 
 # 👇 外部辞書ファイルの読み込み
 from new_dictionary import ISSUE_TEMPLATES
@@ -24,7 +26,6 @@ HEADERS = {
     "Prefer": "return=minimal"
 }
 
-ADMIN_PASSWORD = "2011"
 DELETE_PASSWORD = "5963"
 
 # 🚨 DB操作関数群
@@ -250,17 +251,13 @@ st.markdown("""
 # ==========================================
 # 4. 定義データ（順序・選択肢）
 # ==========================================
-
-# 🌟 並び順アルゴリズム（絶対ルール）
 AREA_ORDER = ["玄関", "トイレ", "キッチン", "バルコニー", "LDK", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
 WORK_ORDER = ["A.リペア", "B.清掃", "C.クロス", "D.造作", "E.水道", "F.電気", "G.キッチン", "H.サッシ", "I.外壁", "J.外構", "K.コーキング", "L.ガス", "板金", "Z.その他"]
 
 def sort_records(records):
-    """指定された順番に従ってレコードを美しく並び替える関数"""
     def get_sort_key(r):
         area = r.get('area', '')
         work = r.get('work_type', '')
-        # 指定リストにないものは末尾(999)へ
         area_idx = AREA_ORDER.index(area) if area in AREA_ORDER else 999
         work_idx = WORK_ORDER.index(work) if work in WORK_ORDER else 999
         return (area_idx, work_idx)
@@ -291,7 +288,7 @@ INSPECTOR_OPTS = ["工事監理チーム", "建設部", "不動産事業部", "�
 # ==========================================
 # 5. セッション管理 
 # ==========================================
-for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "edit_prop_target", "skip_render_ids", "show_bulk_confirm", "edit_saved_records", "cached_records", "cached_target_id", "temp_photo", "prev_floor", "prev_area"]:
+for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "edit_prop_target", "skip_render_ids", "show_bulk_confirm", "edit_saved_records", "cached_records", "cached_target_id", "temp_photo", "prev_floor", "prev_area", "splash_done"]:
     if key not in st.session_state:
         st.session_state[key] = None
 
@@ -299,6 +296,7 @@ if st.session_state.skip_render_ids is None: st.session_state.skip_render_ids = 
 if "issue_saved" not in st.session_state: st.session_state.issue_saved = False
 if "drill_target" not in st.session_state or not isinstance(st.session_state.drill_target, dict): st.session_state.drill_target = None
 if "current_box" not in st.session_state or not isinstance(st.session_state.current_box, dict): st.session_state.current_box = None
+if st.session_state.splash_done is None: st.session_state.splash_done = False
 
 qp = st.query_params
 
@@ -308,13 +306,6 @@ if qp.get("area") == "tokai":
     st.session_state.target_area = "東海エリア"
 elif qp.get("area") == "kanto":
     st.session_state.target_area = "関東エリア"
-
-if qp.get("auth") == ADMIN_PASSWORD:
-    st.session_state.role = "admin"
-    st.session_state.active_menu = "検査実施（管理者）" if not st.session_state.active_menu else st.session_state.active_menu
-elif qp.get("mode") == "partner":
-    st.session_state.role = "partner"
-    st.session_state.active_menu = "是正実施（協力業者）"
 
 def jump_to_menu(menu_name, prop_id=None):
     st.session_state.active_menu = menu_name
@@ -338,24 +329,16 @@ def jump_to_menu(menu_name, prop_id=None):
 # 6. メイン画面・機能
 # ==========================================
 def main():
+    # 🌟 自動ログイン（パスワード画面の撤廃）
     if st.session_state.role is None:
-        st.markdown("<h1 style='text-align: center;'>Felix検査App</h1>", unsafe_allow_html=True)
-        t1, t2 = st.tabs(["管理者", "協力業者"])
-        with t1:
-            pwd = st.text_input("Password", type="password")
-            if st.button("管理者ログイン"):
-                if pwd == ADMIN_PASSWORD:
-                    st.session_state.role = "admin"
-                    st.query_params.auth = ADMIN_PASSWORD
-                    st.session_state.active_menu = "物件登録（管理者）"
-                    st.rerun()
-                else: st.error("パスワードが違います")
-        with t2:
-            if st.button("協力業者としてログイン"):
-                st.session_state.role = "partner"
-                st.query_params.mode = "partner"
-                st.session_state.active_menu = "是正実施（協力業者）"
-                st.rerun()
+        if qp.get("mode") == "partner":
+            st.session_state.role = "partner"
+            st.session_state.active_menu = "是正実施（協力業者）"
+        else:
+            st.session_state.role = "admin"
+            st.session_state.active_menu = "ホーム"
+            st.session_state.splash_done = False
+        st.rerun()
         return
 
     st.sidebar.markdown(f"ユーザー: {st.session_state.role}")
@@ -371,9 +354,8 @@ def main():
     def format_menu(m):
         return f"{m} 🔴未確認{confirm_cnt}件" if m == "検査内容確認（管理者）" and confirm_cnt > 0 else m
 
-    # 🌟 メニューを再び分離（業者は使い慣れた是正実施に戻す）
     if st.session_state.role == "admin":
-        menu_opts = ["物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
+        menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
     else:
         menu_opts = ["是正実施（協力業者）", "完了分一覧（共通）"]
         
@@ -385,9 +367,98 @@ def main():
         jump_to_menu(selected_menu, st.session_state.pre_selected_prop)
 
     # ----------------------------------------
+    # 🌟 メニュー: 0. ホーム（オープニング ＆ 黄金比メニュー）
+    # ----------------------------------------
+    if st.session_state.active_menu == "ホーム":
+        if not st.session_state.splash_done:
+            # アニメーション用スプラッシュ画面
+            st.markdown("""
+            <style>
+            .splash { display: flex; justify-content: center; align-items: center; height: 100vh; font-size: 12px; color: #555; position: fixed; top: 0; left: 0; width: 100vw; background: white; z-index: 999999; letter-spacing: 1px; font-family: sans-serif; }
+            section[data-testid="stSidebar"] { display: none !important; }
+            header[data-testid="stHeader"] { display: none !important; }
+            </style>
+            <div class="splash">FELIX Inspection System...</div>
+            """, unsafe_allow_html=True)
+            time.sleep(1)
+            st.session_state.splash_done = True
+            st.rerun()
+        else:
+            # 黄金比位置にテキストメニューを表示するJSコンポーネント
+            menu_html = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+            <style>
+                body { margin:0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; background: transparent; }
+                .menu-item { font-size: 16px; color: #333; cursor: pointer; margin: 24px 0; text-align: center; transition: color 0.2s; user-select: none; }
+                .menu-item:hover { color: #888; }
+                .container { position: absolute; top: 38.2%; left: 50%; transform: translate(-50%, -50%); width: 100%; }
+            </style>
+            </head>
+            <body>
+            <div class="container">
+                <div class="menu-item" onclick="sendVal('new')">新規検査を開始する</div>
+                <div class="menu-item" id="resume-btn" style="display:none;" onclick="sendVal('resume')"></div>
+            </div>
+            <script>
+                function sendVal(action) {
+                    let val = { action: action };
+                    if(action === 'resume') {
+                        val.data = JSON.parse(localStorage.getItem('felix_session'));
+                    }
+                    window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}, "*");
+                }
+                const saved = localStorage.getItem('felix_session');
+                if(saved) {
+                    try {
+                        const data = JSON.parse(saved);
+                        if(data && data.name && data.type) {
+                            const btn = document.getElementById('resume-btn');
+                            btn.style.display = 'block';
+                            btn.innerText = '前回の続きから再開する（' + data.name + ' / ' + data.type + '）';
+                        }
+                    } catch(e) {}
+                }
+                window.onload = function() {
+                    window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1}, "*");
+                    window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: 500}, "*");
+                };
+            </script>
+            </body>
+            </html>
+            """
+            temp_dir_menu = os.path.join(tempfile.gettempdir(), "felix_home_menu")
+            os.makedirs(temp_dir_menu, exist_ok=True)
+            with open(os.path.join(temp_dir_menu, "index.html"), "w", encoding="utf-8") as f:
+                f.write(menu_html)
+            
+            _home_menu = components.declare_component("home_menu", path=temp_dir_menu)
+            res = _home_menu(key="home_menu_comp")
+            
+            if res:
+                if res.get('action') == 'new':
+                    st.session_state.active_menu = "検査実施（管理者）"
+                    st.session_state.current_box = None
+                    st.rerun()
+                elif res.get('action') == 'resume' and res.get('data'):
+                    d = res['data']
+                    st.session_state.active_menu = "検査実施（管理者）"
+                    st.session_state.current_box = {
+                        "id": d.get('id', str(uuid.uuid4())),
+                        "prop_id": d.get('prop_id'),
+                        "name": d.get('name'),
+                        "type": d.get('type'),
+                        "inspector": d.get('inspector')
+                    }
+                    st.session_state.prev_floor = d.get('prev_floor')
+                    st.session_state.prev_area = d.get('prev_area')
+                    st.rerun()
+
+    # ----------------------------------------
     # メニュー: 1. 物件登録
     # ----------------------------------------
-    if st.session_state.active_menu == "物件登録（管理者）":
+    elif st.session_state.active_menu == "物件登録（管理者）":
         st.header("物件登録")
         
         with st.container():
@@ -516,6 +587,13 @@ def main():
             if not isinstance(cb, dict): cb = {}
             c_name = cb.get('name', ''); c_type = cb.get('type', ''); c_id = cb.get('id', ''); c_prop_id = cb.get('prop_id', ''); c_inspector = cb.get('inspector', '')
             st.subheader(f"{c_name} / {c_type}")
+
+            # 🌟 ローカルストレージ（スマホ記憶）へのリアルタイム同期
+            cb_data = cb.copy()
+            cb_data['prev_floor'] = st.session_state.prev_floor
+            cb_data['prev_area'] = st.session_state.prev_area
+            json_str = json.dumps(cb_data, ensure_ascii=False)
+            components.html(f"<script>localStorage.setItem('felix_session', JSON.stringify({json_str}));</script>", height=0)
             
             if st.session_state.get("edit_saved_records"):
                 st.markdown("#### ✏️ 今回保存した指摘データの確認・修正")
@@ -837,7 +915,7 @@ def main():
 
 
     # ----------------------------------------
-    # 🌟 メニュー: 4-A. 是正実施（協力業者専用）※旧仕様に戻す！
+    # メニュー: 4-A. 是正実施（協力業者専用）
     # ----------------------------------------
     elif st.session_state.active_menu == "是正実施（協力業者）":
         st.header("是正実施")
@@ -917,7 +995,6 @@ def main():
                     if sel_floor != "すべて表示":
                         recs = [r for r in recs if r.get('floor_level') == sel_floor]
                 
-                # 🌟 協力業者は「工種」のみでグループ化（見やすさ優先）
                 w_groups = {}
                 for r in recs:
                     if not isinstance(r, dict): continue
@@ -974,7 +1051,7 @@ def main():
 
 
     # ----------------------------------------
-    # 🌟 メニュー: 4-B. 是正ダッシュボード（管理者用）
+    # メニュー: 4-B. 是正ダッシュボード（管理者用）
     # ----------------------------------------
     elif st.session_state.active_menu == "是正ダッシュボード（管理者用）":
         st.header("是正ダッシュボード（確認・実施）")
@@ -1042,7 +1119,6 @@ def main():
                     if sel_floor != "すべて表示":
                         recs = [r for r in recs if r.get('floor_level') == sel_floor]
                 
-                # 管理者は「部位ごと（部屋順）」に表示する
                 recs = sort_records(recs)
                 area_groups = {}
                 for r in recs:
@@ -1137,7 +1213,6 @@ def main():
                                         
                             st.markdown('</div>', unsafe_allow_html=True)
 
-                # 🌟 写真提出済みのみ一括承認ボタン復活
                 conf_recs = [r for r in recs if r.get('progress_status') == '是正確認中' and r.get('record_id') not in st.session_state.skip_render_ids]
                 if conf_recs:
                     st.markdown("<br><br>", unsafe_allow_html=True)
@@ -1262,7 +1337,7 @@ def main():
                 for w_name, w_recs in w_groups.items():
                     st.markdown(f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px;'>■ 工種: {w_name}</div>", unsafe_allow_html=True)
                     for idx, r in enumerate(w_recs):
-                        floor = r.get('floor_level', ''); area = r.get('area', '')
+                        floor = r.get('floor_level', ''); area = r.get('area')
                         loc_text = "" if type_val.startswith("【検査機関】") or floor == "one" or floor == "一式" else f"【{floor} {area}】"
                         detail = r.get('issue_detail', '')
                         i_photo = r.get("issue_photo_url"); f_photo = r.get("fix_photo_url")
@@ -1291,3 +1366,7 @@ if __name__ == "__main__":
     except Exception as e:
         st.error("システムエラーが発生しました。")
         if st.button("システム復旧"): st.session_state.clear(); st.rerun()
+
+# ==========================================
+# 画面更新のための強制トリガー (2026/06)
+# ==========================================
