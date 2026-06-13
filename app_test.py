@@ -380,7 +380,7 @@ def main():
             </style>
             <div class="splash">FELIX Inspection System...</div>
             """, unsafe_allow_html=True)
-            time.sleep(1)
+            time.sleep(1.5)
             st.session_state.splash_done = True
             st.rerun()
         else:
