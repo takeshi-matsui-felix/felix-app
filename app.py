@@ -28,7 +28,6 @@ HEADERS = {
 
 DELETE_PASSWORD = "5963"
 
-# 🌟 毎朝AM3:00にキャッシュを自動破棄する＆無駄なリクエストを削るための内部倉庫
 if "db_cache" not in st.session_state:
     st.session_state.db_cache = {}
 if "last_cache_clear_date" not in st.session_state:
@@ -39,7 +38,6 @@ def check_and_clear_am3_cache():
     now = datetime.datetime.now()
     today_str = now.strftime("%Y-%m-%d")
     
-    # 毎日AM3:00以降、その日の最初のアクセス時に発動
     if now.hour >= 3 and st.session_state.last_cache_clear_date != today_str:
         st.session_state.db_cache = {}
         st.session_state.last_cache_clear_date = today_str
@@ -47,25 +45,24 @@ def check_and_clear_am3_cache():
 
 def get_cached_data(cache_key, fetch_func, *args, **kwargs):
     """サーバーのメモリ(セッション)にデータがあればそれを返し、なければSupabaseから取得する魔法の関数"""
-    check_and_clear_am3_cache()  # 毎回アクセス時にAM3:00チェックを実行
+    check_and_clear_am3_cache()
     
     if cache_key in st.session_state.db_cache:
         return st.session_state.db_cache[cache_key]
     
-    # キャッシュがない場合のみ、重いSupabase通信を実行
     print(f"🚨【DBからリアルタイム取得】対象キー: {cache_key} (通信量制限を消費中...)")
     data = fetch_func(*args, **kwargs)
     st.session_state.db_cache[cache_key] = data
     return data
 
 def clear_specific_cache(target_prefix):
-    """データが更新(保存・変更・削除)された時に、関係する古い記憶だけをパリンと割って消去する関数"""
+    """データが更新された時に、関係する古い記憶だけを消去する関数"""
     keys_to_del = [k for k in st.session_state.db_cache.keys() if k.startswith(target_prefix)]
     for k in keys_to_del:
         del st.session_state.db_cache[k]
 
 
-# 🚨 実際のDB操作関数群（キャッシュラッパーを適用）
+# 🚨 DB操作関数群
 def _raw_db_get(table, params):
     url = f"{SUPABASE_URL}/rest/v1/{table}?{params}"
     try:
@@ -82,7 +79,6 @@ def _raw_db_get(table, params):
         return []
 
 def db_get(table, params=""):
-    # 🌟 メモリにデータがあれば一瞬で返し、なければDBへ行く
     cache_key = f"{table}_{params}"
     return get_cached_data(cache_key, _raw_db_get, table, params)
 
@@ -90,13 +86,13 @@ def db_post(table, data):
     res = requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, json=data)
     if res.status_code not in [200, 201, 204]: 
         print(f"\n🚨【DB保存エラー】{table}: {res.status_code} - {res.text}\n")
-    clear_specific_cache(table) # 🌟 データが変わったので古い記憶をリセット
+    clear_specific_cache(table)
 
 def db_patch(table, record_id, data): 
     res = requests.patch(f"{SUPABASE_URL}/rest/v1/{table}?record_id=eq.{record_id}", headers=HEADERS, json=data)
     if res.status_code not in [200, 201, 204]: 
         print(f"\n🚨【DB更新エラー】{table}: {res.status_code} - {res.text}\n")
-    clear_specific_cache(table) # 🌟 データが変わったので古い記憶をリセット
+    clear_specific_cache(table)
 
 def db_patch_property(prop_id, data): 
     res = requests.patch(f"{SUPABASE_URL}/rest/v1/properties?property_id=eq.{prop_id}", headers=HEADERS, json=data)
@@ -141,7 +137,7 @@ def upload_to_storage(base64_str):
         print(f"\n🚨【写真例外エラー】: {e}\n")
         return base64_str
 
-# 🚀 ゼロ・ラグ保存用：バックグラウンド処理
+# 🚀 バックグラウンド処理
 def bg_save_inspection(photo_b64, record_data):
     saved_url = upload_to_storage(photo_b64)
     if saved_url: record_data["issue_photo_url"] = saved_url
@@ -156,6 +152,31 @@ def bg_patch_record(rec_id, photo_b64, up_data):
         url = upload_to_storage(photo_b64)
         if url: up_data["issue_photo_url"] = url
     db_patch("inspection_records", rec_id, up_data)
+
+# ==========================================
+# 🌟 物件・指摘の並び替えアルゴリズム
+# ==========================================
+AREA_ORDER = ["玄関", "トイレ", "キッチン", "バルコニー", "LDK", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
+WORK_ORDER = ["A.リペア", "B.清掃", "C.クロス", "D.造作", "E.水道", "F.電気", "G.キッチン", "H.サッシ", "I.外壁", "J.外構", "K.コーキング", "L.ガス", "板金", "Z.その他"]
+
+def sort_records(records):
+    def get_sort_key(r):
+        area = r.get('area', '')
+        work = r.get('work_type', '')
+        area_idx = AREA_ORDER.index(area) if area in AREA_ORDER else 999
+        work_idx = WORK_ORDER.index(work) if work in WORK_ORDER else 999
+        return (area_idx, work_idx)
+    return sorted(records, key=get_sort_key)
+
+def sort_properties_by_handover(props_list):
+    """物件を引渡し日が近い順(昇順)に並び替える関数。未入力は一番下へ。"""
+    if not props_list: return []
+    def get_handover_key(p):
+        h_date = p.get('handover_date')
+        if h_date and h_date.strip():
+            return (0, h_date)
+        return (1, "9999-12-31")
+    return sorted(props_list, key=get_handover_key)
 
 # ==========================================
 # 📱 2. スマート電子黒板カメラ
@@ -274,15 +295,6 @@ _smart_camera = components.declare_component("smart_cam_final", path=temp_dir)
 # ==========================================
 # 3. UI設定
 # ==========================================
-st.set_page_config(page_title="Felix検査App", page_icon="icon.png", layout="wide")
-
-try:
-    with open("icon.png", "rb") as f:
-        img_base64 = base64.b64encode(f.read()).decode()
-    st.markdown(f'<link rel="apple-touch-icon" href="data:image/png;base64,{img_base64}"><link rel="shortcut icon" sizes="192x192" href="data:image/png;base64,{img_base64}"><link rel="icon" sizes="192x192" href="data:image/png;base64,{img_base64}">', unsafe_allow_html=True)
-except FileNotFoundError:
-    pass
-
 st.markdown("""
 <style>
     div.stButton > button { border-radius: 6px; height: 50px; font-weight: bold; width: 100%; margin-bottom: 5px; }
@@ -297,21 +309,6 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-
-# ==========================================
-# 4. 定義データ（順序・選択肢）
-# ==========================================
-AREA_ORDER = ["玄関", "トイレ", "キッチン", "バルコニー", "LDK", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
-WORK_ORDER = ["A.リペア", "B.清掃", "C.クロス", "D.造作", "E.水道", "F.電気", "G.キッチン", "H.サッシ", "I.外壁", "J.外構", "K.コーキング", "L.ガス", "板金", "Z.その他"]
-
-def sort_records(records):
-    def get_sort_key(r):
-        area = r.get('area', '')
-        work = r.get('work_type', '')
-        area_idx = AREA_ORDER.index(area) if area in AREA_ORDER else 999
-        work_idx = WORK_ORDER.index(work) if work in WORK_ORDER else 999
-        return (area_idx, work_idx)
-    return sorted(records, key=get_sort_key)
 
 FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
 AREA_OPTS_STANDARD = ["-- 選択 --", "玄関", "廊下・階段・ENT", "LDK", "キッチン", "洋室", "洗面室", "UB", "トイレ", "バルコニー", "外部", "フリー項目"]
@@ -406,23 +403,22 @@ def main():
     if st.session_state.role == "admin":
         menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "定期的是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
     else:
-        menu_opts = ["ホーム", "是正実施（協力業者）", "完了分一覧（共通）"]
+        menu_opts = ["ホーム", "定期的是正実施（協力業者）", "完了分一覧（共通）"]
         
     if st.session_state.active_menu not in menu_opts: 
         st.session_state.active_menu = menu_opts[0]
     
-    # 🌟 表示上の名前を松井様指定に統一
     display_menu_map = {
         "ホーム": "ホーム", "物件登録（管理者）": "物件登録（管理者）", "検査実施（管理者）": "検査実施（管理者）",
         "検査内容確認（管理者）": "検査内容確認（管理者）", "定期的是正ダッシュボード（管理者用）": "是正ダッシュボード（管理者用）",
-        "是正実施（協力業者）": "是正実施（協力業者）", "完了分一覧（共通）": "完了分一覧（共通）"
+        "定期的是正実施（協力業者）": "是正実施（協力業者）", "完了分一覧（共通）": "完了分一覧（共通）"
     }
     selected_menu = st.sidebar.radio("MENU", menu_opts, index=menu_opts.index(st.session_state.active_menu), format_func=lambda x: format_menu(display_menu_map.get(x, x)))
     if selected_menu != st.session_state.active_menu:
         jump_to_menu(selected_menu, st.session_state.pre_selected_prop)
 
     # ----------------------------------------
-    # 🌟 メニュー: 0. ホーム（オープニング ＆ 黄金比メニュー）
+    # メニュー: 0. ホーム（1.5秒オープニング ＆ 黄金比メニュー）
     # ----------------------------------------
     if st.session_state.active_menu == "ホーム":
         if not st.session_state.splash_done:
@@ -434,7 +430,7 @@ def main():
             </style>
             <div class="splash">FELIX Inspection System...</div>
             """, unsafe_allow_html=True)
-            time.sleep(1.5) # 🌟 黄金の1.5秒を実装！
+            time.sleep(1.5)
             st.session_state.splash_done = True
             st.rerun()
         else:
@@ -501,7 +497,7 @@ def main():
             
             if res:
                 if res.get('action') == 'new':
-                    st.session_state.active_menu = "検査実施（管理者）" if role == "admin" else "是正実施（協力業者）"
+                    st.session_state.active_menu = "検査実施（管理者）" if role == "admin" else "定期的是正実施（協力業者）"
                     st.session_state.current_box = None
                     st.session_state.drill_target = None
                     st.rerun()
@@ -519,13 +515,12 @@ def main():
                         st.session_state.prev_floor = d.get('prev_floor')
                         st.session_state.prev_area = d.get('prev_area')
                     else:
-                        st.session_state.active_menu = "is_partner_resume_redirect"
-                        st.session_state.active_menu = "是正実施（協力業者）"
+                        st.session_state.active_menu = "定期的是正実施（協力業者）"
                         st.session_state.drill_target = {"prop": d.get('prop'), "type": d.get('type')}
                     st.rerun()
 
     # ----------------------------------------
-    # メニュー: 1. 物件登録
+    # メニュー: 1. 物件登録（管理者）
     # ----------------------------------------
     elif st.session_state.active_menu == "物件登録（管理者）":
         st.header("物件登録")
@@ -533,9 +528,18 @@ def main():
         with st.container():
             input_area = st.selectbox("エリアを選択", ["東海エリア", "関東エリア"])
             name = st.text_input("新規物件名")
+            
+            # 🌟 【バグ完全回避】チェックボックス連動式カレンダー
+            set_handover = st.checkbox("引渡し日を設定する", value=False, key="set_h_new")
+            if set_handover:
+                handover_date_val = st.date_input("引渡し日", value=datetime.date.today(), key="h_date_new")
+            else:
+                handover_date_val = None
+            
             if st.button("登録"):
                 if name:
-                    db_post("properties", {"property_id": str(uuid.uuid4()), "property_name": name, "area": input_area})
+                    h_str = str(handover_date_val) if set_handover and handover_date_val else None
+                    db_post("properties", {"property_id": str(uuid.uuid4()), "property_name": name, "area": input_area, "handover_date": h_str})
                     st.success(f"【{input_area}】に登録完了")
                     st.rerun()
         
@@ -545,7 +549,7 @@ def main():
         filter_area = st.radio("一覧のエリア絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True)
         
         props = db_get("properties", "select=*")
-        props = props[::-1]
+        props = sort_properties_by_handover(props)
         
         all_ins = db_get("inspections", "select=property_id")
         prop_ins_counts = {}
@@ -561,10 +565,12 @@ def main():
             if filter_area != "すべて表示" and p_area != filter_area: continue
             
             p_name = p.get('property_name', '不明')
-            ins_count = prop_ins_counts.get(prop_id, 0)
+            p_hdate = p.get('handover_date')
+            hdate_disp = f" (引渡し: {p_hdate})" if p_hdate else " (引渡し日: 未設定)"
             
-            count_disp = f"（📁 検査データ: {ins_count}件）" if ins_count > 0 else "（⚠️ データなし）"
-            btn_text = f"[{p_area}] {p_name} {count_disp} 検査へ"
+            ins_count = prop_ins_counts.get(prop_id, 0)
+            count_disp = f"（📁 データ: {ins_count}件）" if ins_count > 0 else "（⚠️ データなし）"
+            btn_text = f"[{p_area}] {p_name}{hdate_disp} {count_disp} 検査へ"
             key_suffix = f"{prop_id}_{idx}"
             
             c1, c2, c3 = st.columns([6, 2, 2])
@@ -578,17 +584,34 @@ def main():
                 st.session_state.edit_prop_target = None
                 st.rerun()
             
+            # 🌟 【既存物件へのアプローチ】変更ボタンでの処理
             if st.session_state.edit_prop_target == prop_id:
-                st.warning(f"「{p_name}」の名前を変更します。※過去の検査データもすべて新しい名前に更新されます。")
-                new_name = st.text_input("新しい物件名を入力", value=p_name, key=f"new_name_{key_suffix}")
+                st.warning(f"「{p_name}」の内容を変更します。※過去のデータ名もすべて新しい物件名に連動更新されます。")
+                new_name = st.text_input("物件名を入力", value=p_name, key=f"new_name_{key_suffix}")
+                
+                # 既存の日付データの有無を判定してチェックボックスを連動
+                has_hdate = True if p_hdate and p_hdate.strip() else False
+                try:
+                    init_d = datetime.datetime.strptime(p_hdate, "%Y-%m-%d").date() if has_hdate else datetime.date.today()
+                except:
+                    init_d = datetime.date.today()
+                    has_hdate = False
+                
+                edit_set_handover = st.checkbox("引渡し日を設定する", value=has_hdate, key=f"eh_cb_{key_suffix}")
+                if edit_set_handover:
+                    new_hdate = st.date_input("引渡し日を変更", value=init_d, key=f"new_h_{key_suffix}")
+                else:
+                    new_hdate = None
+                
                 col_y, col_n = st.columns(2)
                 if col_y.button("💾 保存", key=f"save_name_{key_suffix}", type="primary"):
-                    if new_name and new_name != p_name:
-                        db_patch_property(prop_id, {"property_name": new_name})
+                    nh_str = str(new_hdate) if edit_set_handover and new_hdate else None
+                    db_patch_property(prop_id, {"property_name": new_name, "handover_date": nh_str})
+                    if new_name != p_name:
                         db_patch_inspections_by_prop(prop_id, new_name)
-                        st.success("物件名を変更しました！")
-                        st.session_state.edit_prop_target = None
-                        st.rerun()
+                    st.success("変更を保存しました！")
+                    st.session_state.edit_prop_target = None
+                    st.rerun()
                 if col_n.button("キャンセル", key=f"cancel_name_{key_suffix}"):
                     st.session_state.edit_prop_target = None
                     st.rerun()
@@ -607,17 +630,16 @@ def main():
                 st.markdown("---")
 
     # ----------------------------------------
-    # メニュー: 2. 検査実施
+    # メニュー: 2. 検査実施（管理者）
     # ----------------------------------------
     elif st.session_state.active_menu == "検査実施（管理者）":
         if not st.session_state.current_box:
             st.header("検査開始")
             props = db_get("properties", "select=*")
+            props = sort_properties_by_handover(props)
             
             if st.session_state.pre_selected_prop is None:
-                latest_ins = db_get("inspections", "select=property_id&order=created_at.desc&limit=1")
-                if latest_ins and isinstance(latest_ins, list) and len(latest_ins) > 0:
-                    st.session_state.pre_selected_prop = latest_ins[0].get("property_id")
+                if props: st.session_state.pre_selected_prop = props[0].get("property_id")
 
             area_opts = ["-- 選択 --", "東海エリア", "関東エリア"]
             init_area_idx = 0
@@ -628,19 +650,22 @@ def main():
             
             sel_area = st.selectbox("エリアを選択", area_opts, index=init_area_idx)
             
-            # 🌟 検索バーの追加（検査実施画面）
             search_query = st.text_input("🔍 物件名で検索（一部入力でも可）", key="search_insp")
             
             filtered_props = [p for p in props if p.get('area') == sel_area and p.get('property_id')] if sel_area != "-- 選択 --" else []
-            
             if search_query:
                 filtered_props = [p for p in filtered_props if search_query in p.get('property_name', '')]
                 
             opts = [{"property_id": None, "property_name": "-- 選択 --"}] + filtered_props
             idx = next((i for i, p in enumerate(opts) if p.get('property_id') == st.session_state.pre_selected_prop), 0)
             
-            st.markdown("<p style='color:gray; font-size:12px; margin-bottom:0;'>💡 物件名の絞り込み検索に対応しています</p>", unsafe_allow_html=True)
-            target = st.selectbox("物件を選択", opts, index=idx, format_func=lambda x: x.get('property_name', '不明'))
+            def format_prop_selectbox(x):
+                if x.get('property_id') is None: return x.get('property_name')
+                h_disp = f" (引渡し: {x.get('handover_date')})" if x.get('handover_date') else " (引渡し未設定)"
+                return f"{x.get('property_name')}{h_disp}"
+
+            st.markdown("<p style='color:gray; font-size:12px; margin-bottom:0;'>💡 物件は上が引渡し日が一番近い順に並んでいます</p>", unsafe_allow_html=True)
+            target = st.selectbox("物件を選択", opts, index=idx, format_func=format_prop_selectbox)
             ins_type = st.selectbox("検査種類を選択", INSP_OPTS)
             
             c1, c2 = st.columns(2)
@@ -654,7 +679,7 @@ def main():
                     db_post("inspections", {"inspection_id": nid, "property_id": prop_id, "property_name": prop_name, "inspection_type": ins_type, "inspection_date": str(ins_date), "inspector": inspector})
                     st.session_state.current_box = {"id": nid, "prop_id": prop_id, "name": prop_name, "type": ins_type, "inspector": inspector}
                     st.session_state.pre_selected_prop = prop_id
-                    st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None
+                    st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.temp_photo = None
                     st.session_state.prev_floor = None; st.session_state.prev_area = None
                     st.rerun()
                 else: st.error("物件と検査種類を選んでください")
@@ -684,7 +709,6 @@ def main():
                         if sel_floor != "すべて表示":
                             saved_recs = [r for r in saved_recs if r.get('floor_level') == sel_floor]
                 
-                # 🌟 断熱検査のリスト分岐追加
                 edit_w_opts = WORK_OPTS_KIKAN if c_type.startswith("【検査機関】") else WORK_OPTS_SHANAI if c_type in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if c_type == "躯体検査" else WORK_OPTS_HAIKIN if c_type == "配筋検査" else WORK_OPTS_CHUKAN if c_type == "中間検査" else WORK_OPTS_DANNETSU if c_type == "断熱検査" else WORK_OPTS_STANDARD
 
                 saved_recs = sort_records(saved_recs)
@@ -708,14 +732,12 @@ def main():
                             new_f = floor; new_a = area; sel_temp = None; default_w = ""
                             if not c_type.startswith("【検査機関】"):
                                 a_opts = AREA_OPTS_SHANAI if c_type in SHANAI_KENSA_TYPES else AREA_OPTS_STANDARD
-                                # 🌟 断熱検査を全邸対応に修正
                                 if c_type not in ["配筋検査", "躯体検査", "断熱検査", "中間検査"]:
                                     f_idx = FLOOR_OPTS[1:].index(floor) if floor in FLOOR_OPTS[1:] else 0
                                     new_f = st.radio("階層を変更", FLOOR_OPTS[1:], index=f_idx, horizontal=True, key=f"ef_{rec_id}")
                                     a_idx = a_opts[1:].index(area) if area in a_opts[1:] else 0
                                     new_a = st.radio("部位を変更", a_opts[1:], index=a_idx, horizontal=True, key=f"ea_{rec_id}")
                                 
-                                # 🌟 断熱検査のテンプレート呼び出し修正
                                 cat_dict = ISSUE_TEMPLATES.get(c_type, {}) if c_type in ["配筋検査", "躯体検査", "断熱検査", "中間検査"] else ISSUE_TEMPLATES.get("社内検査(設計)", {}).get(new_a, {}) if c_type in SHANAI_KENSA_TYPES else {}
                                 if not isinstance(cat_dict, dict): cat_dict = {}
                                 cat_keys = list(cat_dict.keys())
@@ -770,7 +792,7 @@ def main():
                         st.markdown('</div>', unsafe_allow_html=True)
                         
                 st.markdown("---")
-                if st.button("＜ 検査登録に戻る", key="back_bottom", use_container_width=True): st.session_state.edit_saved_records = False; st.rerun()
+                if f_button := st.button("＜ 検査登録に戻る", key="back_bottom", use_container_width=True): st.session_state.edit_saved_records = False; st.rerun()
 
             elif not st.session_state.issue_saved:
                 prev_f = st.session_state.prev_floor
@@ -786,10 +808,8 @@ def main():
                 else:
                     f = "一式"; a = "全体"; default_w = ""
                     area_opts = AREA_OPTS_SHANAI if c_type in SHANAI_KENSA_TYPES else AREA_OPTS_STANDARD
-                    # 🌟 断熱検査のリスト分岐追加
                     work_opts = WORK_OPTS_SHANAI if c_type in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if c_type == "躯体検査" else WORK_OPTS_HAIKIN if c_type == "配筋検査" else WORK_OPTS_CHUKAN if c_type == "中間検査" else WORK_OPTS_DANNETSU if c_type == "断熱検査" else WORK_OPTS_STANDARD
                     
-                    # 🌟 断熱検査を全邸対応に修正
                     if c_type not in ["配筋検査", "躯体検査", "断熱検査", "中間検査"]:
                         f_idx = FLOOR_OPTS[1:].index(prev_f) if prev_f in FLOOR_OPTS[1:] else 0
                         f = st.radio("階層を選択", FLOOR_OPTS[1:], index=f_idx, horizontal=True)
@@ -797,7 +817,6 @@ def main():
                         a_idx = area_opts[1:].index(prev_a) if prev_a in area_opts[1:] else 0
                         a = st.radio("部位を選択", area_opts[1:], index=a_idx, horizontal=True)
                     
-                    # 🌟 断熱検査のテンプレート呼び出し修正
                     cat_dict = ISSUE_TEMPLATES.get(c_type, {}) if c_type in ["配筋検査", "躯体検査", "断熱検査", "中間検査"] else ISSUE_TEMPLATES.get("社内検査(設計)", {}).get(a, {}) if c_type in SHANAI_KENSA_TYPES else {}
                     if not isinstance(cat_dict, dict): cat_dict = {}
                     cat_keys = list(cat_dict.keys())
@@ -805,7 +824,8 @@ def main():
                     
                     if sel_cat:
                         detail_dict = cat_dict.get(sel_cat, {})
-                        temp_list = list(detail_dict.keys()) + ["その他（フリー項目）"]
+                        temp_list = list(detail_dict.keys()) + ["sound"] # その他用ダミー追加
+                        temp_list[-1] = "その他（フリー項目）"
                         sel_temp = st.radio("よくある指摘事項（D列）", temp_list, horizontal=True)
                         default_w = detail_dict.get(sel_temp, "") if sel_temp != "その他（フリー項目）" else ""
                     else:
@@ -880,8 +900,10 @@ def main():
         
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status&progress_status=eq.確認待ち")
         all_ins = db_get("inspections", "select=*")
-        all_props = db_get("properties", "select=property_id,area")
+        all_props = db_get("properties", "select=*")
+        all_props = sort_properties_by_handover(all_props)
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
+        prop_hdate_map = {p.get('property_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
         
         ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
         tree = {}
@@ -892,17 +914,29 @@ def main():
                 p_id = ins.get('property_id')
                 if t_area and prop_area_map.get(p_id) != t_area: continue
                 p = ins.get('property_name', '不明'); t = ins.get('inspection_type', '不明')
-                if p not in tree: tree[p] = {}
-                tree[p][t] = tree[p].get(t, 0) + 1
+                if p not in tree: tree[p] = {"types": {}, "prop_id": p_id}
+                tree[p]["types"][t] = tree[p]["types"].get(t, 0) + 1
         
         if search_verify:
             tree = {k: v for k, v in tree.items() if search_verify in k}
 
+        sorted_tree_keys = []
+        for p in all_props:
+            p_name = p.get('property_name')
+            if p_name in tree: sorted_tree_keys.append(p_name)
+        for k in tree.keys():
+            if k not in sorted_tree_keys: sorted_tree_keys.append(k)
+
         if not tree: st.info("現在、該当する確認待ちの検査はありません。")
                 
-        for p_idx, (p_name, types) in enumerate(tree.items()):
-            with st.expander(p_name):
-                for t_idx, (t_name, count) in enumerate(types.items()):
+        for p_idx, p_name in enumerate(sorted_tree_keys):
+            v_data = tree[p_name]
+            p_id = v_data.get("prop_id")
+            p_hdate = prop_hdate_map.get(p_id)
+            h_disp = f" (引渡し: {p_hdate})" if p_hdate else " (引渡し未設定)"
+            
+            with st.expander(f"{p_name}{h_disp}"):
+                for t_idx, (t_name, count) in enumerate(v_data["types"].items()):
                     if st.button(f"{t_name} ({count}件)", key=f"f_{p_idx}_{t_idx}"):
                         st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
         
@@ -1003,7 +1037,7 @@ def main():
     # ----------------------------------------
     # メニュー: 4-A. 是正実施（協力業者専用）
     # ----------------------------------------
-    elif st.session_state.active_menu == "是正実施（協力業者）":
+    elif st.session_state.active_menu == "定期的是正実施（協力業者）":
         st.header("是正実施")
         
         if st.session_state.target_area:
@@ -1017,8 +1051,10 @@ def main():
 
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status")
         all_ins = db_get("inspections", "select=*")
-        all_props = db_get("properties", "select=property_id,area")
+        all_props = db_get("properties", "select=*")
+        all_props = sort_properties_by_handover(all_props)
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
+        prop_hdate_map = {p.get('property_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
         
         ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
         tree = {}; tree_counts = {}
@@ -1032,20 +1068,28 @@ def main():
                 if t_area and prop_area_map.get(p_id) != t_area: continue
                     
                 p = ins.get('property_name', '不明'); t = ins.get('inspection_type', '不明')
-                if p not in tree: tree[p] = set(); tree_counts[p] = {}
-                tree[p].add(t)
+                if p not in tree: tree[p] = {"types": set(), "prop_id": p_id}
+                tree[p]["types"].add(t)
+                
+                if p not in tree_counts: tree_counts[p] = {}
                 if t not in tree_counts[p]: tree_counts[p][t] = {"total": 0, "done": 0, "wait_conf": 0, "unres": 0, "wait_fix": 0}
                 
                 tree_counts[p][t]["total"] += 1
                 if p_stat == "完了": tree_counts[p][t]["done"] += 1
                 elif p_stat == "是正確認中": tree_counts[p][t]["wait_conf"] += 1; tree_counts[p][t]["unres"] += 1
-                elif p_stat == "is_partner_resume_redirect": pass
                 elif p_stat == "是正待ち": tree_counts[p][t]["wait_fix"] += 1; tree_counts[p][t]["unres"] += 1
                 else: tree_counts[p][t]["unres"] += 1
 
         if search_fix:
             tree = {k: v for k, v in tree.items() if search_fix in k}
                 
+        sorted_tree_keys = []
+        for p in all_props:
+            p_name = p.get('property_name')
+            if p_name in tree: sorted_tree_keys.append(p_name)
+        for k in tree.keys():
+            if k not in sorted_tree_keys: sorted_tree_keys.append(k)
+
         sel = st.session_state.drill_target
         if not isinstance(sel, dict): sel = {}
         prop_val = sel.get('prop', ''); type_val = sel.get('type', '')
@@ -1053,11 +1097,16 @@ def main():
         
         if not (prop_val and type_val):
             has_visible_items = False
-            for p_idx, (p_name, types) in enumerate(tree.items()):
-                valid_types = [t for t in types if tree_counts.get(p_name, {}).get(t, {}).get("wait_fix", 0) > 0]
+            for p_idx, p_name in enumerate(sorted_tree_keys):
+                v_data = tree[p_name]
+                p_id = v_data.get("prop_id")
+                p_hdate = prop_hdate_map.get(p_id)
+                h_disp = f" (引渡し: {p_hdate})" if p_hdate else " (引渡し未設定)"
+                
+                valid_types = [t for t in v_data["types"] if tree_counts.get(p_name, {}).get(t, {}).get("wait_fix", 0) > 0]
                 if valid_types:
                     has_visible_items = True
-                    with st.expander(p_name):
+                    with st.expander(f"{p_name}{h_disp}"):
                         for t_idx, t_name in enumerate(sorted(valid_types)):
                             c_data = tree_counts[p_name][t_name]
                             badge_text = f"全 {c_data['total']} 件 ･･･ [ ✅ 完了：{c_data['done']}件 ／ ⚠️ 未完了：{c_data['unres']}件 ] ※うち是正報告待ち {c_data['wait_fix']}件"
@@ -1070,7 +1119,6 @@ def main():
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
             
-            # 🌟 協力業者側のスマート復帰用：ローカルストレージへ保存
             cb_data = {"prop": prop_val, "type": type_val}
             json_str = json.dumps(cb_data, ensure_ascii=False)
             components.html(f"<script>localStorage.setItem('felix_partner_session', JSON.stringify({json_str}));</script>", height=0)
@@ -1087,7 +1135,7 @@ def main():
                 st.info(f"📊 **【進捗】 指摘総数：{total_cnt}件 ／ 残り（是正報告待ち）：{wait_cnt}件**")
                 
                 if recs and type_val in SHANAI_KENSA_TYPES:
-                    floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in recs if r.get('floor_level')])))
+                    floors_in_recs = sorted(list(set([r.get('floor_level', 'one') for r in recs if r.get('floor_level')])))
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_partner_fix_floor")
                     if sel_floor != "すべて表示":
                         recs = [r for r in recs if r.get('floor_level') == sel_floor]
@@ -1126,7 +1174,7 @@ def main():
                                     st.write("写真なし")
                                     
                             with c2:
-                                st.markdown("**【是正写真（After）**")
+                                st.markdown("**【是正写真（After）】**")
                                 loc_str = f"{floor} {area} {w}".strip()
                                 disp_d = detail[:80] + "..." if len(detail)>80 else detail
                                 
@@ -1156,13 +1204,14 @@ def main():
         sel_area = st.radio("📍 表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key="area_dash")
         t_area = sel_area if sel_area != "すべて表示" else None
 
-        # 🌟 検索バーの追加（管理者ダッシュボード画面）
         search_dash = st.text_input("🔍 物件名で検索（一部入力でも可）", key="search_dash_admin")
 
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status&progress_status=in.(是正待ち,是正確認中)")
         all_ins = db_get("inspections", "select=*")
-        all_props = db_get("properties", "select=property_id,area")
+        all_props = db_get("properties", "select=*")
+        all_props = sort_properties_by_handover(all_props)
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
+        prop_hdate_map = {p.get('property_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
         
         ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
         tree = {}; tree_counts = {}
@@ -1176,8 +1225,10 @@ def main():
                 if t_area and prop_area_map.get(p_id) != t_area: continue
                     
                 p = ins.get('property_name', '不明'); t = ins.get('inspection_type', '不明')
-                if p not in tree: tree[p] = set(); tree_counts[p] = {}
-                tree[p].add(t)
+                if p not in tree: tree[p] = {"types": set(), "prop_id": p_id}
+                tree[p]["types"].add(t)
+                
+                if p not in tree_counts: tree_counts[p] = {}
                 if t not in tree_counts[p]: tree_counts[p][t] = {"wait_fix": 0, "wait_conf": 0}
                 
                 if p_stat == "是正待ち": tree_counts[p][t]["wait_fix"] += 1
@@ -1186,6 +1237,13 @@ def main():
         if search_dash:
             tree = {k: v for k, v in tree.items() if search_dash in k}
 
+        sorted_tree_keys = []
+        for p in all_props:
+            p_name = p.get('property_name')
+            if p_name in tree: sorted_tree_keys.append(p_name)
+        for k in tree.keys():
+            if k not in sorted_tree_keys: sorted_tree_keys.append(k)
+
         sel = st.session_state.drill_target
         if not isinstance(sel, dict): sel = {}
         prop_val = sel.get('prop', ''); type_val = sel.get('type', '')
@@ -1193,11 +1251,16 @@ def main():
         
         if not (prop_val and type_val):
             has_visible_items = False
-            for p_idx, (p_name, types) in enumerate(tree.items()):
-                if types:
+            for p_idx, p_name in enumerate(sorted_tree_keys):
+                v_data = tree[p_name]
+                p_id = v_data.get("prop_id")
+                p_hdate = prop_hdate_map.get(p_id)
+                h_disp = f" (引渡し: {p_hdate})" if p_hdate else " (引渡し未設定)"
+                
+                if v_data["types"]:
                     has_visible_items = True
-                    with st.expander(p_name):
-                        for t_idx, t_name in enumerate(sorted(list(types))):
+                    with st.expander(f"{p_name}{h_disp}"):
+                        for t_idx, t_name in enumerate(sorted(list(v_data["types"]))):
                             c_data = tree_counts[p_name][t_name]
                             badge_text = f"🚨 是正写真待ち：{c_data['wait_fix']}件 ／ 🔍 管理者確認待ち：{c_data['wait_conf']}件"
                             t_cols = st.columns([4, 6])
@@ -1217,7 +1280,7 @@ def main():
                 else: recs = st.session_state.cached_records
                 
                 if recs and type_val in SHANAI_KENSA_TYPES:
-                    floors_in_recs = sorted(list(set([r.get('floor_level', 'モヤ') for r in recs if r.get('floor_level')])))
+                    floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in recs if r.get('floor_level')])))
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_dash_floor")
                     if sel_floor != "すべて表示":
                         recs = [r for r in recs if r.get('floor_level') == sel_floor]
@@ -1232,7 +1295,6 @@ def main():
                     if a not in area_groups: area_groups[a] = []
                     area_groups[a].append(r)
                 
-                # 🌟 断熱検査のリスト分岐追加
                 edit_w_opts = WORK_OPTS_KIKAN if type_val.startswith("【検査機関】") else WORK_OPTS_SHANAI if type_val in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if type_val == "躯体検査" else WORK_OPTS_HAIKIN if type_val == "配筋検査" else WORK_OPTS_CHUKAN if type_val == "中間検査" else WORK_OPTS_DANNETSU if type_val == "断熱検査" else WORK_OPTS_STANDARD
 
                 for a_name, a_recs in area_groups.items():
@@ -1305,7 +1367,7 @@ def main():
                                     
                                     ca, cb = st.columns(2)
                                     if ca.button("✅ 承認（完了へ）", key=f"ok_{rec_id}", type="primary"): 
-                                        db_patch("inspection_records", rec_id, {"progress_status": "完了"})
+                                        db_patch("inspection_records", r['record_id'], {"progress_status": "完了"})
                                         st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                         st.session_state.skip_render_ids.append(rec_id); st.rerun()
                                     
@@ -1352,13 +1414,14 @@ def main():
             sel_area = st.radio("📍 表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key="area_done")
             t_area = sel_area if sel_area != "すべて表示" else None
         
-        # 🌟 検索バーの追加（完了分一覧画面）
         search_done = st.text_input("🔍 物件名で検索（一部入力でも可）", key="search_done_list")
 
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status&progress_status=eq.完了")
         all_ins = db_get("inspections", "select=*")
-        all_props = db_get("properties", "select=property_id,area")
+        all_props = db_get("properties", "select=*")
+        all_props = sort_properties_by_handover(all_props)
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
+        prop_hdate_map = {p.get('property_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
 
         ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
         tree = {} 
@@ -1371,11 +1434,18 @@ def main():
                 p_id = ins.get('property_id')
                 if t_area and prop_area_map.get(p_id) != t_area: continue
                 p = ins.get('property_name', '不明'); t = ins.get('inspection_type', '不明')
-                if p not in tree: tree[p] = {}
-                tree[p][t] = tree[p].get(t, 0) + 1
+                if p not in tree: tree[p] = {"types": {}, "prop_id": p_id}
+                tree[p]["types"][t] = tree[p]["types"].get(t, 0) + 1
                 
         if search_done:
             tree = {k: v for k, v in tree.items() if search_done in k}
+
+        sorted_tree_keys = []
+        for p in all_props:
+            p_name = p.get('property_name')
+            if p_name in tree: sorted_tree_keys.append(p_name)
+        for k in tree.keys():
+            if k not in sorted_tree_keys: sorted_tree_keys.append(k)
 
         sel = st.session_state.drill_target
         if not isinstance(sel, dict): sel = {}
@@ -1384,11 +1454,18 @@ def main():
 
         if not (prop_val and type_val):
             has_visible_items = False
-            for p_idx, (p_name, types) in enumerate(tree.items()):
-                if types:
+            for p_idx, p_name in enumerate(sorted_tree_keys):
+                v_data = tree[p_name]
+                p_id = v_data.get("prop_id")
+                p_hdate = prop_hdate_map.get(p_id)
+                
+                # 🌟 【松井社長指定】完了分一覧の物件名横に引渡し日を表示
+                h_disp = f"（引渡し日: {p_hdate}）" if p_hdate else "（引渡し日: 未設定）"
+                
+                if v_data["types"]:
                     has_visible_items = True
-                    with st.expander(p_name):
-                        for t_idx, (t_name, count) in enumerate(types.items()):
+                    with st.expander(f"{p_name} {h_disp}"):
+                        for t_idx, (t_name, count) in enumerate(v_data["types"].items()):
                             if st.button(f"{t_name} (完了: {count}件)", key=f"c_{p_idx}_{t_idx}", use_container_width=True):
                                 st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
             if not has_visible_items: st.info("該当する項目はありません。")
