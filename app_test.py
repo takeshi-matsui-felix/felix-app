@@ -44,7 +44,7 @@ def check_and_clear_am3_cache():
         print("\n☀️【定期クリーンアップ発動】毎朝AM3:00のキャッシュ初期化が正常に完了しました。\n")
 
 def get_cached_data(cache_key, fetch_func, *args, **kwargs):
-    """サーバーのメモリ(セッション)にデータがあればそれを返し、 lazy 加算。なければSupabaseから取得する魔法の関数"""
+    """サーバーのメモリ(セッション)にデータがあればそれを返し、なければSupabaseから取得する魔法の関数"""
     check_and_clear_am3_cache()
     
     if cache_key in st.session_state.db_cache:
@@ -174,8 +174,8 @@ def sort_properties_by_handover(props_list):
     def get_handover_key(p):
         h_date = p.get('handover_date')
         if h_date and h_date.strip():
-            return (0, h_date) # 0番グループ（日付が入っているもの）
-        return (1, "9999-12-31") # 1番グループ（未入力は未来の果てに配置）
+            return (0, h_date)
+        return (1, "9999-12-31")
     return sorted(props_list, key=get_handover_key)
 
 # ==========================================
@@ -528,12 +528,17 @@ def main():
         with st.container():
             input_area = st.selectbox("エリアを選択", ["東海エリア", "関東エリア"])
             name = st.text_input("新規物件名")
-            # 🌟 引渡し日の選択項目を追加
-            handover_date_val = st.date_input("引渡し日", value=None, placeholder="引渡し日を選択してください")
+            
+            # 🌟 【バグ完全回避】チェックボックス連動式カレンダー
+            set_handover = st.checkbox("引渡し日を設定する", value=False, key="set_h_new")
+            if set_handover:
+                handover_date_val = st.date_input("引渡し日", value=datetime.date.today(), key="h_date_new")
+            else:
+                handover_date_val = None
             
             if st.button("登録"):
                 if name:
-                    h_str = str(handover_date_val) if handover_date_val else None
+                    h_str = str(handover_date_val) if set_handover and handover_date_val else None
                     db_post("properties", {"property_id": str(uuid.uuid4()), "property_name": name, "area": input_area, "handover_date": h_str})
                     st.success(f"【{input_area}】に登録完了")
                     st.rerun()
@@ -544,7 +549,6 @@ def main():
         filter_area = st.radio("一覧のエリア絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True)
         
         props = db_get("properties", "select=*")
-        # 🌟 引渡し日が近い順(昇順)に自動ソート
         props = sort_properties_by_handover(props)
         
         all_ins = db_get("inspections", "select=property_id")
@@ -580,20 +584,28 @@ def main():
                 st.session_state.edit_prop_target = None
                 st.rerun()
             
+            # 🌟 【既存物件へのアプローチ】変更ボタンでの処理
             if st.session_state.edit_prop_target == prop_id:
                 st.warning(f"「{p_name}」の内容を変更します。※過去のデータ名もすべて新しい物件名に連動更新されます。")
                 new_name = st.text_input("物件名を入力", value=p_name, key=f"new_name_{key_suffix}")
                 
-                # 変更用の日付ピッカー
+                # 既存の日付データの有無を判定してチェックボックスを連動
+                has_hdate = True if p_hdate and p_hdate.strip() else False
                 try:
-                    init_d = datetime.datetime.strptime(p_hdate, "%Y-%m-%d").date() if p_hdate else None
+                    init_d = datetime.datetime.strptime(p_hdate, "%Y-%m-%d").date() if has_hdate else datetime.date.today()
                 except:
-                    init_d = None
-                new_hdate = st.date_input("引渡し日を変更", value=init_d, key=f"new_h_{key_suffix}", placeholder="引渡し日を選択")
+                    init_d = datetime.date.today()
+                    has_hdate = False
+                
+                edit_set_handover = st.checkbox("引渡し日を設定する", value=has_hdate, key=f"eh_cb_{key_suffix}")
+                if edit_set_handover:
+                    new_hdate = st.date_input("引渡し日を変更", value=init_d, key=f"new_h_{key_suffix}")
+                else:
+                    new_hdate = None
                 
                 col_y, col_n = st.columns(2)
                 if col_y.button("💾 保存", key=f"save_name_{key_suffix}", type="primary"):
-                    nh_str = str(new_hdate) if new_hdate else None
+                    nh_str = str(new_hdate) if edit_set_handover and new_hdate else None
                     db_patch_property(prop_id, {"property_name": new_name, "handover_date": nh_str})
                     if new_name != p_name:
                         db_patch_inspections_by_prop(prop_id, new_name)
@@ -624,7 +636,6 @@ def main():
         if not st.session_state.current_box:
             st.header("検査開始")
             props = db_get("properties", "select=*")
-            # 🌟 引渡し日が近い順(昇順)に自動ソート
             props = sort_properties_by_handover(props)
             
             if st.session_state.pre_selected_prop is None:
@@ -668,7 +679,7 @@ def main():
                     db_post("inspections", {"inspection_id": nid, "property_id": prop_id, "property_name": prop_name, "inspection_type": ins_type, "inspection_date": str(ins_date), "inspector": inspector})
                     st.session_state.current_box = {"id": nid, "prop_id": prop_id, "name": prop_name, "type": ins_type, "inspector": inspector}
                     st.session_state.pre_selected_prop = prop_id
-                    st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None
+                    st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.temp_photo = None
                     st.session_state.prev_floor = None; st.session_state.prev_area = None
                     st.rerun()
                 else: st.error("物件と検査種類を選んでください")
@@ -781,7 +792,7 @@ def main():
                         st.markdown('</div>', unsafe_allow_html=True)
                         
                 st.markdown("---")
-                if st.button("＜ 検査登録に戻る", key="back_bottom", use_container_width=True): st.session_state.edit_saved_records = False; st.rerun()
+                if f_button := st.button("＜ 検査登録に戻る", key="back_bottom", use_container_width=True): st.session_state.edit_saved_records = False; st.rerun()
 
             elif not st.session_state.issue_saved:
                 prev_f = st.session_state.prev_floor
@@ -813,7 +824,8 @@ def main():
                     
                     if sel_cat:
                         detail_dict = cat_dict.get(sel_cat, {})
-                        temp_list = list(detail_dict.keys()) + ["その他（フリー項目）"]
+                        temp_list = list(detail_dict.keys()) + ["sound"] # その他用ダミー追加
+                        temp_list[-1] = "その他（フリー項目）"
                         sel_temp = st.radio("よくある指摘事項（D列）", temp_list, horizontal=True)
                         default_w = detail_dict.get(sel_temp, "") if sel_temp != "その他（フリー項目）" else ""
                     else:
@@ -888,8 +900,7 @@ def main():
         
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status&progress_status=eq.確認待ち")
         all_ins = db_get("inspections", "select=*")
-        all_props = db_get("properties", "select=*") # 🌟 引渡し日のためにselect変更
-        # 🌟 物件情報を引渡し日の近い順に並び替え
+        all_props = db_get("properties", "select=*")
         all_props = sort_properties_by_handover(all_props)
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
         prop_hdate_map = {p.get('property_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
@@ -909,12 +920,10 @@ def main():
         if search_verify:
             tree = {k: v for k, v in tree.items() if search_verify in k}
 
-        # 🌟 物件マッピングの並び順に従ってツリーアコーディオンを展開
         sorted_tree_keys = []
         for p in all_props:
             p_name = p.get('property_name')
             if p_name in tree: sorted_tree_keys.append(p_name)
-        # 万が一漏れた場合のためのフォールバック
         for k in tree.keys():
             if k not in sorted_tree_keys: sorted_tree_keys.append(k)
 
@@ -1029,7 +1038,7 @@ def main():
     # メニュー: 4-A. 是正実施（協力業者専用）
     # ----------------------------------------
     elif st.session_state.active_menu == "定期的是正実施（協力業者）":
-        st.header("定期的是正実施")
+        st.header("是正実施")
         
         if st.session_state.target_area:
             st.success(f"📍 現在の表示エリア：【 {st.session_state.target_area} 】")
@@ -1042,8 +1051,7 @@ def main():
 
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status")
         all_ins = db_get("inspections", "select=*")
-        all_props = db_get("properties", "select=*") # 🌟 引渡し日連動のためselect変更
-        # 🌟 物件情報を引渡し日の近い順に並び替え
+        all_props = db_get("properties", "select=*")
         all_props = sort_properties_by_handover(all_props)
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
         prop_hdate_map = {p.get('property_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
@@ -1075,7 +1083,6 @@ def main():
         if search_fix:
             tree = {k: v for k, v in tree.items() if search_fix in k}
                 
-        # 🌟 物件並び順に従ってツリーキーをソート
         sorted_tree_keys = []
         for p in all_props:
             p_name = p.get('property_name')
@@ -1112,7 +1119,6 @@ def main():
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
             
-            # 🌟 協力業者側のスマート復帰用：ローカルストレージへ保存
             cb_data = {"prop": prop_val, "type": type_val}
             json_str = json.dumps(cb_data, ensure_ascii=False)
             components.html(f"<script>localStorage.setItem('felix_partner_session', JSON.stringify({json_str}));</script>", height=0)
@@ -1129,7 +1135,7 @@ def main():
                 st.info(f"📊 **【進捗】 指摘総数：{total_cnt}件 ／ 残り（是正報告待ち）：{wait_cnt}件**")
                 
                 if recs and type_val in SHANAI_KENSA_TYPES:
-                    floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in recs if r.get('floor_level')])))
+                    floors_in_recs = sorted(list(set([r.get('floor_level', 'one') for r in recs if r.get('floor_level')])))
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_partner_fix_floor")
                     if sel_floor != "すべて表示":
                         recs = [r for r in recs if r.get('floor_level') == sel_floor]
@@ -1202,8 +1208,7 @@ def main():
 
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status&progress_status=in.(是正待ち,是正確認中)")
         all_ins = db_get("inspections", "select=*")
-        all_props = db_get("properties", "select=*") # 🌟 引渡し日ソートのためselect変更
-        # 🌟 物件情報を引渡し日の近い順に並び替え
+        all_props = db_get("properties", "select=*")
         all_props = sort_properties_by_handover(all_props)
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
         prop_hdate_map = {p.get('property_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
@@ -1232,7 +1237,6 @@ def main():
         if search_dash:
             tree = {k: v for k, v in tree.items() if search_dash in k}
 
-        # 🌟 物件並び順に従ってソート
         sorted_tree_keys = []
         for p in all_props:
             p_name = p.get('property_name')
@@ -1363,7 +1367,7 @@ def main():
                                     
                                     ca, cb = st.columns(2)
                                     if ca.button("✅ 承認（完了へ）", key=f"ok_{rec_id}", type="primary"): 
-                                        db_patch("inspection_records", rec_id, {"progress_status": "完了"})
+                                        db_patch("inspection_records", r['record_id'], {"progress_status": "完了"})
                                         st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                         st.session_state.skip_render_ids.append(rec_id); st.rerun()
                                     
@@ -1414,8 +1418,7 @@ def main():
 
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status&progress_status=eq.完了")
         all_ins = db_get("inspections", "select=*")
-        all_props = db_get("properties", "select=*") # 🌟 引渡し日連動のため変更
-        # 🌟 物件情報を引渡し日の近い順に並び替え
+        all_props = db_get("properties", "select=*")
         all_props = sort_properties_by_handover(all_props)
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
         prop_hdate_map = {p.get('property_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
@@ -1437,7 +1440,6 @@ def main():
         if search_done:
             tree = {k: v for k, v in tree.items() if search_done in k}
 
-        # 🌟 物件並び順に従ってソート
         sorted_tree_keys = []
         for p in all_props:
             p_name = p.get('property_name')
@@ -1457,7 +1459,7 @@ def main():
                 p_id = v_data.get("prop_id")
                 p_hdate = prop_hdate_map.get(p_id)
                 
-                # 🌟 【松井社長指定】物件名のすぐ後に引渡し日を明記
+                # 🌟 【松井社長指定】完了分一覧の物件名横に引渡し日を表示
                 h_disp = f"（引渡し日: {p_hdate}）" if p_hdate else "（引渡し日: 未設定）"
                 
                 if v_data["types"]:
