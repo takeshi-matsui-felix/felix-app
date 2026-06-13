@@ -44,7 +44,7 @@ def check_and_clear_am3_cache():
         print("\n☀️【定期クリーンアップ発動】毎朝AM3:00のキャッシュ初期化が正常に完了しました。\n")
 
 def get_cached_data(cache_key, fetch_func, *args, **kwargs):
-    """サーバーのメモリ(セッション)にデータがあればそれを返し、なければSupabaseから取得する魔法の関数"""
+    """サーバーのメモリにデータがあれば返し、なければSupabaseから取得する関数"""
     check_and_clear_am3_cache()
     
     if cache_key in st.session_state.db_cache:
@@ -414,6 +414,27 @@ def main():
         "定期的是正実施（協力業者）": "是正実施（協力業者）", "完了分一覧（共通）": "完了分一覧（共通）"
     }
     selected_menu = st.sidebar.radio("MENU", menu_opts, index=menu_opts.index(st.session_state.active_menu), format_func=lambda x: format_menu(display_menu_map.get(x, x)))
+    
+    # 🌟 【スマホ専用】メニューを選択したら自動でサイドバーを閉じる裏技
+    components.html("""
+    <script>
+        setTimeout(function() {
+            try {
+                if (window.parent.innerWidth <= 768) {
+                    const sidebar = window.parent.document.querySelector('[data-testid="stSidebar"]');
+                    // サイドバーが開いている状態の時だけ、閉じるボタンを自動クリック
+                    if (sidebar && sidebar.getAttribute('aria-expanded') === 'true') {
+                        const closeBtn = window.parent.document.querySelector('[data-testid="stSidebarCollapseButton"]') || window.parent.document.querySelector('button[aria-label="Collapse sidebar"]');
+                        if (closeBtn) {
+                            closeBtn.click();
+                        }
+                    }
+                }
+            } catch (e) {}
+        }, 50);
+    </script>
+    """, height=0, width=0)
+
     if selected_menu != st.session_state.active_menu:
         jump_to_menu(selected_menu, st.session_state.pre_selected_prop)
 
@@ -529,7 +550,6 @@ def main():
             input_area = st.selectbox("エリアを選択", ["東海エリア", "関東エリア"])
             name = st.text_input("新規物件名")
             
-            # 🌟 【バグ完全回避】チェックボックス連動式カレンダー
             set_handover = st.checkbox("引渡し日を設定する", value=False, key="set_h_new")
             if set_handover:
                 handover_date_val = st.date_input("引渡し日", value=datetime.date.today(), key="h_date_new")
@@ -584,12 +604,10 @@ def main():
                 st.session_state.edit_prop_target = None
                 st.rerun()
             
-            # 🌟 【既存物件へのアプローチ】変更ボタンでの処理
             if st.session_state.edit_prop_target == prop_id:
                 st.warning(f"「{p_name}」の内容を変更します。※過去のデータ名もすべて新しい物件名に連動更新されます。")
                 new_name = st.text_input("物件名を入力", value=p_name, key=f"new_name_{key_suffix}")
                 
-                # 既存の日付データの有無を判定してチェックボックスを連動
                 has_hdate = True if p_hdate and p_hdate.strip() else False
                 try:
                     init_d = datetime.datetime.strptime(p_hdate, "%Y-%m-%d").date() if has_hdate else datetime.date.today()
@@ -679,7 +697,7 @@ def main():
                     db_post("inspections", {"inspection_id": nid, "property_id": prop_id, "property_name": prop_name, "inspection_type": ins_type, "inspection_date": str(ins_date), "inspector": inspector})
                     st.session_state.current_box = {"id": nid, "prop_id": prop_id, "name": prop_name, "type": ins_type, "inspector": inspector}
                     st.session_state.pre_selected_prop = prop_id
-                    st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.temp_photo = None
+                    st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None
                     st.session_state.prev_floor = None; st.session_state.prev_area = None
                     st.rerun()
                 else: st.error("物件と検査種類を選んでください")
@@ -824,7 +842,7 @@ def main():
                     
                     if sel_cat:
                         detail_dict = cat_dict.get(sel_cat, {})
-                        temp_list = list(detail_dict.keys()) + ["sound"] # その他用ダミー追加
+                        temp_list = list(detail_dict.keys()) + ["sound"]
                         temp_list[-1] = "その他（フリー項目）"
                         sel_temp = st.radio("よくある指摘事項（D列）", temp_list, horizontal=True)
                         default_w = detail_dict.get(sel_temp, "") if sel_temp != "その他（フリー項目）" else ""
@@ -1135,7 +1153,7 @@ def main():
                 st.info(f"📊 **【進捗】 指摘総数：{total_cnt}件 ／ 残り（是正報告待ち）：{wait_cnt}件**")
                 
                 if recs and type_val in SHANAI_KENSA_TYPES:
-                    floors_in_recs = sorted(list(set([r.get('floor_level', 'one') for r in recs if r.get('floor_level')])))
+                    floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in recs if r.get('floor_level')])))
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_partner_fix_floor")
                     if sel_floor != "すべて表示":
                         recs = [r for r in recs if r.get('floor_level') == sel_floor]
@@ -1174,7 +1192,7 @@ def main():
                                     st.write("写真なし")
                                     
                             with c2:
-                                st.markdown("**【是正写真（After）】**")
+                                st.markdown("**【是正写真（After）**")
                                 loc_str = f"{floor} {area} {w}".strip()
                                 disp_d = detail[:80] + "..." if len(detail)>80 else detail
                                 
@@ -1367,7 +1385,7 @@ def main():
                                     
                                     ca, cb = st.columns(2)
                                     if ca.button("✅ 承認（完了へ）", key=f"ok_{rec_id}", type="primary"): 
-                                        db_patch("inspection_records", r['record_id'], {"progress_status": "完了"})
+                                        db_patch("inspection_records", rec_id, {"progress_status": "完了"})
                                         st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                         st.session_state.skip_render_ids.append(rec_id); st.rerun()
                                     
@@ -1459,7 +1477,6 @@ def main():
                 p_id = v_data.get("prop_id")
                 p_hdate = prop_hdate_map.get(p_id)
                 
-                # 🌟 【松井社長指定】完了分一覧の物件名横に引渡し日を表示
                 h_disp = f"（引渡し日: {p_hdate}）" if p_hdate else "（引渡し日: 未設定）"
                 
                 if v_data["types"]:
