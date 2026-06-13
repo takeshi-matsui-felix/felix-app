@@ -697,7 +697,8 @@ def main():
                 saved_recs = sort_records(saved_recs)
 
                 for r in saved_recs:
-                    rec_id = r.get('record_id'); if not rec_id: continue
+                    rec_id = r.get('record_id')
+                    if not rec_id: continue
                     floor = r.get('floor_level', ''); area = r.get('area', ''); detail = r.get('issue_detail', ''); orig_w = r.get('work_type', '')
                     head_text = "" if c_type.startswith("【検査機関】") or floor == "一式" else f"【{floor} {area}】".strip()
                     title = f"{head_text} {detail}" if head_text else f"【指摘内容】 {detail}"
@@ -940,13 +941,15 @@ def main():
                 for w_name, w_recs in w_groups.items():
                     st.subheader(f"■ 工種: {w_name}")
                     for r in w_recs:
-                        rec_id = r.get('record_id'); if not rec_id: continue
+                        rec_id = r.get('record_id')
+                        if not rec_id: continue
                         floor = r.get('floor_level', ''); area = r.get('area', ''); detail = r.get('issue_detail', '')
                         head_text = "" if type_val.startswith("【検査機関】") or floor == "一式" else f"【{floor} {area}】".strip()
                         title = f"{head_text} {detail}" if head_text else f"【指摘内容】 {detail}"
                         
                         st.markdown('<div class="record-box">', unsafe_allow_html=True)
                         st.markdown(f"**{title}**")
+                        
                         if r.get('issue_photo_url'): 
                             photo_url = r.get('issue_photo_url')
                             st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
@@ -1083,7 +1086,8 @@ def main():
                 w_groups = {}
                 for r in recs:
                     if not isinstance(r, dict): continue
-                    rec_id = r.get('record_id'); if rec_id in st.session_state.skip_render_ids: continue
+                    rec_id = r.get('record_id')
+                    if rec_id in st.session_state.skip_render_ids: continue
                     w = r.get('work_type') or 'その他'
                     if w not in w_groups: w_groups[w] = []
                     w_groups[w].append(r)
@@ -1091,7 +1095,8 @@ def main():
                 for w_idx, (w_name, w_recs) in enumerate(w_groups.items()):
                     st.subheader(f"■ 工種: {w_name}")
                     for r_idx, r in enumerate(w_recs):
-                        rec_id = r.get('record_id'); if not rec_id: continue 
+                        rec_id = r.get('record_id')
+                        if not rec_id: continue 
                         floor = r.get('floor_level', ''); area = r.get('area', ''); detail = r.get('issue_detail', '')
                         head_text = "" if type_val.startswith("【検査機関】") or floor == "一式" else f"【{floor} {area}】".strip()
                         title = f"{head_text} {detail}" if head_text else f"【指摘内容】 {detail}"
@@ -1216,7 +1221,8 @@ def main():
                 area_groups = {}
                 for r in recs:
                     if not isinstance(r, dict): continue
-                    rec_id = r.get('record_id'); if rec_id in st.session_state.skip_render_ids: continue
+                    rec_id = r.get('record_id')
+                    if rec_id in st.session_state.skip_render_ids: continue
                     a = r.get('area') or 'その他'
                     if a not in area_groups: area_groups[a] = []
                     area_groups[a].append(r)
@@ -1226,7 +1232,8 @@ def main():
                 for a_name, a_recs in area_groups.items():
                     st.subheader(f"📍 部位: {a_name}")
                     for r_idx, r in enumerate(a_recs):
-                        rec_id = r.get('record_id'); if not rec_id: continue 
+                        rec_id = r.get('record_id')
+                        if not rec_id: continue 
                         floor = r.get('floor_level', ''); area = r.get('area', ''); detail = r.get('issue_detail', '')
                         w = r.get('work_type', ''); p_stat = r.get('progress_status')
                         head_text = "" if type_val.startswith("【検査機関】") or floor == "一式" else f"【{floor} {w}】".strip()
