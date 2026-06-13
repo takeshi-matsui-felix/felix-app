@@ -34,33 +34,24 @@ if "last_cache_clear_date" not in st.session_state:
     st.session_state.last_cache_clear_date = None
 
 def check_and_clear_am3_cache():
-    """現在の時刻がAM3:00を過ぎており、かつ今日まだクリアしていなければキャッシュを全消去する関数"""
     now = datetime.datetime.now()
     today_str = now.strftime("%Y-%m-%d")
-    
     if now.hour >= 3 and st.session_state.last_cache_clear_date != today_str:
         st.session_state.db_cache = {}
         st.session_state.last_cache_clear_date = today_str
         print("\n☀️【定期クリーンアップ発動】毎朝AM3:00のキャッシュ初期化が正常に完了しました。\n")
 
 def get_cached_data(cache_key, fetch_func, *args, **kwargs):
-    """サーバーのメモリ(セッション)にデータがあればそれを返し、なければSupabaseから取得する魔法の関数"""
     check_and_clear_am3_cache()
-    
-    if cache_key in st.session_state.db_cache:
-        return st.session_state.db_cache[cache_key]
-    
+    if cache_key in st.session_state.db_cache: return st.session_state.db_cache[cache_key]
     print(f"🚨【DBからリアルタイム取得】対象キー: {cache_key} (通信量制限を消費中...)")
     data = fetch_func(*args, **kwargs)
     st.session_state.db_cache[cache_key] = data
     return data
 
 def clear_specific_cache(target_prefix):
-    """データが更新された時に、関係する古い記憶だけを消去する関数"""
     keys_to_del = [k for k in st.session_state.db_cache.keys() if k.startswith(target_prefix)]
-    for k in keys_to_del:
-        del st.session_state.db_cache[k]
-
+    for k in keys_to_del: del st.session_state.db_cache[k]
 
 # 🚨 DB操作関数群
 def _raw_db_get(table, params):
@@ -71,8 +62,7 @@ def _raw_db_get(table, params):
             data = res.json()
             if isinstance(data, list): return [d for d in data if isinstance(d, dict)]
             elif isinstance(data, dict): return [data]
-        else:
-            print(f"\n🚨【DB取得エラー】{table}: {res.status_code} - {res.text}\n")
+        else: print(f"\n🚨【DB取得エラー】{table}: {res.status_code} - {res.text}\n")
         return []
     except Exception as e: 
         print(f"\n🚨【DB取得例外エラー】: {e}\n")
@@ -84,32 +74,27 @@ def db_get(table, params=""):
 
 def db_post(table, data): 
     res = requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, json=data)
-    if res.status_code not in [200, 201, 204]: 
-        print(f"\n🚨【DB保存エラー】{table}: {res.status_code} - {res.text}\n")
+    if res.status_code not in [200, 201, 204]: print(f"\n🚨【DB保存エラー】{table}: {res.status_code} - {res.text}\n")
     clear_specific_cache(table)
 
 def db_patch(table, record_id, data): 
     res = requests.patch(f"{SUPABASE_URL}/rest/v1/{table}?record_id=eq.{record_id}", headers=HEADERS, json=data)
-    if res.status_code not in [200, 201, 204]: 
-        print(f"\n🚨【DB更新エラー】{table}: {res.status_code} - {res.text}\n")
+    if res.status_code not in [200, 201, 204]: print(f"\n🚨【DB更新エラー】{table}: {res.status_code} - {res.text}\n")
     clear_specific_cache(table)
 
 def db_patch_property(prop_id, data): 
     res = requests.patch(f"{SUPABASE_URL}/rest/v1/properties?property_id=eq.{prop_id}", headers=HEADERS, json=data)
-    if res.status_code not in [200, 201, 204]: 
-        print(f"\n🚨【DB更新エラー】properties: {res.status_code} - {res.text}\n")
+    if res.status_code not in [200, 201, 204]: print(f"\n🚨【DB更新エラー】properties: {res.status_code} - {res.text}\n")
     clear_specific_cache("properties")
 
 def db_patch_inspections_by_prop(prop_id, new_name):
     res = requests.patch(f"{SUPABASE_URL}/rest/v1/inspections?property_id=eq.{prop_id}", headers=HEADERS, json={"property_name": new_name})
-    if res.status_code not in [200, 201, 204]: 
-        print(f"\n🚨【DB更新エラー】inspections: {res.status_code} - {res.text}\n")
+    if res.status_code not in [200, 201, 204]: print(f"\n🚨【DB更新エラー】inspections: {res.status_code} - {res.text}\n")
     clear_specific_cache("inspections")
 
 def db_delete_record(record_id): 
     res = requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
-    if res.status_code not in [200, 201, 204]: 
-        print(f"\n🚨【DB削除エラー】inspection_records: {res.status_code} - {res.text}\n")
+    if res.status_code not in [200, 201, 204]: print(f"\n🚨【DB削除エラー】inspection_records: {res.status_code} - {res.text}\n")
     clear_specific_cache("inspection_records")
 
 def db_delete_property(prop_id):
@@ -129,15 +114,10 @@ def upload_to_storage(base64_str):
         filename = f"{uuid.uuid4()}.jpg"
         url = f"{SUPABASE_URL}/storage/v1/object/photos/{filename}"
         res = requests.post(url, headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "image/jpeg"}, data=file_data)
-        if res.status_code not in [200, 201]: 
-            print(f"\n🚨【写真アップロードエラー】: {res.status_code} - {res.text}\n")
-            return base64_str
+        if res.status_code not in [200, 201]: return base64_str
         return f"{SUPABASE_URL}/storage/v1/object/public/photos/{filename}"
-    except Exception as e: 
-        print(f"\n🚨【写真例外エラー】: {e}\n")
-        return base64_str
+    except Exception: return base64_str
 
-# 🚀 バックグラウンド処理
 def bg_save_inspection(photo_b64, record_data):
     saved_url = upload_to_storage(photo_b64)
     if saved_url: record_data["issue_photo_url"] = saved_url
@@ -169,24 +149,22 @@ def sort_records(records):
     return sorted(records, key=get_sort_key)
 
 def sort_properties_by_handover(props_list):
-    """物件を引渡し日が近い順(昇順)に並び替える関数。未入力は一番下へ。"""
     if not props_list: return []
     def get_handover_key(p):
         h_date = p.get('handover_date')
-        if h_date and h_date.strip():
-            return (0, h_date)
+        if h_date and h_date.strip(): return (0, h_date)
         return (1, "9999-12-31")
     return sorted(props_list, key=get_handover_key)
 
 # ==========================================
-# 📱 2. スマート電子黒板カメラ
+# 📱 2. スマート電子黒板 ＆ ボトムナビゲーション
 # ==========================================
+# 📷 黒板カメラのHTML定義
 SMART_CAMERA_HTML = """<!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         body { margin: 0; padding: 5px; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background-color: transparent;}
         .upload-btn {
@@ -199,7 +177,7 @@ SMART_CAMERA_HTML = """<!DOCTYPE html>
 </head>
 <body>
     <label class="upload-btn" id="upload-label" style="background-color: #28a745;">
-        <i class="fa-solid fa-camera" id="btn-icon"></i> <span id="btn-text">黒板付きで撮影 ／ 選択</span>
+        <span id="btn-text">📷 黒板付きで撮影 ／ 選択</span>
         <input type="file" accept="image/*" id="file-input">
     </label>
     <script>
@@ -211,7 +189,7 @@ SMART_CAMERA_HTML = """<!DOCTYPE html>
                 b.issueDetail = e.data.args.issueDetail || ""; b.mode = e.data.args.mode || "insp";
                 if(b.mode === 'fix') {
                     document.getElementById('upload-label').style.backgroundColor = '#007bff';
-                    document.getElementById('btn-text').innerText = '是正写真を撮影';
+                    document.getElementById('btn-text').innerText = '📷 是正写真を撮影';
                 }
             }
         });
@@ -235,8 +213,7 @@ SMART_CAMERA_HTML = """<!DOCTYPE html>
         input.addEventListener('change', function(e) {
             const file = e.target.files[0]; if (!file) return;
             document.getElementById('upload-label').style.backgroundColor = '#f39c12';
-            document.getElementById('btn-icon').className = 'fa-solid fa-spinner fa-spin';
-            document.getElementById('btn-text').innerHTML = '&nbsp;黒板合成中...';
+            document.getElementById('btn-text').innerHTML = '⏳ 合成中...お待ちください';
 
             const reader = new FileReader();
             reader.onload = function(event) {
@@ -269,8 +246,7 @@ SMART_CAMERA_HTML = """<!DOCTYPE html>
 
                     sendToStreamlit(canvas.toDataURL('image/jpeg', 0.6));
                     document.getElementById('upload-label').style.backgroundColor = '#2ecc71';
-                    document.getElementById('btn-icon').className = 'fa-solid fa-check';
-                    document.getElementById('btn-text').innerHTML = '&nbsp;セット完了';
+                    document.getElementById('btn-text').innerHTML = '✅ セット完了';
                 };
                 img.src = event.target.result;
             };
@@ -284,16 +260,85 @@ SMART_CAMERA_HTML = """<!DOCTYPE html>
 </body>
 </html>
 """
-
-temp_dir = os.path.join(tempfile.gettempdir(), "smart_cam_final")
+temp_dir = os.path.join(tempfile.gettempdir(), "felix_components")
 os.makedirs(temp_dir, exist_ok=True)
-with open(os.path.join(temp_dir, "index.html"), "w", encoding="utf-8") as f:
-    f.write(SMART_CAMERA_HTML)
-
+with open(os.path.join(temp_dir, "index.html"), "w", encoding="utf-8") as f: f.write(SMART_CAMERA_HTML)
 _smart_camera = components.declare_component("smart_cam_final", path=temp_dir)
 
+# 📱 スマホ専用ボトムメニューのHTML定義（正攻法）
+BOTTOM_NAV_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+    body { margin: 0; padding: 0; background: #ffffff; border-top: 1px solid #ddd; display: flex; font-family: sans-serif; height: 60px; user-select: none; }
+    .nav-item { flex: 1; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 2px; font-size: 11px; font-weight: bold; cursor: pointer; color: #666; line-height: 1.3; box-sizing: border-box; border-right: 1px solid #eee; transition: background 0.1s; }
+    .nav-item:last-child { border-right: none; }
+    .nav-item:active { background: #f0f0f0; }
+    .nav-item.active { color: #1a73e8; background: #f4f8ff; border-top: 3px solid #1a73e8; }
+    .badge { color: #d93025; font-size: 10px; display: block; margin-top: 2px; }
+</style>
+</head>
+<body>
+    <div id="nav-admin" style="display: none; width: 100%; height: 100%;">
+        <div class="nav-item" id="btn-prop" onclick="send('物件登録（管理者）')">物件登録</div>
+        <div class="nav-item" id="btn-insp" onclick="send('検査実施（管理者）')">検査実施</div>
+        <div class="nav-item" id="btn-conf" onclick="send('検査内容確認（管理者）')">内容確認<span class="badge" id="badge-cnt"></span></div>
+        <div class="nav-item" id="btn-dash" onclick="send('定期的是正ダッシュボード（管理者用）')">是正確認<br>承認</div>
+        <div class="nav-item" id="btn-done" onclick="send('完了分一覧（共通）')">完了確認</div>
+    </div>
+    
+    <div id="nav-partner" style="display: none; width: 100%; height: 100%;">
+        <div class="nav-item" id="btn-p-fix" onclick="send('定期的是正実施（協力業者）')">是正実施</div>
+        <div class="nav-item" id="btn-p-done" onclick="send('完了分一覧（共通）')">完了確認</div>
+    </div>
+
+    <script>
+        function send(val) {
+            window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}, "*");
+        }
+        window.addEventListener("message", function(e) {
+            if (e.data.type === "streamlit:render" && e.data.args) {
+                const args = e.data.args;
+                document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+                
+                if (args.role === 'admin') {
+                    document.getElementById('nav-admin').style.display = 'flex';
+                    document.getElementById('nav-partner').style.display = 'none';
+                    if(args.confirmCnt > 0) {
+                        document.getElementById('badge-cnt').innerText = '(未承認' + args.confirmCnt + '件)';
+                    } else {
+                        document.getElementById('badge-cnt').innerText = '';
+                    }
+                    if (args.activeMenu === '物件登録（管理者）') document.getElementById('btn-prop').classList.add('active');
+                    else if (args.activeMenu === '検査実施（管理者）') document.getElementById('btn-insp').classList.add('active');
+                    else if (args.activeMenu === '検査内容確認（管理者）') document.getElementById('btn-conf').classList.add('active');
+                    else if (args.activeMenu === '定期的是正ダッシュボード（管理者用）') document.getElementById('btn-dash').classList.add('active');
+                    else if (args.activeMenu === '完了分一覧（共通）') document.getElementById('btn-done').classList.add('active');
+                } else {
+                    document.getElementById('nav-admin').style.display = 'none';
+                    document.getElementById('nav-partner').style.display = 'flex';
+                    if (args.activeMenu === '定期的是正実施（協力業者）') document.getElementById('btn-p-fix').classList.add('active');
+                    else if (args.activeMenu === '完了分一覧（共通）') document.getElementById('btn-p-done').classList.add('active');
+                }
+            }
+        });
+        window.onload = function() {
+            window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1}, "*");
+            window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: 60}, "*");
+        };
+    </script>
+</body>
+</html>
+"""
+temp_dir_nav = os.path.join(tempfile.gettempdir(), "felix_nav")
+os.makedirs(temp_dir_nav, exist_ok=True)
+with open(os.path.join(temp_dir_nav, "index.html"), "w", encoding="utf-8") as f: f.write(BOTTOM_NAV_HTML)
+_bottom_nav = components.declare_component("my_bottom_nav", path=temp_dir_nav)
+
+
 # ==========================================
-# 3. UI設定
+# 3. UI設定 ＆ ボトムナビCSS（正攻法）
 # ==========================================
 st.markdown("""
 <style>
@@ -302,8 +347,34 @@ st.markdown("""
     [data-testid="stStatusWidget"] { display: none; }
     .record-box { border-bottom: 2px solid #EEEEEE; padding-bottom: 20px; margin-bottom: 20px; }
     .badge-wrap { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: bold; margin-left: 5px; }
+    
+    @media (max-width: 768px) {
+        /* スマホ時は左のサイドバーを完全に消去 */
+        [data-testid="collapsedControl"] { display: none !important; }
+        [data-testid="stSidebar"] { display: none !important; }
+        
+        /* ボトムメニューの分、一番下までスクロールできるよう余白を作る */
+        .main .block-container { padding-bottom: 80px !important; padding-top: 1.5rem !important; }
+        
+        /* ボトムメニュー(iframe)を画面の一番下に固定する純粋なCSS */
+        iframe[title="my_bottom_nav"] {
+            position: fixed !important;
+            bottom: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 60px !important;
+            z-index: 999999 !important;
+            border: none !important;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.1) !important;
+        }
+    }
+    @media (min-width: 769px) {
+        /* PC時はボトムメニューを隠し、サイドバーを使う */
+        iframe[title="my_bottom_nav"] { display: none !important; }
+    }
+    
     @media print {
-        section[data-testid="stSidebar"], header[data-testid="stHeader"] { display: none !important; }
+        section[data-testid="stSidebar"], header[data-testid="stHeader"], iframe[title="my_bottom_nav"] { display: none !important; }
         .stButton, [data-testid="stTextInput"], .admin-delete-box, hr { display: none !important; }
         .main .block-container { padding-top: 0 !important; margin-top: 0 !important; }
     }
@@ -397,6 +468,18 @@ def main():
         wait_conf_recs = db_get("inspection_records", "select=record_id&progress_status=eq.確認待ち")
         confirm_cnt = len(wait_conf_recs)
 
+    # 🌟 スマホ用ボトムナビゲーションの配置＆受信
+    if st.session_state.role is not None:
+        nav_res = _bottom_nav(
+            activeMenu=st.session_state.active_menu, 
+            confirmCnt=confirm_cnt, 
+            role=st.session_state.role, 
+            key="bottom_nav_comp"
+        )
+        if nav_res and nav_res != st.session_state.active_menu:
+            jump_to_menu(nav_res, st.session_state.pre_selected_prop)
+
+    # PC用サイドバーの構成
     def format_menu(m):
         return f"{m} 🔴未確認{confirm_cnt}件" if m == "検査内容確認（管理者）" and confirm_cnt > 0 else m
 
@@ -413,27 +496,9 @@ def main():
         "検査内容確認（管理者）": "検査内容確認（管理者）", "定期的是正ダッシュボード（管理者用）": "是正ダッシュボード（管理者用）",
         "定期的是正実施（協力業者）": "是正実施（協力業者）", "完了分一覧（共通）": "完了分一覧（共通）"
     }
-    selected_menu = st.sidebar.radio("MENU", menu_opts, index=menu_opts.index(st.session_state.active_menu), format_func=lambda x: format_menu(display_menu_map.get(x, x)))
     
-    # 🌟 【スマホ専用】メニューを選択したら自動でサイドバーを閉じる最強の裏技（CORS完全回避・強制発動版）
-    st.markdown(f"""
-    <svg style="display:none;" class="sidebar-closer-{time.time()}" onload="
-        setTimeout(() => {{
-            if (window.innerWidth <= 768) {{
-                const sidebar = document.querySelector(`[data-testid='stSidebar']`);
-                if (sidebar && sidebar.getAttribute(`aria-expanded`) === `true`) {{
-                    const escEvent = new KeyboardEvent(`keydown`, {{
-                        key: `Escape`, code: `Escape`, keyCode: 27, bubbles: true
-                    }});
-                    document.dispatchEvent(escEvent);
-                    const closeBtn = document.querySelector(`[data-testid='stSidebarCollapseButton']`);
-                    if (closeBtn) closeBtn.click();
-                }}
-            }}
-        }}, 100);
-    "></svg>
-    """, unsafe_allow_html=True)
-
+    # ＰＣ時はサイドバーから操作可能
+    selected_menu = st.sidebar.radio("MENU", menu_opts, index=menu_opts.index(st.session_state.active_menu), format_func=lambda x: format_menu(display_menu_map.get(x, x)))
     if selected_menu != st.session_state.active_menu:
         jump_to_menu(selected_menu, st.session_state.pre_selected_prop)
 
