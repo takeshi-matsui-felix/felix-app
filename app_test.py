@@ -44,7 +44,7 @@ def check_and_clear_am3_cache():
         print("\n☀️【定期クリーンアップ発動】毎朝AM3:00のキャッシュ初期化が正常に完了しました。\n")
 
 def get_cached_data(cache_key, fetch_func, *args, **kwargs):
-    """サーバーのメモリにデータがあれば返し、なければSupabaseから取得する関数"""
+    """サーバーのメモリ(セッション)にデータがあればそれを返し、なければSupabaseから取得する魔法の関数"""
     check_and_clear_am3_cache()
     
     if cache_key in st.session_state.db_cache:
@@ -415,25 +415,24 @@ def main():
     }
     selected_menu = st.sidebar.radio("MENU", menu_opts, index=menu_opts.index(st.session_state.active_menu), format_func=lambda x: format_menu(display_menu_map.get(x, x)))
     
-    # 🌟 【スマホ専用】メニューを選択したら自動でサイドバーを閉じる裏技
-    components.html("""
-    <script>
-        setTimeout(function() {
-            try {
-                if (window.parent.innerWidth <= 768) {
-                    const sidebar = window.parent.document.querySelector('[data-testid="stSidebar"]');
-                    // サイドバーが開いている状態の時だけ、閉じるボタンを自動クリック
-                    if (sidebar && sidebar.getAttribute('aria-expanded') === 'true') {
-                        const closeBtn = window.parent.document.querySelector('[data-testid="stSidebarCollapseButton"]') || window.parent.document.querySelector('button[aria-label="Collapse sidebar"]');
-                        if (closeBtn) {
-                            closeBtn.click();
-                        }
-                    }
-                }
-            } catch (e) {}
-        }, 50);
-    </script>
-    """, height=0, width=0)
+    # 🌟 【スマホ専用】メニューを選択したら自動でサイドバーを閉じる最強の裏技（CORS完全回避・強制発動版）
+    st.markdown(f"""
+    <svg style="display:none;" class="sidebar-closer-{time.time()}" onload="
+        setTimeout(() => {{
+            if (window.innerWidth <= 768) {{
+                const sidebar = document.querySelector(`[data-testid='stSidebar']`);
+                if (sidebar && sidebar.getAttribute(`aria-expanded`) === `true`) {{
+                    const escEvent = new KeyboardEvent(`keydown`, {{
+                        key: `Escape`, code: `Escape`, keyCode: 27, bubbles: true
+                    }});
+                    document.dispatchEvent(escEvent);
+                    const closeBtn = document.querySelector(`[data-testid='stSidebarCollapseButton']`);
+                    if (closeBtn) closeBtn.click();
+                }}
+            }}
+        }}, 100);
+    "></svg>
+    """, unsafe_allow_html=True)
 
     if selected_menu != st.session_state.active_menu:
         jump_to_menu(selected_menu, st.session_state.pre_selected_prop)
