@@ -15,7 +15,7 @@ import time
 from new_dictionary import ISSUE_TEMPLATES
 
 # ==========================================
-# 1. Supabase 接続設定
+# 1. Supabase 接続設定 ＆ キャッシュ機構（AM3:00クリア対応）
 # ==========================================
 SUPABASE_URL = "https://vzuzeymvyftmfuaxrvtb.supabase.co"
 SUPABASE_KEY = "sb_publishable_2y-rvfayu8BYs0oo-UOzGA_EQTBYLxm"
@@ -28,8 +28,45 @@ HEADERS = {
 
 DELETE_PASSWORD = "5963"
 
-# 🚨 DB操作関数群
-def db_get(table, params=""):
+# 🌟 毎朝AM3:00にキャッシュを自動破棄する＆無駄なリクエストを削るための内部倉庫
+if "db_cache" not in st.session_state:
+    st.session_state.db_cache = {}
+if "last_cache_clear_date" not in st.session_state:
+    st.session_state.last_cache_clear_date = None
+
+def check_and_clear_am3_cache():
+    """現在の時刻がAM3:00を過ぎており、かつ今日まだクリアしていなければキャッシュを全消去する関数"""
+    now = datetime.datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    
+    # 毎日AM3:00以降、その日の最初のアクセス時に発動
+    if now.hour >= 3 and st.session_state.last_cache_clear_date != today_str:
+        st.session_state.db_cache = {}
+        st.session_state.last_cache_clear_date = today_str
+        print("\n☀️【定期クリーンアップ発動】毎朝AM3:00のキャッシュ初期化が正常に完了しました。\n")
+
+def get_cached_data(cache_key, fetch_func, *args, **kwargs):
+    """サーバーのメモリ(セッション)にデータがあればそれを返し、なければSupabaseから取得する魔法の関数"""
+    check_and_clear_am3_cache()  # 毎回アクセス時にAM3:00チェックを実行
+    
+    if cache_key in st.session_state.db_cache:
+        return st.session_state.db_cache[cache_key]
+    
+    # キャッシュがない場合のみ、重いSupabase通信を実行
+    print(f"🚨【DBからリアルタイム取得】対象キー: {cache_key} (通信量制限を消費中...)")
+    data = fetch_func(*args, **kwargs)
+    st.session_state.db_cache[cache_key] = data
+    return data
+
+def clear_specific_cache(target_prefix):
+    """データが更新(保存・変更・削除)された時に、関係する古い記憶だけをパリンと割って消去する関数"""
+    keys_to_del = [k for k in st.session_state.db_cache.keys() if k.startswith(target_prefix)]
+    for k in keys_to_del:
+        del st.session_state.db_cache[k]
+
+
+# 🚨 実際のDB操作関数群（キャッシュラッパーを適用）
+def _raw_db_get(table, params):
     url = f"{SUPABASE_URL}/rest/v1/{table}?{params}"
     try:
         res = requests.get(url, headers=HEADERS)
@@ -44,35 +81,48 @@ def db_get(table, params=""):
         print(f"\n🚨【DB取得例外エラー】: {e}\n")
         return []
 
+def db_get(table, params=""):
+    # 🌟 メモリにデータがあれば一瞬で返し、なければDBへ行く
+    cache_key = f"{table}_{params}"
+    return get_cached_data(cache_key, _raw_db_get, table, params)
+
 def db_post(table, data): 
     res = requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, json=data)
     if res.status_code not in [200, 201, 204]: 
         print(f"\n🚨【DB保存エラー】{table}: {res.status_code} - {res.text}\n")
+    clear_specific_cache(table) # 🌟 データが変わったので古い記憶をリセット
 
 def db_patch(table, record_id, data): 
     res = requests.patch(f"{SUPABASE_URL}/rest/v1/{table}?record_id=eq.{record_id}", headers=HEADERS, json=data)
     if res.status_code not in [200, 201, 204]: 
         print(f"\n🚨【DB更新エラー】{table}: {res.status_code} - {res.text}\n")
+    clear_specific_cache(table) # 🌟 データが変わったので古い記憶をリセット
 
 def db_patch_property(prop_id, data): 
     res = requests.patch(f"{SUPABASE_URL}/rest/v1/properties?property_id=eq.{prop_id}", headers=HEADERS, json=data)
     if res.status_code not in [200, 201, 204]: 
         print(f"\n🚨【DB更新エラー】properties: {res.status_code} - {res.text}\n")
+    clear_specific_cache("properties")
 
 def db_patch_inspections_by_prop(prop_id, new_name):
     res = requests.patch(f"{SUPABASE_URL}/rest/v1/inspections?property_id=eq.{prop_id}", headers=HEADERS, json={"property_name": new_name})
     if res.status_code not in [200, 201, 204]: 
         print(f"\n🚨【DB更新エラー】inspections: {res.status_code} - {res.text}\n")
+    clear_specific_cache("inspections")
 
 def db_delete_record(record_id): 
     res = requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
     if res.status_code not in [200, 201, 204]: 
         print(f"\n🚨【DB削除エラー】inspection_records: {res.status_code} - {res.text}\n")
+    clear_specific_cache("inspection_records")
 
 def db_delete_property(prop_id):
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?property_id=eq.{prop_id}", headers=HEADERS)
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?property_id=eq.{prop_id}", headers=HEADERS)
     requests.delete(f"{SUPABASE_URL}/rest/v1/properties?property_id=eq.{prop_id}", headers=HEADERS)
+    clear_specific_cache("inspection_records")
+    clear_specific_cache("inspections")
+    clear_specific_cache("properties")
 
 def upload_to_storage(base64_str):
     if not base64_str or not isinstance(base64_str, str): return None
@@ -332,11 +382,11 @@ def main():
     if st.session_state.role is None:
         if qp.get("mode") == "partner":
             st.session_state.role = "partner"
-            st.session_state.active_menu = "是正実施（協力業者）"
+            st.session_state.active_menu = "ホーム"
         else:
             st.session_state.role = "admin"
             st.session_state.active_menu = "ホーム"
-            st.session_state.splash_done = False
+        st.session_state.splash_done = False
         st.rerun()
         return
 
@@ -354,14 +404,20 @@ def main():
         return f"{m} 🔴未確認{confirm_cnt}件" if m == "検査内容確認（管理者）" and confirm_cnt > 0 else m
 
     if st.session_state.role == "admin":
-        menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
+        menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "定期的是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
     else:
-        menu_opts = ["是正実施（協力業者）", "完了分一覧（共通）"]
+        menu_opts = ["ホーム", "是正実施（協力業者）", "完了分一覧（共通）"]
         
     if st.session_state.active_menu not in menu_opts: 
         st.session_state.active_menu = menu_opts[0]
     
-    selected_menu = st.sidebar.radio("MENU", menu_opts, index=menu_opts.index(st.session_state.active_menu), format_func=format_menu)
+    # 🌟 表示上の名前を松井様指定に統一
+    display_menu_map = {
+        "ホーム": "ホーム", "物件登録（管理者）": "物件登録（管理者）", "検査実施（管理者）": "検査実施（管理者）",
+        "検査内容確認（管理者）": "検査内容確認（管理者）", "定期的是正ダッシュボード（管理者用）": "是正ダッシュボード（管理者用）",
+        "是正実施（協力業者）": "是正実施（協力業者）", "完了分一覧（共通）": "完了分一覧（共通）"
+    }
+    selected_menu = st.sidebar.radio("MENU", menu_opts, index=menu_opts.index(st.session_state.active_menu), format_func=lambda x: format_menu(display_menu_map.get(x, x)))
     if selected_menu != st.session_state.active_menu:
         jump_to_menu(selected_menu, st.session_state.pre_selected_prop)
 
@@ -378,78 +434,94 @@ def main():
             </style>
             <div class="splash">FELIX Inspection System...</div>
             """, unsafe_allow_html=True)
-            time.sleep(1.5)  # 👈 スイートスポットの1.5秒に変更完了！
+            time.sleep(1.5) # 🌟 黄金の1.5秒を実装！
             st.session_state.splash_done = True
             st.rerun()
         else:
-            menu_html = """
+            role = st.session_state.role
+            new_btn_text = "新規検査を開始する" if role == "admin" else "新規是正を開始する"
+            ls_key = "felix_session" if role == "admin" else "felix_partner_session"
+            
+            menu_html = f"""
             <!DOCTYPE html>
             <html>
             <head>
             <style>
-                body { margin:0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; background: transparent; }
-                .menu-item { font-size: 16px; color: #333; cursor: pointer; margin: 24px 0; text-align: center; transition: color 0.2s; user-select: none; }
-                .menu-item:hover { color: #888; }
-                .container { position: absolute; top: 38.2%; left: 50%; transform: translate(-50%, -50%); width: 100%; }
+                body {{ margin:0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; background: transparent; }}
+                .menu-item {{ font-size: 16px; color: #333; cursor: pointer; margin: 24px 0; text-align: center; transition: color 0.2s; user-select: none; }}
+                .menu-item:hover {{ color: #888; }}
+                .container {{ position: absolute; top: 38.2%; left: 50%; transform: translate(-50%, -50%); width: 100%; }}
             </style>
             </head>
             <body>
             <div class="container">
-                <div class="menu-item" onclick="sendVal('new')">新規検査を開始する</div>
+                <div class="menu-item" onclick="sendVal('new')">{new_btn_text}</div>
                 <div class="menu-item" id="resume-btn" style="display:none;" onclick="sendVal('resume')"></div>
             </div>
             <script>
-                function sendVal(action) {
-                    let val = { action: action };
-                    if(action === 'resume') {
-                        val.data = JSON.parse(localStorage.getItem('felix_session'));
-                    }
-                    window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}, "*");
-                }
-                const saved = localStorage.getItem('felix_session');
-                if(saved) {
-                    try {
+                function sendVal(action) {{
+                    let val = {{ action: action }};
+                    if(action === 'resume') {{
+                        val.data = JSON.parse(localStorage.getItem('{ls_key}'));
+                    }}
+                    window.parent.postMessage({{isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}}, "*");
+                }}
+                const saved = localStorage.getItem('{ls_key}');
+                if(saved) {{
+                    try {{
                         const data = JSON.parse(saved);
-                        if(data && data.name && data.type) {
+                        let text = '';
+                        if('{role}' === 'admin' && data.name && data.type) {{
+                            text = '前回の続きから再開する（' + data.name + ' / ' + data.type + '）';
+                        }} else if ('{role}' === 'partner' && data.prop && data.type) {{
+                            text = '前回の続きから再開する（' + data.prop + ' / ' + data.type + '）';
+                        }}
+                        if(text) {{
                             const btn = document.getElementById('resume-btn');
                             btn.style.display = 'block';
-                            btn.innerText = '前回の続きから再開する（' + data.name + ' / ' + data.type + '）';
-                        }
-                    } catch(e) {}
-                }
-                window.onload = function() {
-                    window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1}, "*");
-                    window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: 500}, "*");
-                };
+                            btn.innerText = text;
+                        }}
+                    }} catch(e) {{}}
+                }}
+                window.onload = function() {{
+                    window.parent.postMessage({{isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1}}, "*");
+                    window.parent.postMessage({{isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: 500}}, "*");
+                }};
             </script>
             </body>
             </html>
             """
-            temp_dir_menu = os.path.join(tempfile.gettempdir(), "felix_home_menu")
+            temp_dir_menu = os.path.join(tempfile.gettempdir(), f"felix_home_menu_{role}")
             os.makedirs(temp_dir_menu, exist_ok=True)
             with open(os.path.join(temp_dir_menu, "index.html"), "w", encoding="utf-8") as f:
                 f.write(menu_html)
             
-            _home_menu = components.declare_component("home_menu", path=temp_dir_menu)
-            res = _home_menu(key="home_menu_comp")
+            _home_menu = components.declare_component(f"home_menu_{role}", path=temp_dir_menu)
+            res = _home_menu(key=f"home_menu_comp_{role}")
             
             if res:
                 if res.get('action') == 'new':
-                    st.session_state.active_menu = "検査実施（管理者）"
+                    st.session_state.active_menu = "検査実施（管理者）" if role == "admin" else "是正実施（協力業者）"
                     st.session_state.current_box = None
+                    st.session_state.drill_target = None
                     st.rerun()
                 elif res.get('action') == 'resume' and res.get('data'):
                     d = res['data']
-                    st.session_state.active_menu = "検査実施（管理者）"
-                    st.session_state.current_box = {
-                        "id": d.get('id', str(uuid.uuid4())),
-                        "prop_id": d.get('prop_id'),
-                        "name": d.get('name'),
-                        "type": d.get('type'),
-                        "inspector": d.get('inspector')
-                    }
-                    st.session_state.prev_floor = d.get('prev_floor')
-                    st.session_state.prev_area = d.get('prev_area')
+                    if role == "admin":
+                        st.session_state.active_menu = "検査実施（管理者）"
+                        st.session_state.current_box = {
+                            "id": d.get('id', str(uuid.uuid4())),
+                            "prop_id": d.get('prop_id'),
+                            "name": d.get('name'),
+                            "type": d.get('type'),
+                            "inspector": d.get('inspector')
+                        }
+                        st.session_state.prev_floor = d.get('prev_floor')
+                        st.session_state.prev_area = d.get('prev_area')
+                    else:
+                        st.session_state.active_menu = "is_partner_resume_redirect"
+                        st.session_state.active_menu = "是正実施（協力業者）"
+                        st.session_state.drill_target = {"prop": d.get('prop'), "type": d.get('type')}
                     st.rerun()
 
     # ----------------------------------------
@@ -527,7 +599,7 @@ def main():
                 del_pw = st.text_input("削除用パスワードを入力", type="password", key=f"pw_{key_suffix}", placeholder="2011")
                 col_y, col_n = st.columns(2)
                 if col_y.button("Yes (削除実行)", key=f"yes_{key_suffix}"):
-                    if del_pw == DELETE_PASSWORD:
+                    if del_pw == "2011":
                         db_delete_property(prop_id)
                         st.session_state.delete_target = None; st.session_state.current_box = None; st.rerun()
                     else: st.error("パスワードが違います")
@@ -567,7 +639,7 @@ def main():
             opts = [{"property_id": None, "property_name": "-- 選択 --"}] + filtered_props
             idx = next((i for i, p in enumerate(opts) if p.get('property_id') == st.session_state.pre_selected_prop), 0)
             
-            st.markdown("<p style='color:gray; font-size:12px; margin-bottom:0;'>💡 文字を入力するか、上の検索バーで絞り込めます</p>", unsafe_allow_html=True)
+            st.markdown("<p style='color:gray; font-size:12px; margin-bottom:0;'>💡 物件名の絞り込み検索に対応しています</p>", unsafe_allow_html=True)
             target = st.selectbox("物件を選択", opts, index=idx, format_func=lambda x: x.get('property_name', '不明'))
             ins_type = st.selectbox("検査種類を選択", INSP_OPTS)
             
@@ -793,7 +865,7 @@ def main():
                 if st.button("続けて次を登録", use_container_width=True): 
                     st.session_state.issue_saved = False; st.session_state.temp_photo = None; st.rerun()
                 if st.button("✏️ 保存データを確認・修正", use_container_width=True): st.session_state.edit_saved_records = True; st.rerun()
-                if st.button("検査全体を終了", use_container_width=True): st.session_state.current_box = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None; st.session_state.prev_floor = None; st.session_state.prev_area = None; st.rerun()
+                if st.button("検査全体を終了", use_container_width=True): st.session_state.current_box = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.temp_photo = None; st.session_state.prev_floor = None; st.session_state.prev_area = None; st.rerun()
 
     # ----------------------------------------
     # メニュー: 3. 検査内容確認（管理者専用）
@@ -804,7 +876,6 @@ def main():
         sel_area = st.radio("📍 表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key="area_verify")
         t_area = sel_area if sel_area != "すべて表示" else None
 
-        # 🌟 検索バーの追加（確認画面）
         search_verify = st.text_input("🔍 物件名で検索（一部入力でも可）", key="search_verify")
         
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status&progress_status=eq.確認待ち")
@@ -819,7 +890,7 @@ def main():
             ins = ins_map.get(r.get('inspection_id'))
             if ins:
                 p_id = ins.get('property_id')
-                if t_area and prop_area_map.get(p_id) != t_area: continue
+                if t_area && prop_area_map.get(p_id) != t_area: continue
                 p = ins.get('property_name', '不明'); t = ins.get('inspection_type', '不明')
                 if p not in tree: tree[p] = {}
                 tree[p][t] = tree[p].get(t, 0) + 1
@@ -863,7 +934,6 @@ def main():
                     st.success("一括承認が完了しました！協力業者へ表示されます。"); st.session_state.drill_target = None; st.session_state.cached_records = None; st.rerun()
                 st.markdown("---")
                 
-                # 🌟 断熱検査のリスト分岐追加
                 edit_w_opts = WORK_OPTS_KIKAN if type_val.startswith("【検査機関】") else WORK_OPTS_SHANAI if type_val in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if type_val == "躯体検査" else WORK_OPTS_HAIKIN if type_val == "配筋検査" else WORK_OPTS_CHUKAN if type_val == "中間検査" else WORK_OPTS_DANNETSU if type_val == "断熱検査" else WORK_OPTS_STANDARD
                 edit_a_opts = AREA_OPTS_SHANAI if type_val in SHANAI_KENSA_TYPES else AREA_OPTS_STANDARD
 
@@ -943,7 +1013,6 @@ def main():
             st.warning("⚠️ URLにエリア指定がありません。正しいURLからアクセスしてください。")
             t_area = None
 
-        # 🌟 検索バーの追加（是正実施画面）
         search_fix = st.text_input("🔍 物件名で検索（一部入力でも可）", key="search_fix")
 
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status")
@@ -970,6 +1039,7 @@ def main():
                 tree_counts[p][t]["total"] += 1
                 if p_stat == "完了": tree_counts[p][t]["done"] += 1
                 elif p_stat == "是正確認中": tree_counts[p][t]["wait_conf"] += 1; tree_counts[p][t]["unres"] += 1
+                elif p_stat == "is_partner_resume_redirect": pass
                 elif p_stat == "是正待ち": tree_counts[p][t]["wait_fix"] += 1; tree_counts[p][t]["unres"] += 1
                 else: tree_counts[p][t]["unres"] += 1
 
@@ -1000,6 +1070,11 @@ def main():
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
             
+            # 🌟 協力業者側のスマート復帰用：ローカルストレージへ保存
+            cb_data = {"prop": prop_val, "type": type_val}
+            json_str = json.dumps(cb_data, ensure_ascii=False)
+            components.html(f"<script>localStorage.setItem('felix_partner_session', JSON.stringify({json_str}));</script>", height=0)
+
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
             if t_ids:
                 if st.session_state.cached_records is None or st.session_state.cached_target_id != target_id_str:
@@ -1075,7 +1150,7 @@ def main():
     # ----------------------------------------
     # メニュー: 4-B. 是正ダッシュボード（管理者用）
     # ----------------------------------------
-    elif st.session_state.active_menu == "是正ダッシュボード（管理者用）":
+    elif st.session_state.active_menu == "定期的是正ダッシュボード（管理者用）":
         st.header("是正ダッシュボード（確認・実施）")
         
         sel_area = st.radio("📍 表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key="area_dash")
@@ -1142,7 +1217,7 @@ def main():
                 else: recs = st.session_state.cached_records
                 
                 if recs and type_val in SHANAI_KENSA_TYPES:
-                    floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in recs if r.get('floor_level')])))
+                    floors_in_recs = sorted(list(set([r.get('floor_level', 'モヤ') for r in recs if r.get('floor_level')])))
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_dash_floor")
                     if sel_floor != "すべて表示":
                         recs = [r for r in recs if r.get('floor_level') == sel_floor]
