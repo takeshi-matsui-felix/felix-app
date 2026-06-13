@@ -8,6 +8,8 @@ import io
 import os
 import tempfile
 import threading
+import json
+import time
 
 # 👇 外部辞書ファイルの読み込み
 from new_dictionary import ISSUE_TEMPLATES
@@ -24,7 +26,6 @@ HEADERS = {
     "Prefer": "return=minimal"
 }
 
-ADMIN_PASSWORD = "2011"
 DELETE_PASSWORD = "5963"
 
 # 🚨 DB操作関数群
@@ -250,22 +251,17 @@ st.markdown("""
 # ==========================================
 # 4. 定義データ（順序・選択肢）
 # ==========================================
-
-# 🌟 並び順アルゴリズム（絶対ルール）
 AREA_ORDER = ["玄関", "トイレ", "キッチン", "バルコニー", "LDK", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
 WORK_ORDER = ["A.リペア", "B.清掃", "C.クロス", "D.造作", "E.水道", "F.電気", "G.キッチン", "H.サッシ", "I.外壁", "J.外構", "K.コーキング", "L.ガス", "板金", "Z.その他"]
 
 def sort_records(records):
-    """指定された順番に従ってレコードを美しく並び替える関数"""
     def get_sort_key(r):
         area = r.get('area', '')
         work = r.get('work_type', '')
-        # 指定リストにないものは末尾(999)へ
         area_idx = AREA_ORDER.index(area) if area in AREA_ORDER else 999
         work_idx = WORK_ORDER.index(work) if work in WORK_ORDER else 999
         return (area_idx, work_idx)
     return sorted(records, key=get_sort_key)
-
 
 FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
 AREA_OPTS_STANDARD = ["-- 選択 --", "玄関", "廊下・階段・ENT", "LDK", "キッチン", "洋室", "洗面室", "UB", "トイレ", "バルコニー", "外部", "フリー項目"]
@@ -274,6 +270,7 @@ AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK"
 WORK_OPTS_STANDARD = ["-- 選択 --", "基礎工事（鉄筋）", "基礎工事（型枠）", "フレーミング", "FM", "造作", "内装", "電気", "設備", "ガス", "清掃", "サッシ", "外壁", "外構", "コーキング", "リペア", "その他"]
 WORK_OPTS_HAIKIN = ["-- 選択 --", "基礎工事(鉄筋)", "水道", "ガス", "その他"]
 WORK_OPTS_KUTAI = ["-- 選択 --", "フレーミング", "電気", "水道", "防水", "その他"]
+WORK_OPTS_DANNETSU = ["-- 選択 --", "断熱", "造作", "電気", "設備", "その他"]
 WORK_OPTS_CHUKAN = ["-- 選択 --", "造作", "電気", "水道", "外壁", "ガス", "足場", "その他"]
 WORK_OPTS_SHANAI = ["-- 選択 --", "A.リペア", "B.清掃", "C.クロス", "D.造作", "E.水道", "F.電気", "G.キッチン", "H.サッシ", "I.外壁", "J.外構", "K.コーキング", "L.ガス", "板金", "Z.その他"]
 WORK_OPTS_KIKAN = ["基礎工事", "フレーミング", "防水", "造作", "内装", "電気", "設備", "ガス", "サッシ", "外壁", "足場", "外構", "その他"]
@@ -291,7 +288,7 @@ INSPECTOR_OPTS = ["工事監理チーム", "建設部", "不動産事業部", "�
 # ==========================================
 # 5. セッション管理 
 # ==========================================
-for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "edit_prop_target", "skip_render_ids", "show_bulk_confirm", "edit_saved_records", "cached_records", "cached_target_id", "temp_photo", "prev_floor", "prev_area"]:
+for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "edit_prop_target", "skip_render_ids", "show_bulk_confirm", "edit_saved_records", "cached_records", "cached_target_id", "temp_photo", "prev_floor", "prev_area", "splash_done"]:
     if key not in st.session_state:
         st.session_state[key] = None
 
@@ -299,6 +296,7 @@ if st.session_state.skip_render_ids is None: st.session_state.skip_render_ids = 
 if "issue_saved" not in st.session_state: st.session_state.issue_saved = False
 if "drill_target" not in st.session_state or not isinstance(st.session_state.drill_target, dict): st.session_state.drill_target = None
 if "current_box" not in st.session_state or not isinstance(st.session_state.current_box, dict): st.session_state.current_box = None
+if st.session_state.splash_done is None: st.session_state.splash_done = False
 
 qp = st.query_params
 
@@ -308,13 +306,6 @@ if qp.get("area") == "tokai":
     st.session_state.target_area = "東海エリア"
 elif qp.get("area") == "kanto":
     st.session_state.target_area = "関東エリア"
-
-if qp.get("auth") == ADMIN_PASSWORD:
-    st.session_state.role = "admin"
-    st.session_state.active_menu = "検査実施（管理者）" if not st.session_state.active_menu else st.session_state.active_menu
-elif qp.get("mode") == "partner":
-    st.session_state.role = "partner"
-    st.session_state.active_menu = "是正実施（協力業者）"
 
 def jump_to_menu(menu_name, prop_id=None):
     st.session_state.active_menu = menu_name
@@ -339,23 +330,14 @@ def jump_to_menu(menu_name, prop_id=None):
 # ==========================================
 def main():
     if st.session_state.role is None:
-        st.markdown("<h1 style='text-align: center;'>Felix検査App</h1>", unsafe_allow_html=True)
-        t1, t2 = st.tabs(["管理者", "協力業者"])
-        with t1:
-            pwd = st.text_input("Password", type="password")
-            if st.button("管理者ログイン"):
-                if pwd == ADMIN_PASSWORD:
-                    st.session_state.role = "admin"
-                    st.query_params.auth = ADMIN_PASSWORD
-                    st.session_state.active_menu = "物件登録（管理者）"
-                    st.rerun()
-                else: st.error("パスワードが違います")
-        with t2:
-            if st.button("協力業者としてログイン"):
-                st.session_state.role = "partner"
-                st.query_params.mode = "partner"
-                st.session_state.active_menu = "是正実施（協力業者）"
-                st.rerun()
+        if qp.get("mode") == "partner":
+            st.session_state.role = "partner"
+            st.session_state.active_menu = "是正実施（協力業者）"
+        else:
+            st.session_state.role = "admin"
+            st.session_state.active_menu = "ホーム"
+            st.session_state.splash_done = False
+        st.rerun()
         return
 
     st.sidebar.markdown(f"ユーザー: {st.session_state.role}")
@@ -371,9 +353,8 @@ def main():
     def format_menu(m):
         return f"{m} 🔴未確認{confirm_cnt}件" if m == "検査内容確認（管理者）" and confirm_cnt > 0 else m
 
-    # 🌟 メニューを再び分離（業者は使い慣れた是正実施に戻す）
     if st.session_state.role == "admin":
-        menu_opts = ["物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
+        menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
     else:
         menu_opts = ["是正実施（協力業者）", "完了分一覧（共通）"]
         
@@ -385,9 +366,96 @@ def main():
         jump_to_menu(selected_menu, st.session_state.pre_selected_prop)
 
     # ----------------------------------------
+    # 🌟 メニュー: 0. ホーム（オープニング ＆ 黄金比メニュー）
+    # ----------------------------------------
+    if st.session_state.active_menu == "ホーム":
+        if not st.session_state.splash_done:
+            st.markdown("""
+            <style>
+            .splash { display: flex; justify-content: center; align-items: center; height: 100vh; font-size: 16px; color: #555; position: fixed; top: 0; left: 0; width: 100vw; background: white; z-index: 999999; letter-spacing: 2px; font-family: sans-serif; }
+            section[data-testid="stSidebar"] { display: none !important; }
+            header[data-testid="stHeader"] { display: none !important; }
+            </style>
+            <div class="splash">FELIX Inspection System...</div>
+            """, unsafe_allow_html=True)
+            time.sleep(1.5)  # 👈 スイートスポットの1.5秒に変更完了！
+            st.session_state.splash_done = True
+            st.rerun()
+        else:
+            menu_html = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+            <style>
+                body { margin:0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; background: transparent; }
+                .menu-item { font-size: 16px; color: #333; cursor: pointer; margin: 24px 0; text-align: center; transition: color 0.2s; user-select: none; }
+                .menu-item:hover { color: #888; }
+                .container { position: absolute; top: 38.2%; left: 50%; transform: translate(-50%, -50%); width: 100%; }
+            </style>
+            </head>
+            <body>
+            <div class="container">
+                <div class="menu-item" onclick="sendVal('new')">新規検査を開始する</div>
+                <div class="menu-item" id="resume-btn" style="display:none;" onclick="sendVal('resume')"></div>
+            </div>
+            <script>
+                function sendVal(action) {
+                    let val = { action: action };
+                    if(action === 'resume') {
+                        val.data = JSON.parse(localStorage.getItem('felix_session'));
+                    }
+                    window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}, "*");
+                }
+                const saved = localStorage.getItem('felix_session');
+                if(saved) {
+                    try {
+                        const data = JSON.parse(saved);
+                        if(data && data.name && data.type) {
+                            const btn = document.getElementById('resume-btn');
+                            btn.style.display = 'block';
+                            btn.innerText = '前回の続きから再開する（' + data.name + ' / ' + data.type + '）';
+                        }
+                    } catch(e) {}
+                }
+                window.onload = function() {
+                    window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1}, "*");
+                    window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: 500}, "*");
+                };
+            </script>
+            </body>
+            </html>
+            """
+            temp_dir_menu = os.path.join(tempfile.gettempdir(), "felix_home_menu")
+            os.makedirs(temp_dir_menu, exist_ok=True)
+            with open(os.path.join(temp_dir_menu, "index.html"), "w", encoding="utf-8") as f:
+                f.write(menu_html)
+            
+            _home_menu = components.declare_component("home_menu", path=temp_dir_menu)
+            res = _home_menu(key="home_menu_comp")
+            
+            if res:
+                if res.get('action') == 'new':
+                    st.session_state.active_menu = "検査実施（管理者）"
+                    st.session_state.current_box = None
+                    st.rerun()
+                elif res.get('action') == 'resume' and res.get('data'):
+                    d = res['data']
+                    st.session_state.active_menu = "検査実施（管理者）"
+                    st.session_state.current_box = {
+                        "id": d.get('id', str(uuid.uuid4())),
+                        "prop_id": d.get('prop_id'),
+                        "name": d.get('name'),
+                        "type": d.get('type'),
+                        "inspector": d.get('inspector')
+                    }
+                    st.session_state.prev_floor = d.get('prev_floor')
+                    st.session_state.prev_area = d.get('prev_area')
+                    st.rerun()
+
+    # ----------------------------------------
     # メニュー: 1. 物件登録
     # ----------------------------------------
-    if st.session_state.active_menu == "物件登録（管理者）":
+    elif st.session_state.active_menu == "物件登録（管理者）":
         st.header("物件登録")
         
         with st.container():
@@ -459,7 +527,7 @@ def main():
                 del_pw = st.text_input("削除用パスワードを入力", type="password", key=f"pw_{key_suffix}", placeholder="2011")
                 col_y, col_n = st.columns(2)
                 if col_y.button("Yes (削除実行)", key=f"yes_{key_suffix}"):
-                    if del_pw == "2011":
+                    if del_pw == DELETE_PASSWORD:
                         db_delete_property(prop_id)
                         st.session_state.delete_target = None; st.session_state.current_box = None; st.rerun()
                     else: st.error("パスワードが違います")
@@ -488,11 +556,18 @@ def main():
             
             sel_area = st.selectbox("エリアを選択", area_opts, index=init_area_idx)
             
+            # 🌟 検索バーの追加（検査実施画面）
+            search_query = st.text_input("🔍 物件名で検索（一部入力でも可）", key="search_insp")
+            
             filtered_props = [p for p in props if p.get('area') == sel_area and p.get('property_id')] if sel_area != "-- 選択 --" else []
+            
+            if search_query:
+                filtered_props = [p for p in filtered_props if search_query in p.get('property_name', '')]
+                
             opts = [{"property_id": None, "property_name": "-- 選択 --"}] + filtered_props
             idx = next((i for i, p in enumerate(opts) if p.get('property_id') == st.session_state.pre_selected_prop), 0)
             
-            st.markdown("<p style='color:gray; font-size:12px; margin-bottom:0;'>💡 文字を入力するとリストを検索できます</p>", unsafe_allow_html=True)
+            st.markdown("<p style='color:gray; font-size:12px; margin-bottom:0;'>💡 文字を入力するか、上の検索バーで絞り込めます</p>", unsafe_allow_html=True)
             target = st.selectbox("物件を選択", opts, index=idx, format_func=lambda x: x.get('property_name', '不明'))
             ins_type = st.selectbox("検査種類を選択", INSP_OPTS)
             
@@ -516,6 +591,12 @@ def main():
             if not isinstance(cb, dict): cb = {}
             c_name = cb.get('name', ''); c_type = cb.get('type', ''); c_id = cb.get('id', ''); c_prop_id = cb.get('prop_id', ''); c_inspector = cb.get('inspector', '')
             st.subheader(f"{c_name} / {c_type}")
+
+            cb_data = cb.copy()
+            cb_data['prev_floor'] = st.session_state.prev_floor
+            cb_data['prev_area'] = st.session_state.prev_area
+            json_str = json.dumps(cb_data, ensure_ascii=False)
+            components.html(f"<script>localStorage.setItem('felix_session', JSON.stringify({json_str}));</script>", height=0)
             
             if st.session_state.get("edit_saved_records"):
                 st.markdown("#### ✏️ 今回保存した指摘データの確認・修正")
@@ -531,7 +612,8 @@ def main():
                         if sel_floor != "すべて表示":
                             saved_recs = [r for r in saved_recs if r.get('floor_level') == sel_floor]
                 
-                edit_w_opts = WORK_OPTS_KIKAN if c_type.startswith("【検査機関】") else WORK_OPTS_SHANAI if c_type in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if c_type == "躯体検査" else WORK_OPTS_HAIKIN if c_type == "配筋検査" else WORK_OPTS_CHUKAN if c_type == "中間検査" else WORK_OPTS_STANDARD
+                # 🌟 断熱検査のリスト分岐追加
+                edit_w_opts = WORK_OPTS_KIKAN if c_type.startswith("【検査機関】") else WORK_OPTS_SHANAI if c_type in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if c_type == "躯体検査" else WORK_OPTS_HAIKIN if c_type == "配筋検査" else WORK_OPTS_CHUKAN if c_type == "中間検査" else WORK_OPTS_DANNETSU if c_type == "断熱検査" else WORK_OPTS_STANDARD
 
                 saved_recs = sort_records(saved_recs)
 
@@ -554,13 +636,15 @@ def main():
                             new_f = floor; new_a = area; sel_temp = None; default_w = ""
                             if not c_type.startswith("【検査機関】"):
                                 a_opts = AREA_OPTS_SHANAI if c_type in SHANAI_KENSA_TYPES else AREA_OPTS_STANDARD
-                                if c_type not in ["配筋検査", "躯体検査", "中間検査"]:
+                                # 🌟 断熱検査を全邸対応に修正
+                                if c_type not in ["配筋検査", "躯体検査", "断熱検査", "中間検査"]:
                                     f_idx = FLOOR_OPTS[1:].index(floor) if floor in FLOOR_OPTS[1:] else 0
                                     new_f = st.radio("階層を変更", FLOOR_OPTS[1:], index=f_idx, horizontal=True, key=f"ef_{rec_id}")
                                     a_idx = a_opts[1:].index(area) if area in a_opts[1:] else 0
                                     new_a = st.radio("部位を変更", a_opts[1:], index=a_idx, horizontal=True, key=f"ea_{rec_id}")
                                 
-                                cat_dict = ISSUE_TEMPLATES.get(c_type, {}) if c_type in ["配筋検査", "躯体検査", "中間検査"] else ISSUE_TEMPLATES.get("社内検査(設計)", {}).get(new_a, {}) if c_type in SHANAI_KENSA_TYPES else {}
+                                # 🌟 断熱検査のテンプレート呼び出し修正
+                                cat_dict = ISSUE_TEMPLATES.get(c_type, {}) if c_type in ["配筋検査", "躯体検査", "断熱検査", "中間検査"] else ISSUE_TEMPLATES.get("社内検査(設計)", {}).get(new_a, {}) if c_type in SHANAI_KENSA_TYPES else {}
                                 if not isinstance(cat_dict, dict): cat_dict = {}
                                 cat_keys = list(cat_dict.keys())
                                 sel_cat = st.radio("分類を変更（A列）", cat_keys, horizontal=True, key=f"ecat_{rec_id}") if cat_keys else None
@@ -630,16 +714,19 @@ def main():
                 else:
                     f = "一式"; a = "全体"; default_w = ""
                     area_opts = AREA_OPTS_SHANAI if c_type in SHANAI_KENSA_TYPES else AREA_OPTS_STANDARD
-                    work_opts = WORK_OPTS_SHANAI if c_type in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if c_type == "躯体検査" else WORK_OPTS_HAIKIN if c_type == "配筋検査" else WORK_OPTS_CHUKAN if c_type == "中間検査" else WORK_OPTS_STANDARD
+                    # 🌟 断熱検査のリスト分岐追加
+                    work_opts = WORK_OPTS_SHANAI if c_type in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if c_type == "躯体検査" else WORK_OPTS_HAIKIN if c_type == "配筋検査" else WORK_OPTS_CHUKAN if c_type == "中間検査" else WORK_OPTS_DANNETSU if c_type == "断熱検査" else WORK_OPTS_STANDARD
                     
-                    if c_type not in ["配筋検査", "躯体検査", "中間検査"]:
+                    # 🌟 断熱検査を全邸対応に修正
+                    if c_type not in ["配筋検査", "躯体検査", "断熱検査", "中間検査"]:
                         f_idx = FLOOR_OPTS[1:].index(prev_f) if prev_f in FLOOR_OPTS[1:] else 0
                         f = st.radio("階層を選択", FLOOR_OPTS[1:], index=f_idx, horizontal=True)
                         
                         a_idx = area_opts[1:].index(prev_a) if prev_a in area_opts[1:] else 0
                         a = st.radio("部位を選択", area_opts[1:], index=a_idx, horizontal=True)
                     
-                    cat_dict = ISSUE_TEMPLATES.get(c_type, {}) if c_type in ["配筋検査", "躯体検査", "中間検査"] else ISSUE_TEMPLATES.get("社内検査(設計)", {}).get(a, {}) if c_type in SHANAI_KENSA_TYPES else {}
+                    # 🌟 断熱検査のテンプレート呼び出し修正
+                    cat_dict = ISSUE_TEMPLATES.get(c_type, {}) if c_type in ["配筋検査", "躯体検査", "断熱検査", "中間検査"] else ISSUE_TEMPLATES.get("社内検査(設計)", {}).get(a, {}) if c_type in SHANAI_KENSA_TYPES else {}
                     if not isinstance(cat_dict, dict): cat_dict = {}
                     cat_keys = list(cat_dict.keys())
                     sel_cat = st.radio("分類を選択（A列）", cat_keys, horizontal=True) if cat_keys else None
@@ -716,6 +803,9 @@ def main():
         
         sel_area = st.radio("📍 表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key="area_verify")
         t_area = sel_area if sel_area != "すべて表示" else None
+
+        # 🌟 検索バーの追加（確認画面）
+        search_verify = st.text_input("🔍 物件名で検索（一部入力でも可）", key="search_verify")
         
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status&progress_status=eq.確認待ち")
         all_ins = db_get("inspections", "select=*")
@@ -734,7 +824,10 @@ def main():
                 if p not in tree: tree[p] = {}
                 tree[p][t] = tree[p].get(t, 0) + 1
         
-        if not tree: st.info("現在、確認待ちの検査はありません。")
+        if search_verify:
+            tree = {k: v for k, v in tree.items() if search_verify in k}
+
+        if not tree: st.info("現在、該当する確認待ちの検査はありません。")
                 
         for p_idx, (p_name, types) in enumerate(tree.items()):
             with st.expander(p_name):
@@ -770,7 +863,8 @@ def main():
                     st.success("一括承認が完了しました！協力業者へ表示されます。"); st.session_state.drill_target = None; st.session_state.cached_records = None; st.rerun()
                 st.markdown("---")
                 
-                edit_w_opts = WORK_OPTS_KIKAN if type_val.startswith("【検査機関】") else WORK_OPTS_SHANAI if type_val in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if type_val == "躯体検査" else WORK_OPTS_HAIKIN if type_val == "配筋検査" else WORK_OPTS_CHUKAN if type_val == "中間検査" else WORK_OPTS_STANDARD
+                # 🌟 断熱検査のリスト分岐追加
+                edit_w_opts = WORK_OPTS_KIKAN if type_val.startswith("【検査機関】") else WORK_OPTS_SHANAI if type_val in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if type_val == "躯体検査" else WORK_OPTS_HAIKIN if type_val == "配筋検査" else WORK_OPTS_CHUKAN if type_val == "中間検査" else WORK_OPTS_DANNETSU if type_val == "断熱検査" else WORK_OPTS_STANDARD
                 edit_a_opts = AREA_OPTS_SHANAI if type_val in SHANAI_KENSA_TYPES else AREA_OPTS_STANDARD
 
                 recs = sort_records(recs)
@@ -837,7 +931,7 @@ def main():
 
 
     # ----------------------------------------
-    # 🌟 メニュー: 4-A. 是正実施（協力業者専用）※旧仕様に戻す！
+    # メニュー: 4-A. 是正実施（協力業者専用）
     # ----------------------------------------
     elif st.session_state.active_menu == "是正実施（協力業者）":
         st.header("是正実施")
@@ -848,6 +942,9 @@ def main():
         else:
             st.warning("⚠️ URLにエリア指定がありません。正しいURLからアクセスしてください。")
             t_area = None
+
+        # 🌟 検索バーの追加（是正実施画面）
+        search_fix = st.text_input("🔍 物件名で検索（一部入力でも可）", key="search_fix")
 
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status")
         all_ins = db_get("inspections", "select=*")
@@ -875,6 +972,9 @@ def main():
                 elif p_stat == "是正確認中": tree_counts[p][t]["wait_conf"] += 1; tree_counts[p][t]["unres"] += 1
                 elif p_stat == "是正待ち": tree_counts[p][t]["wait_fix"] += 1; tree_counts[p][t]["unres"] += 1
                 else: tree_counts[p][t]["unres"] += 1
+
+        if search_fix:
+            tree = {k: v for k, v in tree.items() if search_fix in k}
                 
         sel = st.session_state.drill_target
         if not isinstance(sel, dict): sel = {}
@@ -895,7 +995,7 @@ def main():
                             if t_cols[0].button(t_name, key=f"f_{p_idx}_{t_idx}", use_container_width=True):
                                 st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
                             t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#555;'>{badge_text}</span></div>", unsafe_allow_html=True)
-            if not has_visible_items: st.info("対象の項目はありません。")
+            if not has_visible_items: st.info("該当する対応が必要な項目はありません。")
         
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
@@ -917,7 +1017,6 @@ def main():
                     if sel_floor != "すべて表示":
                         recs = [r for r in recs if r.get('floor_level') == sel_floor]
                 
-                # 🌟 協力業者は「工種」のみでグループ化（見やすさ優先）
                 w_groups = {}
                 for r in recs:
                     if not isinstance(r, dict): continue
@@ -974,13 +1073,16 @@ def main():
 
 
     # ----------------------------------------
-    # 🌟 メニュー: 4-B. 是正ダッシュボード（管理者用）
+    # メニュー: 4-B. 是正ダッシュボード（管理者用）
     # ----------------------------------------
     elif st.session_state.active_menu == "是正ダッシュボード（管理者用）":
         st.header("是正ダッシュボード（確認・実施）")
         
         sel_area = st.radio("📍 表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key="area_dash")
         t_area = sel_area if sel_area != "すべて表示" else None
+
+        # 🌟 検索バーの追加（管理者ダッシュボード画面）
+        search_dash = st.text_input("🔍 物件名で検索（一部入力でも可）", key="search_dash_admin")
 
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status&progress_status=in.(是正待ち,是正確認中)")
         all_ins = db_get("inspections", "select=*")
@@ -1006,6 +1108,9 @@ def main():
                 if p_stat == "是正待ち": tree_counts[p][t]["wait_fix"] += 1
                 elif p_stat == "是正確認中": tree_counts[p][t]["wait_conf"] += 1
                 
+        if search_dash:
+            tree = {k: v for k, v in tree.items() if search_dash in k}
+
         sel = st.session_state.drill_target
         if not isinstance(sel, dict): sel = {}
         prop_val = sel.get('prop', ''); type_val = sel.get('type', '')
@@ -1024,7 +1129,7 @@ def main():
                             if t_cols[0].button(t_name, key=f"d_{p_idx}_{t_idx}", use_container_width=True):
                                 st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
                             t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#E74C3C;'>{badge_text}</span></div>", unsafe_allow_html=True)
-            if not has_visible_items: st.info("現在、対応が必要な項目はありません！🎉")
+            if not has_visible_items: st.info("現在、該当する対応が必要な項目はありません！🎉")
         
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
@@ -1042,7 +1147,6 @@ def main():
                     if sel_floor != "すべて表示":
                         recs = [r for r in recs if r.get('floor_level') == sel_floor]
                 
-                # 管理者は「部位ごと（部屋順）」に表示する
                 recs = sort_records(recs)
                 area_groups = {}
                 for r in recs:
@@ -1053,7 +1157,8 @@ def main():
                     if a not in area_groups: area_groups[a] = []
                     area_groups[a].append(r)
                 
-                edit_w_opts = WORK_OPTS_KIKAN if type_val.startswith("【検査機関】") else WORK_OPTS_SHANAI if type_val in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if type_val == "躯体検査" else WORK_OPTS_HAIKIN if type_val == "配筋検査" else WORK_OPTS_CHUKAN if type_val == "中間検査" else WORK_OPTS_STANDARD
+                # 🌟 断熱検査のリスト分岐追加
+                edit_w_opts = WORK_OPTS_KIKAN if type_val.startswith("【検査機関】") else WORK_OPTS_SHANAI if type_val in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if type_val == "躯体検査" else WORK_OPTS_HAIKIN if type_val == "配筋検査" else WORK_OPTS_CHUKAN if type_val == "中間検査" else WORK_OPTS_DANNETSU if type_val == "断熱検査" else WORK_OPTS_STANDARD
 
                 for a_name, a_recs in area_groups.items():
                     st.subheader(f"📍 部位: {a_name}")
@@ -1137,7 +1242,6 @@ def main():
                                         
                             st.markdown('</div>', unsafe_allow_html=True)
 
-                # 🌟 写真提出済みのみ一括承認ボタン復活
                 conf_recs = [r for r in recs if r.get('progress_status') == '是正確認中' and r.get('record_id') not in st.session_state.skip_render_ids]
                 if conf_recs:
                     st.markdown("<br><br>", unsafe_allow_html=True)
@@ -1173,6 +1277,9 @@ def main():
             sel_area = st.radio("📍 表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key="area_done")
             t_area = sel_area if sel_area != "すべて表示" else None
         
+        # 🌟 検索バーの追加（完了分一覧画面）
+        search_done = st.text_input("🔍 物件名で検索（一部入力でも可）", key="search_done_list")
+
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status&progress_status=eq.完了")
         all_ins = db_get("inspections", "select=*")
         all_props = db_get("properties", "select=property_id,area")
@@ -1191,6 +1298,9 @@ def main():
                 p = ins.get('property_name', '不明'); t = ins.get('inspection_type', '不明')
                 if p not in tree: tree[p] = {}
                 tree[p][t] = tree[p].get(t, 0) + 1
+                
+        if search_done:
+            tree = {k: v for k, v in tree.items() if search_done in k}
 
         sel = st.session_state.drill_target
         if not isinstance(sel, dict): sel = {}
@@ -1206,7 +1316,7 @@ def main():
                         for t_idx, (t_name, count) in enumerate(types.items()):
                             if st.button(f"{t_name} (完了: {count}件)", key=f"c_{p_idx}_{t_idx}", use_container_width=True):
                                 st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
-            if not has_visible_items: st.info("対象の項目はありません。")
+            if not has_visible_items: st.info("該当する項目はありません。")
 
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
@@ -1291,7 +1401,3 @@ if __name__ == "__main__":
     except Exception as e:
         st.error("システムエラーが発生しました。")
         if st.button("システム復旧"): st.session_state.clear(); st.rerun()
-
-# ==========================================
-# 画面更新のための強制トリガー (2026/06)
-# ==========================================
