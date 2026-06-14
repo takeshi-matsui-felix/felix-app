@@ -15,6 +15,54 @@ import time
 from new_dictionary import ISSUE_TEMPLATES
 
 # ==========================================
+# LINE通知設定（東海・関東の出し分け）
+# ==========================================
+LINE_CHANNEL_ACCESS_TOKEN = "IqpDy1/OlcfW34pKSF7AXFJSvZ1MM7WpX81wXxwGV/PasCjuQCv33keiCNmucETGgQ2R6IbbxQJDYKoUSiH+i2a+pgKaTJjwawe6u0XdRDxKdQtnOu2pfv9zMcL9mqICMFl6yrapvoJTeL+onHiRSgdB04t89/1O/w1cDnyilFU="
+
+# 🚨 Webhook.siteで取得した「Cから始まる33桁のグループID」をここに貼り付けてください
+LINE_GROUP_ID_TOKAI = "ここに東海グループのIDを貼り付けてください"
+LINE_GROUP_ID_KANTO = "ここに関東グループのIDを貼り付けてください"
+
+def send_line_denial_notification(area, prop_name, insp_type, reason):
+    """否認時のみ指定エリアのLINEグループへ一方通行で通知する関数"""
+    target_group = LINE_GROUP_ID_TOKAI if area == "東海エリア" else LINE_GROUP_ID_KANTO
+    
+    # グループIDが初期値のまま、または未設定の場合は通知をスキップ
+    if "貼り付けてください" in target_group or not target_group.startswith("C"):
+        return
+        
+    url = "https://api.line.me/v2/bot/message/push"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"
+    }
+    
+    # 協力業者のURLも東海と関東で自動出し分け
+    area_param = "tokai" if area == "東海エリア" else "kanto"
+    partner_url = f"https://felix-app.streamlit.app/?mode=partner&area={area_param}"
+    
+    # アイコンや絵文字を一切使わない、スマートなテキスト通知
+    text = (
+        "[是正差し戻し通知]\n\n"
+        f"対象の指摘に否認（差し戻し）が発生しました。内容を確認し、再是正をお願いします。\n\n"
+        f"■物件名: {prop_name}\n"
+        f"■検査名: {insp_type}\n"
+        f"■否認理由: {reason}\n\n"
+        f"確認および再是正写真の提出は、以下のURLから行ってください。\n"
+        f"{partner_url}"
+    )
+    
+    payload = {
+        "to": target_group,
+        "messages": [{"type": "text", "text": text}]
+    }
+    
+    try:
+        requests.post(url, headers=headers, json=payload, timeout=10)
+    except Exception:
+        pass
+
+# ==========================================
 # 1. Supabase 接続設定 ＆ キャッシュ機構（AM3:00クリア対応）
 # ==========================================
 SUPABASE_URL = "https://vzuzeymvyftmfuaxrvtb.supabase.co"
@@ -125,10 +173,10 @@ def bg_patch_record(rec_id, photo_b64, up_data):
     db_patch("inspection_records", rec_id, up_data)
 
 # ==========================================
-# 🌟 物件・指摘の並び替えアルゴリズム
+# 物件・指摘の並び替えアルゴリズム
 # ==========================================
 AREA_ORDER = ["玄関", "トイレ", "キッチン", "バルコニー", "LDK", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
-WORK_ORDER = ["A.リペア", "B.清掃", "C.クロス", "D.造作", "E.水道", "F.電気", "G.キッチン", "H.サッシ", "I.外壁", "J.外構", "K.コーキング", "L.ガス", "板金", "Z.その他"]
+WORK_ORDER = ["A.リペア", "B.清協", "C.クロス", "D.造作", "E.水道", "F.電気", "G.キッチン", "H.サッシ", "I.外壁", "J.外構", "K.コーキング", "L.ガス", "板金", "Z.その他"]
 
 def sort_records(records):
     def get_sort_key(r):
@@ -148,7 +196,7 @@ def sort_properties_by_handover(props_list):
     return sorted(props_list, key=get_handover_key)
 
 # ==========================================
-# 📱 2. スマート電子黒板カメラ (アイコン排除)
+# 2. スマート電子黒板カメラ
 # ==========================================
 SMART_CAMERA_HTML = """<!DOCTYPE html>
 <html lang="ja">
@@ -272,7 +320,7 @@ st.markdown("""
     .record-box { border-bottom: 2px solid #EEEEEE; padding-bottom: 20px; margin-bottom: 20px; }
     .badge-wrap { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: bold; margin-left: 5px; color: #d93025; }
     
-    /* 印刷時の設定：レポートの中身以外を跡形もなく消す */
+    /* 印刷時の設定：レポートの中身以外を消去 */
     @media print {
         .stButton, .stTextInput, .stRadio, .stSelectbox, .stCheckbox, [data-testid="stExpander"] { display: none !important; }
         .admin-delete-box, hr { display: none !important; }
@@ -366,7 +414,7 @@ def main():
         
     if st.session_state.active_menu not in menu_opts: st.session_state.active_menu = menu_opts[0]
     
-    # 🌟 プランB: 上部アコーディオンメニュー (自動で閉じる)
+    # プランB: 上部アコーディオンメニュー (自動で閉じる)
     with st.expander(f"メニューを開く (現在のユーザー: {st.session_state.role})", expanded=False):
         selected_menu = st.radio("移動先を選択", menu_opts, index=menu_opts.index(st.session_state.active_menu), format_func=format_menu, label_visibility="collapsed")
         
@@ -970,14 +1018,14 @@ def main():
                             if t_cols[0].button(t_name, key=f"f_{p_idx}_{t_idx}", use_container_width=True):
                                 st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
                             t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#555;'>{badge_text}</span></div>", unsafe_allow_html=True)
-            if not has_visible_items: st.info("該当する対応が必要な項目はありません。")
+            if not has_visible_items: st.info("該当する対応必要項目はありません。")
         
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
             
             cb_data = {"prop": prop_val, "type": type_val}
             json_str = json.dumps(cb_data, ensure_ascii=False)
-            components.html(f"<script>localStorage.setItem('felix_partner_session', JSON.stringify({json_str}));</script>", height=0)
+            components.html(f"<script>localStorage.setItem(\"felix_partner_session\", JSON.stringify({json_str}));</script>", height=0)
 
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
             if t_ids:
@@ -1046,10 +1094,10 @@ def main():
 
 
     # ----------------------------------------
-    # メニュー: 4-B. 是正ダッシュボード（管理者用）
+    # メメニュー: 4-B. 是正ダッシュボード（管理者用）
     # ----------------------------------------
     elif st.session_state.active_menu == "定期的是正ダッシュボード（管理者用）":
-        st.header("是正ダッシュボード（確認・実施）")
+        st.header("定是正ダッシュボード（確認・実施）")
         sel_area = st.radio("表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key="area_dash")
         t_area = sel_area if sel_area != "すべて表示" else None
         search_dash = st.text_input("物件名で検索（一部入力でも可）", key="search_dash_admin")
@@ -1111,7 +1159,7 @@ def main():
                             if t_cols[0].button(t_name, key=f"d_{p_idx}_{t_idx}", use_container_width=True):
                                 st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
                             t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#E74C3C;'>{badge_text}</span></div>", unsafe_allow_html=True)
-            if not has_visible_items: st.info("現在、該当する対応が必要な項目はありません。")
+            if not has_visible_items: st.info("現在、該当する対応必要項目はありません。")
         
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
@@ -1183,7 +1231,7 @@ def main():
                                 else: st.write("写真なし")
                             with c2:
                                 if p_stat == "是正待ち":
-                                    st.markdown("**【是正写真を撮影（After）】**")
+                                    st.markdown("**【定是正写真を撮影（After）】**")
                                     loc_str = f"{floor} {area} {w}".strip()
                                     disp_d = detail[:80] + "..." if len(detail)>80 else detail
                                     up = _smart_camera(propName=prop_val, inspType=type_val, inspDate=datetime.date.today().strftime("%Y/%m/%d"), locationText=loc_str, issueDetail=disp_d, mode="fix", key=f"fix_cam_{rec_id}")
@@ -1205,8 +1253,15 @@ def main():
                                         st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                         st.session_state.skip_render_ids.append(rec_id); st.rerun()
                                     reason = cb.text_input("否認理由を入力", key=f"re_{rec_id}", label_visibility="collapsed", placeholder="否認理由があれば入力")
+                                    
+                                    # ❌ 否認（差し戻し）ボタンが押された時の処理
                                     if cb.button("否認（差し戻し）", key=f"ng_{rec_id}"): 
                                         db_patch("inspection_records", rec_id, {"progress_status": "是正待ち", "reject_reason": reason})
+                                        
+                                        # 🌟 物件のエリアを特定し、指定エリアのLINEグループへ非同期で否認理由を自動通知
+                                        p_area = prop_area_map.get(r.get('property_id'), '東海エリア')
+                                        threading.Thread(target=send_line_denial_notification, args=(p_area, prop_val, type_val, reason)).start()
+                                        
                                         st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                         st.session_state.skip_render_ids.append(rec_id); st.rerun()
                             st.markdown('</div>', unsafe_allow_html=True)
