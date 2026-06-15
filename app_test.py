@@ -37,13 +37,13 @@ def send_line_denial_notification(area, prop_name, insp_type, work_type, loc_are
         "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"
     }
     
-    # 協力業者のURLも東海と関東で自動出し分け
+    # 協力業者のURLを松井様の本物URLで自動出し分け
     area_param = "tokai" if area == "東海エリア" else "kanto"
-    partner_url = f"https://felix-app.streamlit.app/?mode=partner&area={area_param}"
+    partner_url = f"https://felix-app-prbmr4ghbjai7n7hzfyahj.streamlit.app/?mode=partner&area={area_param}"
     
     # 現場に必要な情報をすべて盛り込んだスマートなテキスト通知
     text = (
-        "[是正差し戻し通知]\n\n"
+        "[定是正差し戻し通知]\n\n"
         f"対象の指摘に否認（差し戻し）が発生しました。内容を確認し、再是正をお願いします。\n\n"
         f"■物件名: {prop_name}\n"
         f"■検査名: {insp_type}\n"
@@ -411,10 +411,8 @@ def main():
         return m
 
     if st.session_state.role == "admin":
-        # 🌟 「是正ダッシュボード」に名称変更
         menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
     else:
-        # 🌟 「是正実施」に名称変更
         menu_opts = ["ホーム", "是正実施（協力業者）", "完了分一覧（共通）"]
         
     if st.session_state.active_menu not in menu_opts: st.session_state.active_menu = menu_opts[0]
@@ -785,7 +783,7 @@ def main():
                 else: final_desc = (sel_temp + ("：" + desc.strip() if desc.strip() != "" else "")) if sel_temp else desc.strip()
                 
                 loc_parts = [str(f), str(a)]
-                if not c_type.startswith("【検査機関】") and sel_cat: loc_parts.append(str(sel_cat))
+                if not r_type.startswith("【検査機関】") and sel_cat: loc_parts.append(str(sel_cat))
                 loc_str = " ".join(loc_parts).strip()
                 disp_desc = final_desc[:80] + "..." if len(final_desc) > 80 else final_desc
 
@@ -1099,10 +1097,10 @@ def main():
 
 
     # ----------------------------------------
-    # メメニュー: 4-B. 是正ダッシュボード（管理者用）
+    # メニュー: 4-B. 是正ダッシュボード（管理者用）
     # ----------------------------------------
     elif st.session_state.active_menu == "是正ダッシュボード（管理者用）":
-        st.header("是正ダッシュボード（確認・実施）")
+        st.header("定是正ダッシュボード（確認・実施）")
         sel_area = st.radio("表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key="area_dash")
         t_area = sel_area if sel_area != "すべて表示" else None
         search_dash = st.text_input("物件名で検索（一部入力でも可）", key="search_dash_admin")
@@ -1271,7 +1269,7 @@ def main():
                                         st.session_state.skip_render_ids.append(rec_id); st.rerun()
                             st.markdown('</div>', unsafe_allow_html=True)
 
-                conf_recs = [r for r in recs if r.get('progress_status') == '是正確認中' and r.get('record_id') not in st.session_state.skip_render_ids]
+                conf_recs = [r for r in recs if r.get('progress_status') == '定是正確認中' and r.get('record_id') not in st.session_state.skip_render_ids]
                 if conf_recs:
                     st.markdown("<br><br>", unsafe_allow_html=True)
                     if not st.session_state.get("show_bulk_confirm"):
