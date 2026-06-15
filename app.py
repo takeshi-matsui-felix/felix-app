@@ -125,7 +125,7 @@ def bg_patch_record(rec_id, photo_b64, up_data):
     db_patch("inspection_records", rec_id, up_data)
 
 # ==========================================
-# 🌟 物件・指摘の並び替えアルゴリズム
+# 物件・指摘の並び替えアルゴリズム
 # ==========================================
 AREA_ORDER = ["玄関", "トイレ", "キッチン", "バルコニー", "LDK", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
 WORK_ORDER = ["A.リペア", "B.清掃", "C.クロス", "D.造作", "E.水道", "F.電気", "G.キッチン", "H.サッシ", "I.外壁", "J.外構", "K.コーキング", "L.ガス", "板金", "Z.その他"]
@@ -148,7 +148,7 @@ def sort_properties_by_handover(props_list):
     return sorted(props_list, key=get_handover_key)
 
 # ==========================================
-# 📱 2. スマート電子黒板カメラ (アイコン排除)
+# 2. スマート電子黒板カメラ
 # ==========================================
 SMART_CAMERA_HTML = """<!DOCTYPE html>
 <html lang="ja">
@@ -272,7 +272,7 @@ st.markdown("""
     .record-box { border-bottom: 2px solid #EEEEEE; padding-bottom: 20px; margin-bottom: 20px; }
     .badge-wrap { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: bold; margin-left: 5px; color: #d93025; }
     
-    /* 印刷時の設定：レポートの中身以外を跡形もなく消す */
+    /* 印刷時の設定：レポートの中身以外を消去 */
     @media print {
         .stButton, .stTextInput, .stRadio, .stSelectbox, .stCheckbox, [data-testid="stExpander"] { display: none !important; }
         .admin-delete-box, hr { display: none !important; }
@@ -360,13 +360,13 @@ def main():
         return m
 
     if st.session_state.role == "admin":
-        menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "定期的是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
+        menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
     else:
-        menu_opts = ["ホーム", "定期的是正実施（協力業者）", "完了分一覧（共通）"]
+        menu_opts = ["ホーム", "是正実施（協力業者）", "完了分一覧（共通）"]
         
     if st.session_state.active_menu not in menu_opts: st.session_state.active_menu = menu_opts[0]
     
-    # 🌟 プランB: 上部アコーディオンメニュー (自動で閉じる)
+    # 上部アコーディオンメニュー
     with st.expander(f"メニューを開く (現在のユーザー: {st.session_state.role})", expanded=False):
         selected_menu = st.radio("移動先を選択", menu_opts, index=menu_opts.index(st.session_state.active_menu), format_func=format_menu, label_visibility="collapsed")
         
@@ -379,7 +379,7 @@ def main():
         jump_to_menu(selected_menu, st.session_state.pre_selected_prop)
 
     # ----------------------------------------
-    # メニュー: 0. ホーム
+    # メメニュー: 0. ホーム
     # ----------------------------------------
     if st.session_state.active_menu == "ホーム":
         if not st.session_state.splash_done:
@@ -448,7 +448,7 @@ def main():
             
             if res:
                 if res.get('action') == 'new':
-                    st.session_state.active_menu = "検査実施（管理者）" if role == "admin" else "定期的是正実施（協力業者）"
+                    st.session_state.active_menu = "検査実施（管理者）" if role == "admin" else "是正実施（協力業者）"
                     st.session_state.current_box = None; st.session_state.drill_target = None; st.rerun()
                 elif res.get('action') == 'resume' and res.get('data'):
                     d = res['data']
@@ -457,7 +457,7 @@ def main():
                         st.session_state.current_box = {"id": d.get('id', str(uuid.uuid4())), "prop_id": d.get('prop_id'), "name": d.get('name'), "type": d.get('type'), "inspector": d.get('inspector')}
                         st.session_state.prev_floor = d.get('prev_floor'); st.session_state.prev_area = d.get('prev_area')
                     else:
-                        st.session_state.active_menu = "定期的是正実施（協力業者）"
+                        st.session_state.active_menu = "是正実施（協力業者）"
                         st.session_state.drill_target = {"prop": d.get('prop'), "type": d.get('type')}
                     st.rerun()
 
@@ -747,15 +747,16 @@ def main():
                     active_photo = st.session_state.temp_photo
                     if w and final_desc != "" and active_photo is not None:
                         initial_status = "確認待ち" if c_inspector == "工事監理チーム" else "是正待ち"
+                        # 🌟 新しい列 line_notified を初期値 False で追加
                         record_data = {
                             "record_id": str(uuid.uuid4()), "inspection_id": c_id, "property_id": c_prop_id, 
                             "floor_level": f, "area": a, "work_type": w, "issue_detail": final_desc, 
-                            "progress_status": initial_status
+                            "progress_status": initial_status, "line_notified": False
                         }
                         threading.Thread(target=bg_save_inspection, args=(active_photo, record_data)).start()
                         st.session_state.issue_saved = True; st.session_state.temp_photo = None
                         st.session_state.prev_floor = f; st.session_state.prev_area = a; st.rerun()
-                    else: st.error("工種・内容・写真はすべて必須です（写真が『セット完了』になるまでお待ちください）")
+                    else: st.error("工種・内容・写真はすべて必須です")
                 
                 if st.button("終了"): st.session_state.current_box = None; st.session_state.temp_photo = None; st.session_state.prev_floor = None; st.session_state.prev_area = None; st.rerun()
 
@@ -900,7 +901,7 @@ def main():
     # ----------------------------------------
     # メニュー: 4-A. 是正実施（協力業者専用）
     # ----------------------------------------
-    elif st.session_state.active_menu == "定期的是正実施（協力業者）":
+    elif st.session_state.active_menu == "是正実施（協力業者）":
         st.header("是正実施")
         if st.session_state.target_area:
             st.success(f"現在の表示エリア：【 {st.session_state.target_area} 】")
@@ -970,14 +971,14 @@ def main():
                             if t_cols[0].button(t_name, key=f"f_{p_idx}_{t_idx}", use_container_width=True):
                                 st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
                             t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#555;'>{badge_text}</span></div>", unsafe_allow_html=True)
-            if not has_visible_items: st.info("該当する対応が必要な項目はありません。")
+            if not has_visible_items: st.info("該当する対応必要項目はありません。")
         
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
             
             cb_data = {"prop": prop_val, "type": type_val}
             json_str = json.dumps(cb_data, ensure_ascii=False)
-            components.html(f"<script>localStorage.setItem('felix_partner_session', JSON.stringify({json_str}));</script>", height=0)
+            components.html(f"<script>localStorage.setItem(\"felix_partner_session\", JSON.stringify({json_str}));</script>", height=0)
 
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
             if t_ids:
@@ -1048,7 +1049,7 @@ def main():
     # ----------------------------------------
     # メニュー: 4-B. 是正ダッシュボード（管理者用）
     # ----------------------------------------
-    elif st.session_state.active_menu == "定期的是正ダッシュボード（管理者用）":
+    elif st.session_state.active_menu == "是正ダッシュボード（管理者用）":
         st.header("是正ダッシュボード（確認・実施）")
         sel_area = st.radio("表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key="area_dash")
         t_area = sel_area if sel_area != "すべて表示" else None
@@ -1111,7 +1112,7 @@ def main():
                             if t_cols[0].button(t_name, key=f"d_{p_idx}_{t_idx}", use_container_width=True):
                                 st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
                             t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#E74C3C;'>{badge_text}</span></div>", unsafe_allow_html=True)
-            if not has_visible_items: st.info("現在、該当する対応が必要な項目はありません。")
+            if not has_visible_items: st.info("現在、該当する対応必要項目はありません。")
         
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
@@ -1197,7 +1198,7 @@ def main():
                                         else: st.error("写真をセットしてください")
                                     if up: st.image(up, width=250)
                                 elif p_stat == "是正確認中":
-                                    st.markdown("**【是正写真（After）】**")
+                                    st.markdown("**【是正写真（After）**")
                                     if f_photo: st.markdown(f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
                                     ca, cb = st.columns(2)
                                     if ca.button("承認（完了へ）", key=f"ok_{rec_id}", type="primary"): 
@@ -1205,8 +1206,16 @@ def main():
                                         st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                         st.session_state.skip_render_ids.append(rec_id); st.rerun()
                                     reason = cb.text_input("否認理由を入力", key=f"re_{rec_id}", label_visibility="collapsed", placeholder="否認理由があれば入力")
+                                    
+                                    # ❌ 否認（差し戻し）ボタンが押された時の処理
                                     if cb.button("否認（差し戻し）", key=f"ng_{rec_id}"): 
-                                        db_patch("inspection_records", rec_id, {"progress_status": "是正待ち", "reject_reason": reason})
+                                        # 🌟 アプリ側からの即時LINE通知を完全に撤廃。
+                                        # 🌟 金庫（Supabase）に「是正待ち」「否認理由」を書き込み、line_notified=False（未送信状態）にして保存。
+                                        db_patch("inspection_records", rec_id, {
+                                            "progress_status": "是正待ち", 
+                                            "reject_reason": reason,
+                                            "line_notified": False
+                                        })
                                         st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                         st.session_state.skip_render_ids.append(rec_id); st.rerun()
                             st.markdown('</div>', unsafe_allow_html=True)
@@ -1238,7 +1247,6 @@ def main():
         if not isinstance(sel, dict): sel = {}
         prop_val = sel.get('prop', ''); type_val = sel.get('type', '')
         
-        # レポート詳細画面を開いていない時だけ「一覧系のUI」を表示する
         if not (prop_val and type_val):
             st.header("完了分一覧")
             if st.session_state.role == "partner":
@@ -1289,7 +1297,6 @@ def main():
                                 st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
             if not has_visible_items: st.info("該当する項目はありません。")
 
-        # レポート詳細画面を開いた時の処理
         if prop_val and type_val:
             target_id_str = f"done_{prop_val}_{type_val}"
             
@@ -1329,7 +1336,6 @@ def main():
                         else: st.error("パスワードが違います")
                     st.markdown("<hr class='admin-delete-box'>", unsafe_allow_html=True)
 
-                # レポート本体の開始
                 st.markdown(f"""<div style="background:white; padding:0; font-family:sans-serif; width:100%;">
                     <div style="text-align:center; margin-bottom:5px; font-size:24px; font-weight:bold;">{prop_val}</div>
                     <div style="text-align:center; margin-top:0; font-size:20px; font-weight:bold;">{type_val} 報告書</div>
