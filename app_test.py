@@ -1117,7 +1117,7 @@ def main():
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
             
-            t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val && i.get('inspection_type') == type_val and i.get('inspection_id')]
+            t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
             if t_ids:
                 if st.session_state.cached_records is None or st.session_state.cached_target_id != target_id_str:
                     recs = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})&progress_status=in.(是正待ち,是正確認中)")
