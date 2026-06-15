@@ -23,11 +23,10 @@ LINE_CHANNEL_ACCESS_TOKEN = "IqpDy1/OlcfW34pKSF7AXFJSvZ1MM7WpX81wXxwGV/PasCjuQCv
 LINE_GROUP_ID_TOKAI = "C6fc8fb79a343fb2e459e3fa5e891e927"
 LINE_GROUP_ID_KANTO = "C440062b549a1165d645f61891503e264"
 
-def send_line_denial_notification(area, prop_name, insp_type, work_type, loc_area, issue_detail, reason):
-    """否認時のみ指定エリアのLINEグループへ一方通行で通知する関数"""
+def send_line_denial_notification(area, prop_name, insp_type, work_type, loc_area, issue_detail, reason, photo_url=None):
+    """否認時のみ指定エリアのLINEグループへテキストと写真を通知する関数"""
     target_group = LINE_GROUP_ID_TOKAI if area == "東海エリア" else LINE_GROUP_ID_KANTO
     
-    # グループIDが初期値のまま、または未設定の場合は通知をスキップ
     if "入れてください" in target_group or not target_group.startswith("C"):
         return
         
@@ -37,13 +36,11 @@ def send_line_denial_notification(area, prop_name, insp_type, work_type, loc_are
         "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"
     }
     
-    # 協力業者のURLを松井様の本物URLで自動出し分け
     area_param = "tokai" if area == "東海エリア" else "kanto"
     partner_url = f"https://felix-app-prbmr4ghbjai7n7hzfyahj.streamlit.app/?mode=partner&area={area_param}"
     
-    # 現場に必要な情報をすべて盛り込んだスマートなテキスト通知
     text = (
-        "[定是正差し戻し通知]\n\n"
+        "[是正差し戻し通知]\n\n"
         f"対象の指摘に否認（差し戻し）が発生しました。内容を確認し、再是正をお願いします。\n\n"
         f"■物件名: {prop_name}\n"
         f"■検査名: {insp_type}\n"
@@ -55,9 +52,20 @@ def send_line_denial_notification(area, prop_name, insp_type, work_type, loc_are
         f"{partner_url}"
     )
     
+    # メッセージの組み立て（テキストは必須）
+    messages = [{"type": "text", "text": text}]
+    
+    # 写真URLが存在する場合は、画像メッセージも追加（1通の送信としてカウントされます）
+    if photo_url and photo_url.startswith("http"):
+        messages.append({
+            "type": "image",
+            "originalContentUrl": photo_url,
+            "previewImageUrl": photo_url
+        })
+    
     payload = {
         "to": target_group,
-        "messages": [{"type": "text", "text": text}]
+        "messages": messages
     }
     
     try:
@@ -334,7 +342,7 @@ st.markdown("""
 
 FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
 AREA_OPTS_STANDARD = ["-- 選択 --", "玄関", "廊下・階段・ENT", "LDK", "キッチン", "洋室", "洗面室", "UB", "トイレ", "バルコニー", "外部", "フリー項目"]
-AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バルコニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
+AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バル কাশী", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
 WORK_OPTS_STANDARD = ["-- 選択 --", "基礎工事(鉄筋)", "基礎工事(型枠)", "フレーミング", "FM", "造作", "内装", "電気", "設備", "ガス", "清掃", "サッシ", "外壁", "外構", "コーキング", "リペア", "その他"]
 WORK_OPTS_HAIKIN = ["-- 選択 --", "基礎工事(鉄筋)", "水道", "ガス", "その他"]
 WORK_OPTS_KUTAI = ["-- 選択 --", "フレーミング", "電気", "水道", "防水", "その他"]
@@ -783,7 +791,7 @@ def main():
                 else: final_desc = (sel_temp + ("：" + desc.strip() if desc.strip() != "" else "")) if sel_temp else desc.strip()
                 
                 loc_parts = [str(f), str(a)]
-                if not r_type.startswith("【検査機関】") and sel_cat: loc_parts.append(str(sel_cat))
+                if not c_type.startswith("【検査機関】") and sel_cat: loc_parts.append(str(sel_cat))
                 loc_str = " ".join(loc_parts).strip()
                 disp_desc = final_desc[:80] + "..." if len(final_desc) > 80 else final_desc
 
@@ -1100,7 +1108,7 @@ def main():
     # メニュー: 4-B. 是正ダッシュボード（管理者用）
     # ----------------------------------------
     elif st.session_state.active_menu == "是正ダッシュボード（管理者用）":
-        st.header("定是正ダッシュボード（確認・実施）")
+        st.header("是正ダッシュボード（確認・実施）")
         sel_area = st.radio("表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key="area_dash")
         t_area = sel_area if sel_area != "すべて表示" else None
         search_dash = st.text_input("物件名で検索（一部入力でも可）", key="search_dash_admin")
@@ -1261,15 +1269,15 @@ def main():
                                     if cb.button("否認（差し戻し）", key=f"ng_{rec_id}"): 
                                         db_patch("inspection_records", rec_id, {"progress_status": "是正待ち", "reject_reason": reason})
                                         
-                                        # 🌟 物件のエリアを特定し、指定エリアのLINEグループへ非同期で否認理由を自動通知
+                                        # 🌟 物件のエリアを特定し、指定エリアのLINEグループへテキストと写真を自動通知
                                         p_area = prop_area_map.get(r.get('property_id'), '東海エリア')
-                                        threading.Thread(target=send_line_denial_notification, args=(p_area, prop_val, type_val, w, area, title, reason)).start()
+                                        threading.Thread(target=send_line_denial_notification, args=(p_area, prop_val, type_val, w, area, title, reason, i_photo)).start()
                                         
                                         st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                         st.session_state.skip_render_ids.append(rec_id); st.rerun()
                             st.markdown('</div>', unsafe_allow_html=True)
 
-                conf_recs = [r for r in recs if r.get('progress_status') == '定是正確認中' and r.get('record_id') not in st.session_state.skip_render_ids]
+                conf_recs = [r for r in recs if r.get('progress_status') == '是正確認中' and r.get('record_id') not in st.session_state.skip_render_ids]
                 if conf_recs:
                     st.markdown("<br><br>", unsafe_allow_html=True)
                     if not st.session_state.get("show_bulk_confirm"):
