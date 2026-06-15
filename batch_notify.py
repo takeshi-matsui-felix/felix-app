@@ -67,8 +67,8 @@ def main():
         detail = r.get('issue_detail', '')
         reason = r.get('reject_reason', 'なし')
         
-        # 否認理由が空の場合は表示を調整
-        reason_text = f"\n(否認理由: {reason})" if reason and reason != "なし" else ""
+        # 🌟 否認理由のカッコを外し、目立つ赤い絵文字を追加
+        reason_text = f"\n🚨 否認理由: {reason}" if reason and reason != "なし" else ""
         issue_text = f"・{w_type} / {a_name}\n「{detail}」{reason_text}"
 
         target_dict = tokai_issues if area == "東海エリア" else kanto_issues
@@ -83,7 +83,6 @@ def main():
         text = "[本日の是正差し戻し まとめ通知]\n\n"
         for p_name, issues in tokai_issues.items():
             text += f"■物件名: {p_name}\n"
-            # 否認内容の間は1行あけ（\n\n）、物件と物件の間は2行あけ（\n\n\n）
             text += "\n\n".join(issues) + "\n\n\n"
         text += "👇 まとめて再提出はこちらからお願いします\nhttps://felix-app-prbmr4ghbjai7n7hzfyahj.streamlit.app/?mode=partner&area=tokai"
         send_line(LINE_GROUP_ID_TOKAI, text)
