@@ -21,9 +21,9 @@ LINE_CHANNEL_ACCESS_TOKEN = "IqpDy1/OlcfW34pKSF7AXFJSvZ1MM7WpX81wXxwGV/PasCjuQCv
 
 # 🚨 Webhook.siteで取得した「Cから始まる33桁のグループID」
 LINE_GROUP_ID_TOKAI = "C6fc8fb79a343fb2e459e3fa5e891e927"
-LINE_GROUP_ID_KANTO = "ここに関東のグループIDを入れてください"
+LINE_GROUP_ID_KANTO = "C440062b549a1165d645f61891503e264"
 
-def send_line_denial_notification(area, prop_name, insp_type, reason):
+def send_line_denial_notification(area, prop_name, insp_type, work_type, loc_area, issue_detail, reason):
     """否認時のみ指定エリアのLINEグループへ一方通行で通知する関数"""
     target_group = LINE_GROUP_ID_TOKAI if area == "東海エリア" else LINE_GROUP_ID_KANTO
     
@@ -41,12 +41,15 @@ def send_line_denial_notification(area, prop_name, insp_type, reason):
     area_param = "tokai" if area == "東海エリア" else "kanto"
     partner_url = f"https://felix-app.streamlit.app/?mode=partner&area={area_param}"
     
-    # アイコンや絵文字を一切使わない、スマートなテキスト通知
+    # 現場に必要な情報をすべて盛り込んだスマートなテキスト通知
     text = (
         "[是正差し戻し通知]\n\n"
         f"対象の指摘に否認（差し戻し）が発生しました。内容を確認し、再是正をお願いします。\n\n"
         f"■物件名: {prop_name}\n"
         f"■検査名: {insp_type}\n"
+        f"■工種: {work_type}\n"
+        f"■部位: {loc_area}\n"
+        f"■指摘内容: {issue_detail}\n"
         f"■否認理由: {reason}\n\n"
         f"確認および再是正写真の提出は、以下のURLから行ってください。\n"
         f"{partner_url}"
@@ -408,8 +411,10 @@ def main():
         return m
 
     if st.session_state.role == "admin":
+        # 🌟 「是正ダッシュボード」に名称変更
         menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
     else:
+        # 🌟 「是正実施」に名称変更
         menu_opts = ["ホーム", "是正実施（協力業者）", "完了分一覧（共通）"]
         
     if st.session_state.active_menu not in menu_opts: st.session_state.active_menu = menu_opts[0]
@@ -1094,7 +1099,7 @@ def main():
 
 
     # ----------------------------------------
-    # メニュー: 4-B. 是正ダッシュボード（管理者用）
+    # メメニュー: 4-B. 是正ダッシュボード（管理者用）
     # ----------------------------------------
     elif st.session_state.active_menu == "是正ダッシュボード（管理者用）":
         st.header("是正ダッシュボード（確認・実施）")
@@ -1260,7 +1265,7 @@ def main():
                                         
                                         # 🌟 物件のエリアを特定し、指定エリアのLINEグループへ非同期で否認理由を自動通知
                                         p_area = prop_area_map.get(r.get('property_id'), '東海エリア')
-                                        threading.Thread(target=send_line_denial_notification, args=(p_area, prop_val, type_val, reason)).start()
+                                        threading.Thread(target=send_line_denial_notification, args=(p_area, prop_val, type_val, w, area, title, reason)).start()
                                         
                                         st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                         st.session_state.skip_render_ids.append(rec_id); st.rerun()
