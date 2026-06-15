@@ -19,16 +19,16 @@ from new_dictionary import ISSUE_TEMPLATES
 # ==========================================
 LINE_CHANNEL_ACCESS_TOKEN = "IqpDy1/OlcfW34pKSF7AXFJSvZ1MM7WpX81wXxwGV/PasCjuQCv33keiCNmucETGgQ2R6IbbxQJDYKoUSiH+i2a+pgKaTJjwawe6u0XdRDxKdQtnOu2pfv9zMcL9mqICMFl6yrapvoJTeL+onHiRSgdB04t89/1O/w1cDnyilFU="
 
-# 🚨 Webhook.siteで取得した「Cから始まる33桁のグループID」をここに貼り付けてください
-LINE_GROUP_ID_TOKAI = "ここに東海グループのIDを貼り付けてください"
-LINE_GROUP_ID_KANTO = "ここに関東グループのIDを貼り付けてください"
+# 🚨 Webhook.siteで取得した「Cから始まる33桁のグループID」
+LINE_GROUP_ID_TOKAI = "C6fc8fb79a343fb2e459e3fa5e891e927"
+LINE_GROUP_ID_KANTO = "ここに関東のグループIDを入れてください"
 
 def send_line_denial_notification(area, prop_name, insp_type, reason):
     """否認時のみ指定エリアのLINEグループへ一方通行で通知する関数"""
     target_group = LINE_GROUP_ID_TOKAI if area == "東海エリア" else LINE_GROUP_ID_KANTO
     
     # グループIDが初期値のまま、または未設定の場合は通知をスキップ
-    if "貼り付けてください" in target_group or not target_group.startswith("C"):
+    if "入れてください" in target_group or not target_group.startswith("C"):
         return
         
     url = "https://api.line.me/v2/bot/message/push"
@@ -176,7 +176,7 @@ def bg_patch_record(rec_id, photo_b64, up_data):
 # 物件・指摘の並び替えアルゴリズム
 # ==========================================
 AREA_ORDER = ["玄関", "トイレ", "キッチン", "バルコニー", "LDK", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
-WORK_ORDER = ["A.リペア", "B.清協", "C.クロス", "D.造作", "E.水道", "F.電気", "G.キッチン", "H.サッシ", "I.外壁", "J.外構", "K.コーキング", "L.ガス", "板金", "Z.その他"]
+WORK_ORDER = ["A.リペア", "B.清掃", "C.クロス", "D.造作", "E.水道", "F.電気", "G.キッチン", "H.サッシ", "I.外壁", "J.外構", "K.コーキング", "L.ガス", "板金", "Z.その他"]
 
 def sort_records(records):
     def get_sort_key(r):
@@ -408,9 +408,9 @@ def main():
         return m
 
     if st.session_state.role == "admin":
-        menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "定期的是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
+        menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
     else:
-        menu_opts = ["ホーム", "定期的是正実施（協力業者）", "完了分一覧（共通）"]
+        menu_opts = ["ホーム", "是正実施（協力業者）", "完了分一覧（共通）"]
         
     if st.session_state.active_menu not in menu_opts: st.session_state.active_menu = menu_opts[0]
     
@@ -496,7 +496,7 @@ def main():
             
             if res:
                 if res.get('action') == 'new':
-                    st.session_state.active_menu = "検査実施（管理者）" if role == "admin" else "定期的是正実施（協力業者）"
+                    st.session_state.active_menu = "検査実施（管理者）" if role == "admin" else "是正実施（協力業者）"
                     st.session_state.current_box = None; st.session_state.drill_target = None; st.rerun()
                 elif res.get('action') == 'resume' and res.get('data'):
                     d = res['data']
@@ -505,7 +505,7 @@ def main():
                         st.session_state.current_box = {"id": d.get('id', str(uuid.uuid4())), "prop_id": d.get('prop_id'), "name": d.get('name'), "type": d.get('type'), "inspector": d.get('inspector')}
                         st.session_state.prev_floor = d.get('prev_floor'); st.session_state.prev_area = d.get('prev_area')
                     else:
-                        st.session_state.active_menu = "定期的是正実施（協力業者）"
+                        st.session_state.active_menu = "是正実施（協力業者）"
                         st.session_state.drill_target = {"prop": d.get('prop'), "type": d.get('type')}
                     st.rerun()
 
@@ -948,7 +948,7 @@ def main():
     # ----------------------------------------
     # メニュー: 4-A. 是正実施（協力業者専用）
     # ----------------------------------------
-    elif st.session_state.active_menu == "定期的是正実施（協力業者）":
+    elif st.session_state.active_menu == "是正実施（協力業者）":
         st.header("是正実施")
         if st.session_state.target_area:
             st.success(f"現在の表示エリア：【 {st.session_state.target_area} 】")
@@ -1094,10 +1094,10 @@ def main():
 
 
     # ----------------------------------------
-    # メメニュー: 4-B. 是正ダッシュボード（管理者用）
+    # メニュー: 4-B. 是正ダッシュボード（管理者用）
     # ----------------------------------------
-    elif st.session_state.active_menu == "定期的是正ダッシュボード（管理者用）":
-        st.header("定是正ダッシュボード（確認・実施）")
+    elif st.session_state.active_menu == "是正ダッシュボード（管理者用）":
+        st.header("是正ダッシュボード（確認・実施）")
         sel_area = st.radio("表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key="area_dash")
         t_area = sel_area if sel_area != "すべて表示" else None
         search_dash = st.text_input("物件名で検索（一部入力でも可）", key="search_dash_admin")
@@ -1231,7 +1231,7 @@ def main():
                                 else: st.write("写真なし")
                             with c2:
                                 if p_stat == "是正待ち":
-                                    st.markdown("**【定是正写真を撮影（After）】**")
+                                    st.markdown("**【是正写真を撮影（After）】**")
                                     loc_str = f"{floor} {area} {w}".strip()
                                     disp_d = detail[:80] + "..." if len(detail)>80 else detail
                                     up = _smart_camera(propName=prop_val, inspType=type_val, inspDate=datetime.date.today().strftime("%Y/%m/%d"), locationText=loc_str, issueDetail=disp_d, mode="fix", key=f"fix_cam_{rec_id}")
