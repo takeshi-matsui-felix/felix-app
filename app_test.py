@@ -15,65 +15,6 @@ import time
 from new_dictionary import ISSUE_TEMPLATES
 
 # ==========================================
-# LINE通知設定（東海・関東の出し分け）
-# ==========================================
-LINE_CHANNEL_ACCESS_TOKEN = "IqpDy1/OlcfW34pKSF7AXFJSvZ1MM7WpX81wXxwGV/PasCjuQCv33keiCNmucETGgQ2R6IbbxQJDYKoUSiH+i2a+pgKaTJjwawe6u0XdRDxKdQtnOu2pfv9zMcL9mqICMFl6yrapvoJTeL+onHiRSgdB04t89/1O/w1cDnyilFU="
-
-# 🚨 Webhook.siteで取得した「Cから始まる33桁のグループID」
-LINE_GROUP_ID_TOKAI = "C6fc8fb79a343fb2e459e3fa5e891e927"
-LINE_GROUP_ID_KANTO = "C440062b549a1165d645f61891503e264"
-
-def send_line_denial_notification(area, prop_name, insp_type, work_type, loc_area, issue_detail, reason, photo_url=None):
-    """否認時のみ指定エリアのLINEグループへテキストと写真を通知する関数"""
-    target_group = LINE_GROUP_ID_TOKAI if area == "東海エリア" else LINE_GROUP_ID_KANTO
-    
-    if "入れてください" in target_group or not target_group.startswith("C"):
-        return
-        
-    url = "https://api.line.me/v2/bot/message/push"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"
-    }
-    
-    area_param = "tokai" if area == "東海エリア" else "kanto"
-    partner_url = f"https://felix-app-prbmr4ghbjai7n7hzfyahj.streamlit.app/?mode=partner&area={area_param}"
-    
-    text = (
-        "[是正差し戻し通知]\n\n"
-        f"対象の指摘に否認（差し戻し）が発生しました。内容を確認し、再是正をお願いします。\n\n"
-        f"■物件名: {prop_name}\n"
-        f"■検査名: {insp_type}\n"
-        f"■工種: {work_type}\n"
-        f"■部位: {loc_area}\n"
-        f"■指摘内容: {issue_detail}\n"
-        f"■否認理由: {reason}\n\n"
-        f"確認および再是正写真の提出は、以下のURLから行ってください。\n"
-        f"{partner_url}"
-    )
-    
-    # メッセージの組み立て（テキストは必須）
-    messages = [{"type": "text", "text": text}]
-    
-    # 写真URLが存在する場合は、画像メッセージも追加（1通の送信としてカウントされます）
-    if photo_url and photo_url.startswith("http"):
-        messages.append({
-            "type": "image",
-            "originalContentUrl": photo_url,
-            "previewImageUrl": photo_url
-        })
-    
-    payload = {
-        "to": target_group,
-        "messages": messages
-    }
-    
-    try:
-        requests.post(url, headers=headers, json=payload, timeout=10)
-    except Exception:
-        pass
-
-# ==========================================
 # 1. Supabase 接続設定 ＆ キャッシュ機構（AM3:00クリア対応）
 # ==========================================
 SUPABASE_URL = "https://vzuzeymvyftmfuaxrvtb.supabase.co"
@@ -342,7 +283,7 @@ st.markdown("""
 
 FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
 AREA_OPTS_STANDARD = ["-- 選択 --", "玄関", "廊下・階段・ENT", "LDK", "キッチン", "洋室", "洗面室", "UB", "トイレ", "バルコニー", "外部", "フリー項目"]
-AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バル কাশী", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
+AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バルコニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
 WORK_OPTS_STANDARD = ["-- 選択 --", "基礎工事(鉄筋)", "基礎工事(型枠)", "フレーミング", "FM", "造作", "内装", "電気", "設備", "ガス", "清掃", "サッシ", "外壁", "外構", "コーキング", "リペア", "その他"]
 WORK_OPTS_HAIKIN = ["-- 選択 --", "基礎工事(鉄筋)", "水道", "ガス", "その他"]
 WORK_OPTS_KUTAI = ["-- 選択 --", "フレーミング", "電気", "水道", "防水", "その他"]
@@ -425,7 +366,7 @@ def main():
         
     if st.session_state.active_menu not in menu_opts: st.session_state.active_menu = menu_opts[0]
     
-    # プランB: 上部アコーディオンメニュー (自動で閉じる)
+    # 上部アコーディオンメニュー
     with st.expander(f"メニューを開く (現在のユーザー: {st.session_state.role})", expanded=False):
         selected_menu = st.radio("移動先を選択", menu_opts, index=menu_opts.index(st.session_state.active_menu), format_func=format_menu, label_visibility="collapsed")
         
@@ -438,7 +379,7 @@ def main():
         jump_to_menu(selected_menu, st.session_state.pre_selected_prop)
 
     # ----------------------------------------
-    # メニュー: 0. ホーム
+    # メメニュー: 0. ホーム
     # ----------------------------------------
     if st.session_state.active_menu == "ホーム":
         if not st.session_state.splash_done:
@@ -806,15 +747,16 @@ def main():
                     active_photo = st.session_state.temp_photo
                     if w and final_desc != "" and active_photo is not None:
                         initial_status = "確認待ち" if c_inspector == "工事監理チーム" else "是正待ち"
+                        # 🌟 新しい列 line_notified を初期値 False で追加
                         record_data = {
                             "record_id": str(uuid.uuid4()), "inspection_id": c_id, "property_id": c_prop_id, 
                             "floor_level": f, "area": a, "work_type": w, "issue_detail": final_desc, 
-                            "progress_status": initial_status
+                            "progress_status": initial_status, "line_notified": False
                         }
                         threading.Thread(target=bg_save_inspection, args=(active_photo, record_data)).start()
                         st.session_state.issue_saved = True; st.session_state.temp_photo = None
                         st.session_state.prev_floor = f; st.session_state.prev_area = a; st.rerun()
-                    else: st.error("工種・内容・写真はすべて必須です（写真が『セット完了』になるまでお待ちください）")
+                    else: st.error("工種・内容・写真はすべて必須です")
                 
                 if st.button("終了"): st.session_state.current_box = None; st.session_state.temp_photo = None; st.session_state.prev_floor = None; st.session_state.prev_area = None; st.rerun()
 
@@ -1175,7 +1117,7 @@ def main():
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
             
-            t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
+            t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val && i.get('inspection_type') == type_val and i.get('inspection_id')]
             if t_ids:
                 if st.session_state.cached_records is None or st.session_state.cached_target_id != target_id_str:
                     recs = db_get("inspection_records", f"inspection_id=in.({','.join(t_ids)})&progress_status=in.(是正待ち,是正確認中)")
@@ -1256,7 +1198,7 @@ def main():
                                         else: st.error("写真をセットしてください")
                                     if up: st.image(up, width=250)
                                 elif p_stat == "是正確認中":
-                                    st.markdown("**【是正写真（After）】**")
+                                    st.markdown("**【是正写真（After）**")
                                     if f_photo: st.markdown(f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
                                     ca, cb = st.columns(2)
                                     if ca.button("承認（完了へ）", key=f"ok_{rec_id}", type="primary"): 
@@ -1267,12 +1209,13 @@ def main():
                                     
                                     # ❌ 否認（差し戻し）ボタンが押された時の処理
                                     if cb.button("否認（差し戻し）", key=f"ng_{rec_id}"): 
-                                        db_patch("inspection_records", rec_id, {"progress_status": "是正待ち", "reject_reason": reason})
-                                        
-                                        # 🌟 物件のエリアを特定し、指定エリアのLINEグループへテキストと写真を自動通知
-                                        p_area = prop_area_map.get(r.get('property_id'), '東海エリア')
-                                        threading.Thread(target=send_line_denial_notification, args=(p_area, prop_val, type_val, w, area, title, reason, i_photo)).start()
-                                        
+                                        # 🌟 アプリ側からの即時LINE通知を完全に撤廃。
+                                        # 🌟 金庫（Supabase）に「是正待ち」「否認理由」を書き込み、line_notified=False（未送信状態）にして保存。
+                                        db_patch("inspection_records", rec_id, {
+                                            "progress_status": "是正待ち", 
+                                            "reject_reason": reason,
+                                            "line_notified": False
+                                        })
                                         st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                         st.session_state.skip_render_ids.append(rec_id); st.rerun()
                             st.markdown('</div>', unsafe_allow_html=True)
@@ -1304,7 +1247,6 @@ def main():
         if not isinstance(sel, dict): sel = {}
         prop_val = sel.get('prop', ''); type_val = sel.get('type', '')
         
-        # レポート詳細画面を開いていない時だけ「一覧系のUI」を表示する
         if not (prop_val and type_val):
             st.header("完了分一覧")
             if st.session_state.role == "partner":
@@ -1355,7 +1297,6 @@ def main():
                                 st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
             if not has_visible_items: st.info("該当する項目はありません。")
 
-        # レポート詳細画面を開いた時の処理
         if prop_val and type_val:
             target_id_str = f"done_{prop_val}_{type_val}"
             
@@ -1395,7 +1336,6 @@ def main():
                         else: st.error("パスワードが違います")
                     st.markdown("<hr class='admin-delete-box'>", unsafe_allow_html=True)
 
-                # レポート本体の開始
                 st.markdown(f"""<div style="background:white; padding:0; font-family:sans-serif; width:100%;">
                     <div style="text-align:center; margin-bottom:5px; font-size:24px; font-weight:bold;">{prop_val}</div>
                     <div style="text-align:center; margin-top:0; font-size:20px; font-weight:bold;">{type_val} 報告書</div>
