@@ -271,6 +271,9 @@ st.markdown("""
     .record-box { border-bottom: 2px solid #EEEEEE; padding-bottom: 20px; margin-bottom: 20px; }
     .badge-wrap { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: bold; margin-left: 5px; color: #d93025; }
     
+    /* 🌟 差し戻し等のインライン小ボタン用の調整 */
+    div[data-testid="column"] button { height: 35px !important; font-size: 12px !important; font-weight: normal !important; padding: 0 !important; }
+
     @media print {
         .stButton, .stTextInput, .stRadio, .stSelectbox, .stCheckbox, [data-testid="stExpander"] { display: none !important; }
         .admin-delete-box, hr { display: none !important; }
@@ -358,7 +361,8 @@ def main():
         return m
 
     if st.session_state.role == "admin":
-        menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "定是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
+        # 🌟 【定】を完全駆除完了
+        menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
     else:
         menu_opts = ["ホーム", "是正実施（協力業者）", "完了分一覧（共通）"]
         
@@ -744,7 +748,6 @@ def main():
                     active_photo = st.session_state.temp_photo
                     if w and final_desc != "" and active_photo is not None:
                         initial_status = "確認待ち" if c_inspector == "工事監理チーム" else "是正待ち"
-                        # 🌟 新しい列 line_notified を初期値 False で追加
                         record_data = {
                             "record_id": str(uuid.uuid4()), "inspection_id": c_id, "property_id": c_prop_id, 
                             "floor_level": f, "area": a, "work_type": w, "issue_detail": final_desc, 
@@ -796,7 +799,7 @@ def main():
                 tree[p]["types"][t] = tree[p]["types"].get(t, 0) + 1
         if search_verify: tree = {k: v for k, v in tree.items() if search_verify in k}
 
-        # 🌟 【プランB改修】 物件アコーディオンの重複表示を完全に排除
+        # 物件アコーディオンの重複表示を合体排除
         sorted_tree_keys = []
         for p in all_props:
             p_name = p.get('property_name')
@@ -823,7 +826,6 @@ def main():
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.cached_records = None; st.rerun()
             
-            # 🌟 【&& -> and 修正済み】
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
             if t_ids:
                 if st.session_state.cached_records is None or st.session_state.cached_target_id != target_id_str:
@@ -832,7 +834,7 @@ def main():
                 else: recs = st.session_state.cached_records
 
                 if recs and type_val in SHANAI_KENSA_TYPES:
-                    floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in recs if r.get('floor_level')])))
+                    floors_in_recs = sorted(list(set([r.get('floor_level', 'one') for r in recs if r.get('floor_level')])))
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_verify_floor")
                     if sel_floor != "すべて表示": recs = [r for r in recs if r.get('floor_level') == sel_floor]
 
@@ -901,8 +903,8 @@ def main():
     # ----------------------------------------
     # メニュー: 4-A. 是正実施（協力業者専用）
     # ----------------------------------------
-    elif st.session_state.active_menu == "定是正実施（協力業者）" or st.session_state.active_menu == "是正実施（協力業者）":
-        st.header("是正実施")
+    elif st.session_state.active_menu == "是正実施（協力業者）":
+        st.header("定是正実施")
         if st.session_state.target_area:
             st.success(f"現在の表示エリア：【 {st.session_state.target_area} 】")
             t_area = st.session_state.target_area
@@ -942,7 +944,6 @@ def main():
 
         if search_fix: tree = {k: v for k, v in tree.items() if search_fix in k}
                 
-        # 🌟 【プランB改修】 物件アコーディオンの重複表示を完全に排除
         sorted_tree_keys = []
         for p in all_props:
             p_name = p.get('property_name')
@@ -982,7 +983,6 @@ def main():
             json_str = json.dumps(cb_data, ensure_ascii=False)
             components.html(f"<script>localStorage.setItem(\"felix_partner_session\", JSON.stringify({json_str}));</script>", height=0)
 
-            # 🌟 【&& -> and 修正済み】
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
             if t_ids:
                 if st.session_state.cached_records is None or st.session_state.cached_target_id != target_id_str:
@@ -995,7 +995,7 @@ def main():
                 st.info(f"進捗： 指摘総数 {total_cnt}件 ／ 残り（是正報告待ち） {wait_cnt}件")
                 
                 if recs and type_val in SHANAI_KENSA_TYPES:
-                    floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in recs if r.get('floor_level')])))
+                    floors_in_recs = sorted(list(set([r.get('floor_level', 'one') for r in recs if r.get('floor_level')])))
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_partner_fix_floor")
                     if sel_floor != "すべて表示": recs = [r for r in recs if r.get('floor_level') == sel_floor]
                 
@@ -1052,7 +1052,7 @@ def main():
     # ----------------------------------------
     # メニュー: 4-B. 是正ダッシュボード（管理者用）
     # ----------------------------------------
-    elif st.session_state.active_menu == "定是正ダッシュボード（管理者用）" or st.session_state.active_menu == "是正ダッシュボード（管理者用）":
+    elif st.session_state.active_menu == "是正ダッシュボード（管理者用）":
         st.header("是正ダッシュボード（確認・実施）")
         sel_area = st.radio("表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key="area_dash")
         t_area = sel_area if sel_area != "すべて表示" else None
@@ -1087,7 +1087,6 @@ def main():
                 
         if search_dash: tree = {k: v for k, v in tree.items() if search_dash in k}
 
-        # 🌟 【プランB改修】 物件アコーディオンの重複表示を完全に排除
         sorted_tree_keys = []
         for p in all_props:
             p_name = p.get('property_name')
@@ -1122,7 +1121,6 @@ def main():
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
             
-            # 🌟 【&& -> and 修正済み】
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
             if t_ids:
                 if st.session_state.cached_records is None or st.session_state.cached_target_id != target_id_str:
@@ -1131,7 +1129,7 @@ def main():
                 else: recs = st.session_state.cached_records
                 
                 if recs and type_val in SHANAI_KENSA_TYPES:
-                    floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in recs if r.get('floor_level')])))
+                    floors_in_recs = sorted(list(set([r.get('floor_level', 'one') for r in recs if r.get('floor_level')])))
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_dash_floor")
                     if sel_floor != "すべて表示": recs = [r for r in recs if r.get('floor_level') == sel_floor]
                 
@@ -1161,7 +1159,7 @@ def main():
                         with c_box:
                             st.markdown('<div class="record-box">', unsafe_allow_html=True)
                             
-                            if p_stat == "是正待ち": st.markdown(f"**{title}** <span style='background-color:#ffeaea; color:#d93025; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:bold;'>写真待ち</span>", unsafe_allow_html=True)
+                            if p_stat == "is_waiting_fix" or p_stat == "是正待ち": st.markdown(f"**{title}** <span style='background-color:#ffeaea; color:#d93025; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:bold;'>写真待ち</span>", unsafe_allow_html=True)
                             else: st.markdown(f"**{title}** <span style='background-color:#e8f0fe; color:#1a73e8; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:bold;'>確認待ち</span>", unsafe_allow_html=True)
                             
                             if r.get('reject_reason'): st.error(f"否認理由: {r.get('reject_reason')}")
@@ -1204,7 +1202,7 @@ def main():
                                         else: st.error("写真をセットしてください")
                                     if up: st.image(up, width=250)
                                 elif p_stat == "是正確認中":
-                                    st.markdown("**【是正写真（After）**")
+                                    st.markdown("**【是正写真（After）】**")
                                     if f_photo: st.markdown(f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
                                     ca, cb = st.columns(2)
                                     if ca.button("承認（完了へ）", key=f"ok_{rec_id}", type="primary"): 
@@ -1280,7 +1278,6 @@ def main():
                     
             if search_done: tree = {k: v for k, v in tree.items() if search_done in k}
 
-            # 🌟 【プランB改修】 物件アコーディオンの重複表示を完全に排除
             sorted_tree_keys = []
             for p in all_props:
                 p_name = p.get('property_name')
@@ -1358,6 +1355,8 @@ def main():
                 for w_name, w_recs in w_groups.items():
                     st.markdown(f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px;'>■ 工種: {w_name}</div>", unsafe_allow_html=True)
                     for idx, r in enumerate(w_recs):
+                        rec_id = r.get('record_id')
+                        if not rec_id: continue
                         floor = r.get('floor_level', ''); area = r.get('area')
                         loc_text = "" if type_val.startswith("【検査機関】") or floor == "one" or floor == "一式" else f"【{floor} {area}】"
                         detail = r.get('issue_detail', '')
@@ -1367,10 +1366,26 @@ def main():
                         img_b = f'<a href="{i_photo}" target="_blank"><img src="{i_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;"></a>' if i_photo else no_img_html
                         img_a = f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;"></a>' if f_photo else no_img_html
                         
+                        # 🌟 【大改修：タイトル右側の差し戻し（やり直し）ボタンの実装】
+                        st.markdown('<div style="page-break-inside: avoid; border-bottom: 1px dashed #ccc; padding: 15px 0; margin-bottom: 10px;">', unsafe_allow_html=True)
+                        
+                        # カラムを[8割, 2割]に分割してタイトルとボタンを横並びにする
+                        col_title, col_undo = st.columns([8, 2])
+                        with col_title:
+                            st.markdown(f'<div style="font-size:14px; font-weight:bold; margin-top:5px;">No.{issue_count} {loc_text}</div>', unsafe_allow_html=True)
+                        with col_undo:
+                            # 管理者の場合のみ、インラインで「完了取消（差し戻し）」ボタンを表示
+                            if st.session_state.role == "admin":
+                                if st.button("↩️ 完了取消", key=f"undo_{rec_id}_{idx}"):
+                                    # ステータスを「是正確認中（管理者確認待ち）」に戻し、ダッシュボードへ復活させる
+                                    db_patch("inspection_records", rec_id, {"progress_status": "是正確認中"})
+                                    st.session_state.cached_records = None
+                                    st.success("完了を取り消し、ダッシュボードに復活させました！")
+                                    time.sleep(1)
+                                    st.rerun()
+
                         st.markdown(f"""
-                        <div style="page-break-inside: avoid; border-bottom: 1px dashed #ccc; padding: 15px 0; margin-bottom: 10px;">
-                            <div style="font-size:14px; font-weight:bold; margin-bottom:5px;">No.{issue_count} {loc_text}</div>
-                            <div style="font-size:14px; margin-bottom:12px; line-height:1.4;"><strong>指摘内容：</strong> {detail}</div>
+                            <div style="font-size:14px; margin-bottom:12px; line-height:1.4; margin-top:5px;"><strong>指摘内容：</strong> {detail}</div>
                             <table style="width:100%; table-layout:fixed; border-collapse:collapse; border:none;">
                                 <tr>
                                     <td style="width:50%; text-align:center; vertical-align:top; padding-right:5px;"><div style="font-size:12px; color:#555; margin-bottom:4px;">[ Before（指摘時） ]</div>{img_b}</td>
