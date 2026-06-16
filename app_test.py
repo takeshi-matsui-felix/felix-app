@@ -414,7 +414,7 @@ def main():
                 function sendVal(action) {{
                     let val = {{ action: action }};
                     if(action === 'resume') {{ val.data = JSON.parse(localStorage.getItem('{ls_key}')); }}
-                    window.parent.postMessage({{isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}, "*");
+                    window.parent.postMessage({{isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}}, "*");
                 }}
                 const saved = localStorage.getItem('{ls_key}');
                 if(saved) {{
@@ -744,6 +744,7 @@ def main():
                     active_photo = st.session_state.temp_photo
                     if w and final_desc != "" and active_photo is not None:
                         initial_status = "確認待ち" if c_inspector == "工事監理チーム" else "是正待ち"
+                        # 🌟 新しい列 line_notified を初期値 False で追加
                         record_data = {
                             "record_id": str(uuid.uuid4()), "inspection_id": c_id, "property_id": c_prop_id, 
                             "floor_level": f, "area": a, "work_type": w, "issue_detail": final_desc, 
@@ -1031,7 +1032,7 @@ def main():
                                 else: st.write("写真なし")
                                     
                             with c2:
-                                st.markdown("**【是正写真（After）**")
+                                st.markdown("**【是正写真（After）】**")
                                 loc_str = f"{floor} {area} {w}".strip()
                                 disp_d = detail[:80] + "..." if len(detail)>80 else detail
                                 up = _smart_camera(
