@@ -262,7 +262,6 @@ st.set_page_config(page_title="Felix検査App", layout="wide", initial_sidebar_s
 
 st.markdown("""
 <style>
-    /* 左のサイドバーを完全に消去（プランBのため） */
     [data-testid="collapsedControl"] { display: none !important; }
     [data-testid="stSidebar"] { display: none !important; }
 
@@ -272,7 +271,6 @@ st.markdown("""
     .record-box { border-bottom: 2px solid #EEEEEE; padding-bottom: 20px; margin-bottom: 20px; }
     .badge-wrap { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: bold; margin-left: 5px; color: #d93025; }
     
-    /* 印刷時の設定：レポートの中身以外を消去 */
     @media print {
         .stButton, .stTextInput, .stRadio, .stSelectbox, .stCheckbox, [data-testid="stExpander"] { display: none !important; }
         .admin-delete-box, hr { display: none !important; }
@@ -360,13 +358,12 @@ def main():
         return m
 
     if st.session_state.role == "admin":
-        menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
+        menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "定是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
     else:
         menu_opts = ["ホーム", "是正実施（協力業者）", "完了分一覧（共通）"]
         
     if st.session_state.active_menu not in menu_opts: st.session_state.active_menu = menu_opts[0]
     
-    # 上部アコーディオンメニュー
     with st.expander(f"メニューを開く (現在のユーザー: {st.session_state.role})", expanded=False):
         selected_menu = st.radio("移動先を選択", menu_opts, index=menu_opts.index(st.session_state.active_menu), format_func=format_menu, label_visibility="collapsed")
         
@@ -379,7 +376,7 @@ def main():
         jump_to_menu(selected_menu, st.session_state.pre_selected_prop)
 
     # ----------------------------------------
-    # メメニュー: 0. ホーム
+    # メニュー: 0. ホーム
     # ----------------------------------------
     if st.session_state.active_menu == "ホーム":
         if not st.session_state.splash_done:
@@ -417,7 +414,7 @@ def main():
                 function sendVal(action) {{
                     let val = {{ action: action }};
                     if(action === 'resume') {{ val.data = JSON.parse(localStorage.getItem('{ls_key}')); }}
-                    window.parent.postMessage({{isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}}, "*");
+                    window.parent.postMessage({{isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}, "*");
                 }}
                 const saved = localStorage.getItem('{ls_key}');
                 if(saved) {{
@@ -747,7 +744,6 @@ def main():
                     active_photo = st.session_state.temp_photo
                     if w and final_desc != "" and active_photo is not None:
                         initial_status = "確認待ち" if c_inspector == "工事監理チーム" else "是正待ち"
-                        # 🌟 新しい列 line_notified を初期値 False で追加
                         record_data = {
                             "record_id": str(uuid.uuid4()), "inspection_id": c_id, "property_id": c_prop_id, 
                             "floor_level": f, "area": a, "work_type": w, "issue_detail": final_desc, 
@@ -799,10 +795,12 @@ def main():
                 tree[p]["types"][t] = tree[p]["types"].get(t, 0) + 1
         if search_verify: tree = {k: v for k, v in tree.items() if search_verify in k}
 
+        # 🌟 【プランB改修】 物件アコーディオンの重複表示を完全に排除
         sorted_tree_keys = []
         for p in all_props:
             p_name = p.get('property_name')
-            if p_name in tree: sorted_tree_keys.append(p_name)
+            if p_name in tree and p_name not in sorted_tree_keys: 
+                sorted_tree_keys.append(p_name)
         for k in tree.keys():
             if k not in sorted_tree_keys: sorted_tree_keys.append(k)
 
@@ -824,6 +822,7 @@ def main():
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.cached_records = None; st.rerun()
             
+            # 🌟 【&& -> and 修正済み】
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
             if t_ids:
                 if st.session_state.cached_records is None or st.session_state.cached_target_id != target_id_str:
@@ -901,7 +900,7 @@ def main():
     # ----------------------------------------
     # メニュー: 4-A. 是正実施（協力業者専用）
     # ----------------------------------------
-    elif st.session_state.active_menu == "是正実施（協力業者）":
+    elif st.session_state.active_menu == "定是正実施（協力業者）" or st.session_state.active_menu == "是正実施（協力業者）":
         st.header("是正実施")
         if st.session_state.target_area:
             st.success(f"現在の表示エリア：【 {st.session_state.target_area} 】")
@@ -942,10 +941,12 @@ def main():
 
         if search_fix: tree = {k: v for k, v in tree.items() if search_fix in k}
                 
+        # 🌟 【プランB改修】 物件アコーディオンの重複表示を完全に排除
         sorted_tree_keys = []
         for p in all_props:
             p_name = p.get('property_name')
-            if p_name in tree: sorted_tree_keys.append(p_name)
+            if p_name in tree and p_name not in sorted_tree_keys: 
+                sorted_tree_keys.append(p_name)
         for k in tree.keys():
             if k not in sorted_tree_keys: sorted_tree_keys.append(k)
 
@@ -980,6 +981,7 @@ def main():
             json_str = json.dumps(cb_data, ensure_ascii=False)
             components.html(f"<script>localStorage.setItem(\"felix_partner_session\", JSON.stringify({json_str}));</script>", height=0)
 
+            # 🌟 【&& -> and 修正済み】
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
             if t_ids:
                 if st.session_state.cached_records is None or st.session_state.cached_target_id != target_id_str:
@@ -1029,7 +1031,7 @@ def main():
                                 else: st.write("写真なし")
                                     
                             with c2:
-                                st.markdown("**【是正写真（After）】**")
+                                st.markdown("**【是正写真（After）**")
                                 loc_str = f"{floor} {area} {w}".strip()
                                 disp_d = detail[:80] + "..." if len(detail)>80 else detail
                                 up = _smart_camera(
@@ -1049,7 +1051,7 @@ def main():
     # ----------------------------------------
     # メニュー: 4-B. 是正ダッシュボード（管理者用）
     # ----------------------------------------
-    elif st.session_state.active_menu == "是正ダッシュボード（管理者用）":
+    elif st.session_state.active_menu == "定是正ダッシュボード（管理者用）" or st.session_state.active_menu == "是正ダッシュボード（管理者用）":
         st.header("是正ダッシュボード（確認・実施）")
         sel_area = st.radio("表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key="area_dash")
         t_area = sel_area if sel_area != "すべて表示" else None
@@ -1084,10 +1086,12 @@ def main():
                 
         if search_dash: tree = {k: v for k, v in tree.items() if search_dash in k}
 
+        # 🌟 【プランB改修】 物件アコーディオンの重複表示を完全に排除
         sorted_tree_keys = []
         for p in all_props:
             p_name = p.get('property_name')
-            if p_name in tree: sorted_tree_keys.append(p_name)
+            if p_name in tree and p_name not in sorted_tree_keys: 
+                sorted_tree_keys.append(p_name)
         for k in tree.keys():
             if k not in sorted_tree_keys: sorted_tree_keys.append(k)
 
@@ -1117,6 +1121,7 @@ def main():
         if prop_val and type_val:
             if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
             
+            # 🌟 【&& -> and 修正済み】
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
             if t_ids:
                 if st.session_state.cached_records is None or st.session_state.cached_target_id != target_id_str:
@@ -1207,10 +1212,7 @@ def main():
                                         st.session_state.skip_render_ids.append(rec_id); st.rerun()
                                     reason = cb.text_input("否認理由を入力", key=f"re_{rec_id}", label_visibility="collapsed", placeholder="否認理由があれば入力")
                                     
-                                    # ❌ 否認（差し戻し）ボタンが押された時の処理
                                     if cb.button("否認（差し戻し）", key=f"ng_{rec_id}"): 
-                                        # 🌟 アプリ側からの即時LINE通知を完全に撤廃。
-                                        # 🌟 金庫（Supabase）に「是正待ち」「否認理由」を書き込み、line_notified=False（未送信状態）にして保存。
                                         db_patch("inspection_records", rec_id, {
                                             "progress_status": "是正待ち", 
                                             "reject_reason": reason,
@@ -1242,7 +1244,6 @@ def main():
     # メニュー: 5. 完了分一覧
     # ----------------------------------------
     elif st.session_state.active_menu == "完了分一覧（共通）":
-        
         sel = st.session_state.drill_target
         if not isinstance(sel, dict): sel = {}
         prop_val = sel.get('prop', ''); type_val = sel.get('type', '')
@@ -1278,10 +1279,12 @@ def main():
                     
             if search_done: tree = {k: v for k, v in tree.items() if search_done in k}
 
+            # 🌟 【プランB改修】 物件アコーディオンの重複表示を完全に排除
             sorted_tree_keys = []
             for p in all_props:
                 p_name = p.get('property_name')
-                if p_name in tree: sorted_tree_keys.append(p_name)
+                if p_name in tree and p_name not in sorted_tree_keys: 
+                    sorted_tree_keys.append(p_name)
             for k in tree.keys():
                 if k not in sorted_tree_keys: sorted_tree_keys.append(k)
 
