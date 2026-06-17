@@ -6,10 +6,6 @@ on:
     - cron: '0 3 * * *'
     # 20:00 JST (UTC 11:00)
     - cron: '0 11 * * *'
-    # 22:30 JST (UTC 13:30)
-    - cron: '30 13 * * *'
-    # 23:00 JST (UTC 14:00) ※念のための予備タイマー
-    - cron: '0 14 * * *'
   workflow_dispatch:
 
 jobs:
