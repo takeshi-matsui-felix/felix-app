@@ -84,6 +84,10 @@ def db_patch_inspections_by_prop(prop_id, new_name):
     requests.patch(f"{SUPABASE_URL}/rest/v1/inspections?property_id=eq.{prop_id}", headers=HEADERS, json={"property_name": new_name})
     clear_specific_cache("inspections")
 
+def db_patch_inspection(inspection_id, data):
+    requests.patch(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{inspection_id}", headers=HEADERS, json=data)
+    clear_specific_cache("inspections")
+
 def db_delete_record(record_id): 
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
     clear_specific_cache("inspection_records")
@@ -361,7 +365,6 @@ def main():
         return m
 
     if st.session_state.role == "admin":
-        # 🌟 【定】を完全駆除完了
         menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
     else:
         menu_opts = ["ホーム", "是正実施（協力業者）", "完了分一覧（共通）"]
@@ -1104,7 +1107,22 @@ def main():
             has_visible_items = False
             for p_idx, p_name in enumerate(sorted_tree_keys):
                 v_data = tree[p_name]; p_id = v_data.get("prop_id"); p_hdate = prop_hdate_map.get(p_id)
-                h_disp = f" (引渡し: {p_hdate})" if p_hdate else " (引渡し未設定)"
+                
+                # ①引渡し日数・超過日数の計算と表示
+                h_disp = " (引渡し未設定)"
+                if p_hdate:
+                    try:
+                        h_date_obj = datetime.datetime.strptime(str(p_hdate), "%Y-%m-%d").date()
+                        today = datetime.date.today()
+                        diff = (h_date_obj - today).days
+                        if diff > 0:
+                            h_disp = f" (引渡し: {p_hdate} ⚠️あと{diff}日)"
+                        elif diff == 0:
+                            h_disp = f" (引渡し: {p_hdate} ⚠️本日引渡し！)"
+                        else:
+                            h_disp = f" (引渡し: {p_hdate} ❗️超過{abs(diff)}日!!)"
+                    except Exception:
+                        h_disp = f" (引渡し: {p_hdate})"
                 
                 if v_data["types"]:
                     has_visible_items = True
@@ -1112,10 +1130,25 @@ def main():
                         for t_idx, t_name in enumerate(sorted(list(v_data["types"]))):
                             c_data = tree_counts[p_name][t_name]
                             badge_text = f"是正写真待ち：{c_data['wait_fix']}件 ／ 管理者確認待ち：{c_data['wait_conf']}件"
-                            t_cols = st.columns([4, 6])
+                            
+                            # 当該検査のIDと遅延理由（delay_reason）を取得
+                            target_ins_list = [i for i in all_ins if isinstance(i, dict) and i.get('property_name') == p_name and i.get('inspection_type') == t_name]
+                            t_ins_id = target_ins_list[0].get('inspection_id') if target_ins_list else None
+                            current_delay_reason = target_ins_list[0].get('delay_reason', '') if target_ins_list else ''
+                            
+                            # ②遅延理由を入力できるようにカラムを3分割
+                            t_cols = st.columns([3, 4, 3])
                             if t_cols[0].button(t_name, key=f"d_{p_idx}_{t_idx}", use_container_width=True):
                                 st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
-                            t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#E74C3C;'>{badge_text}</span></div>", unsafe_allow_html=True)
+                            t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#E74C3C; font-size: 13px;'>{badge_text}</span></div>", unsafe_allow_html=True)
+                            
+                            # 遅延理由の入力フィールドと保存アクション
+                            if t_ins_id:
+                                new_reason = t_cols[2].text_input("遅延理由メモ", value=current_delay_reason, key=f"delay_{t_ins_id}", label_visibility="collapsed", placeholder="遅延理由を入力してEnter")
+                                if new_reason != current_delay_reason:
+                                    db_patch_inspection(t_ins_id, {"delay_reason": new_reason})
+                                    st.toast("遅延理由を保存しました")
+                                    
             if not has_visible_items: st.info("現在、該当する対応必要項目はありません。")
         
         if prop_val and type_val:
@@ -1143,6 +1176,27 @@ def main():
                     if a not in area_groups: area_groups[a] = []
                     area_groups[a].append(r)
                 
+                # ③ 未完了項目のテキスト化とコピー機能
+                if recs:
+                    with st.expander("📝 LINE送信用テキスト生成（クリックで開く）", expanded=False):
+                        copy_lines = [f"【未完了の是正総数】 {len(recs)}件\n"]
+                        for a_name, a_recs in area_groups.items():
+                            copy_lines.append(f"■ 部位: {a_name}")
+                            for r in a_recs:
+                                c_floor = r.get('floor_level', '')
+                                c_w = r.get('work_type', '')
+                                c_detail = r.get('issue_detail', '')
+                                c_stat = r.get('progress_status')
+                                stat_text = "写真待ち" if c_stat in ["is_waiting_fix", "是正待ち"] else "確認待ち"
+                                head_text = "" if type_val.startswith("【検査機関】") or c_floor == "一式" else f"【{c_floor} {c_w}】".strip()
+                                copy_lines.append(f"{head_text} {c_detail} {stat_text}".strip())
+                            copy_lines.append("") # 空行
+                        
+                        copy_text = "\n".join(copy_lines)
+                        st.code(copy_text, language="text")
+                        st.info("↑ 右上のコピーボタン（📄のアイコン）をクリックしてLINE等に貼り付けてください")
+                        st.markdown("<br>", unsafe_allow_html=True)
+
                 edit_w_opts = WORK_OPTS_KIKAN if type_val.startswith("【検査機関】") else WORK_OPTS_SHANAI if type_val in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if type_val == "躯体検査" else WORK_OPTS_HAIKIN if type_val == "配筋検査" else WORK_OPTS_CHUKAN if type_val == "中間検査" else WORK_OPTS_DANNETSU if type_val == "断熱検査" else WORK_OPTS_STANDARD
 
                 for a_name, a_recs in area_groups.items():
@@ -1366,18 +1420,14 @@ def main():
                         img_b = f'<a href="{i_photo}" target="_blank"><img src="{i_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;"></a>' if i_photo else no_img_html
                         img_a = f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;"></a>' if f_photo else no_img_html
                         
-                        # 🌟 【大改修：タイトル右側の差し戻し（やり直し）ボタンの実装】
                         st.markdown('<div style="page-break-inside: avoid; border-bottom: 1px dashed #ccc; padding: 15px 0; margin-bottom: 10px;">', unsafe_allow_html=True)
                         
-                        # カラムを[8割, 2割]に分割してタイトルとボタンを横並びにする
                         col_title, col_undo = st.columns([8, 2])
                         with col_title:
                             st.markdown(f'<div style="font-size:14px; font-weight:bold; margin-top:5px;">No.{issue_count} {loc_text}</div>', unsafe_allow_html=True)
                         with col_undo:
-                            # 管理者の場合のみ、インラインで「完了取消（差し戻し）」ボタンを表示
                             if st.session_state.role == "admin":
                                 if st.button("↩️ 完了取消", key=f"undo_{rec_id}_{idx}"):
-                                    # ステータスを「是正確認中（管理者確認待ち）」に戻し、ダッシュボードへ復活させる
                                     db_patch("inspection_records", rec_id, {"progress_status": "是正確認中"})
                                     st.session_state.cached_records = None
                                     st.success("完了を取り消し、ダッシュボードに復活させました！")
