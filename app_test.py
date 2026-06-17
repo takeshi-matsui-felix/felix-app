@@ -84,8 +84,8 @@ def db_patch_inspections_by_prop(prop_id, new_name):
     requests.patch(f"{SUPABASE_URL}/rest/v1/inspections?property_id=eq.{prop_id}", headers=HEADERS, json={"property_name": new_name})
     clear_specific_cache("inspections")
 
-def db_patch_inspection(inspection_id, data):
-    requests.patch(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{inspection_id}", headers=HEADERS, json=data)
+def db_patch_inspection(ins_id, data):
+    requests.patch(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{ins_id}", headers=HEADERS, json=data)
     clear_specific_cache("inspections")
 
 def db_delete_record(record_id): 
@@ -288,7 +288,7 @@ st.markdown("""
 
 FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
 AREA_OPTS_STANDARD = ["-- 選択 --", "玄関", "廊下・階段・ENT", "LDK", "キッチン", "洋室", "洗面室", "UB", "トイレ", "バルコニー", "外部", "フリー項目"]
-AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バルコニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
+AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バルCor", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
 WORK_OPTS_STANDARD = ["-- 選択 --", "基礎工事(鉄筋)", "基礎工事(型枠)", "フレーミング", "FM", "造作", "内装", "電気", "設備", "ガス", "清掃", "サッシ", "外壁", "外構", "コーキング", "リペア", "その他"]
 WORK_OPTS_HAIKIN = ["-- 選択 --", "基礎工事(鉄筋)", "水道", "ガス", "その他"]
 WORK_OPTS_KUTAI = ["-- 選択 --", "フレーミング", "電気", "水道", "防水", "その他"]
@@ -1061,7 +1061,7 @@ def main():
         t_area = sel_area if sel_area != "すべて表示" else None
         search_dash = st.text_input("物件名で検索（一部入力でも可）", key="search_dash_admin")
 
-        all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status&progress_status=in.(是正待ち,是正確認中)")
+        all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status,area,floor_level,work_type,issue_detail&progress_status=in.(是正待ち,是正確認中)")
         all_ins = db_get("inspections", "select=*")
         all_props = db_get("properties", "select=*")
         all_props = sort_properties_by_handover(all_props)
@@ -1108,8 +1108,9 @@ def main():
             for p_idx, p_name in enumerate(sorted_tree_keys):
                 v_data = tree[p_name]; p_id = v_data.get("prop_id"); p_hdate = prop_hdate_map.get(p_id)
                 
-                # ①引渡し日数・超過日数の計算と表示
+                # ①引渡し日数・超過日数の計算と表示 (❗️アラート用)
                 h_disp = " (引渡し未設定)"
+                is_overdue = False
                 if p_hdate:
                     try:
                         h_date_obj = datetime.datetime.strptime(str(p_hdate), "%Y-%m-%d").date()
@@ -1120,35 +1121,83 @@ def main():
                         elif diff == 0:
                             h_disp = f" (引渡し: {p_hdate} ⚠️本日引渡し！)"
                         else:
-                            h_disp = f" (引渡し: {p_hdate} ❗️超過{abs(diff)}日!!)"
+                            h_disp = f" ❗️超過{abs(diff)}日❗️"
+                            is_overdue = True
                     except Exception:
                         h_disp = f" (引渡し: {p_hdate})"
                 
                 if v_data["types"]:
                     has_visible_items = True
-                    with st.expander(f"{p_name}{h_disp}"):
-                        for t_idx, t_name in enumerate(sorted(list(v_data["types"]))):
-                            c_data = tree_counts[p_name][t_name]
-                            badge_text = f"是正写真待ち：{c_data['wait_fix']}件 ／ 管理者確認待ち：{c_data['wait_conf']}件"
+                    
+                    # ーー ③ 全検査分をまとめたLINE送信用テキスト作成 ーー
+                    p_inspections = [i for i in all_ins if isinstance(i, dict) and i.get('property_name') == p_name]
+                    p_ins_ids = [str(i.get('inspection_id')) for i in p_inspections]
+                    p_recs = [r for r in all_recs_for_tree if str(r.get('inspection_id')) in p_ins_ids]
+                    
+                    copy_lines = [f"【物件名】 {p_name}", f"【未完了の是正総数】 {len(p_recs)}件", ""]
+                    
+                    recs_by_type = {}
+                    for r in p_recs:
+                        iid = str(r.get('inspection_id'))
+                        itype = next((i.get('inspection_type') for i in p_inspections if str(i.get('inspection_id')) == iid), "不明")
+                        if itype not in recs_by_type: recs_by_type[itype] = {}
+                        area = r.get('area', 'その他')
+                        if area not in recs_by_type[itype]: recs_by_type[itype][area] = []
+                        recs_by_type[itype][area].append(r)
+                        
+                    for itype, a_dict in recs_by_type.items():
+                        copy_lines.append(f"《 {itype} 》")
+                        for a_name, a_recs in a_dict.items():
+                            copy_lines.append(f"■ 部位: {a_name}")
+                            for r in a_recs:
+                                c_floor = r.get('floor_level', '')
+                                c_w = r.get('work_type', '')
+                                c_detail = r.get('issue_detail', '')
+                                c_stat = r.get('progress_status')
+                                stat_text = "写真待ち" if c_stat in ["is_waiting_fix", "是正待ち"] else "確認待ち"
+                                head_text = "" if itype.startswith("【検査機関】") or c_floor == "一式" else f"【{c_floor} {c_w}】".strip()
+                                copy_lines.append(f"{head_text} {c_detail} {stat_text}".strip())
+                        copy_lines.append("")
+                        
+                    copy_text = "\n".join(copy_lines)
+                    
+                    # レイアウト（10:1で分割し、右側にメール送信ボタン）
+                    col_ex1, col_ex2 = st.columns([10, 1])
+                    with col_ex1:
+                        with st.expander(f"{p_name}{h_disp}"):
+                            # 超過している場合はExpander直下に赤文字太字で警告
+                            if is_overdue:
+                                st.markdown(f"<div style='color:#E74C3C; font-weight:bold; margin-bottom:15px; font-size:16px;'>🚨 引渡し日（{p_hdate}）を超過しています！至急対応してください。</div>", unsafe_allow_html=True)
                             
-                            # 当該検査のIDと遅延理由（delay_reason）を取得
-                            target_ins_list = [i for i in all_ins if isinstance(i, dict) and i.get('property_name') == p_name and i.get('inspection_type') == t_name]
-                            t_ins_id = target_ins_list[0].get('inspection_id') if target_ins_list else None
-                            current_delay_reason = target_ins_list[0].get('delay_reason', '') if target_ins_list else ''
-                            
-                            # ②遅延理由を入力できるようにカラムを3分割
-                            t_cols = st.columns([3, 4, 3])
-                            if t_cols[0].button(t_name, key=f"d_{p_idx}_{t_idx}", use_container_width=True):
-                                st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
-                            t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#E74C3C; font-size: 13px;'>{badge_text}</span></div>", unsafe_allow_html=True)
-                            
-                            # 遅延理由の入力フィールドと保存アクション
-                            if t_ins_id:
-                                new_reason = t_cols[2].text_input("遅延理由メモ", value=current_delay_reason, key=f"delay_{t_ins_id}", label_visibility="collapsed", placeholder="遅延理由を入力してEnter")
-                                if new_reason != current_delay_reason:
-                                    db_patch_inspection(t_ins_id, {"delay_reason": new_reason})
-                                    st.toast("遅延理由を保存しました")
+                            for t_idx, t_name in enumerate(sorted(list(v_data["types"]))):
+                                c_data = tree_counts[p_name][t_name]
+                                badge_text = f"是正写真待ち：{c_data['wait_fix']}件 ／ 管理者確認待ち：{c_data['wait_conf']}件"
+                                
+                                target_ins_list = [i for i in p_inspections if i.get('inspection_type') == t_name]
+                                t_ins_id = target_ins_list[0].get('inspection_id') if target_ins_list else None
+                                current_delay_reason = target_ins_list[0].get('delay_reason', '') if target_ins_list else ''
+                                
+                                t_cols = st.columns([3, 4, 3])
+                                if t_cols[0].button(t_name, key=f"d_{p_idx}_{t_idx}", use_container_width=True):
+                                    st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
+                                t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#E74C3C; font-size: 13px;'>{badge_text}</span></div>", unsafe_allow_html=True)
+                                
+                                # ②遅延理由の入力と自動保存（コールバック利用）
+                                if t_ins_id:
+                                    def make_update_reason_cb(ins_id, key):
+                                        def _update():
+                                            db_patch_inspection(ins_id, {"delay_reason": st.session_state[key]})
+                                            st.toast("遅延理由を保存しました")
+                                        return _update
                                     
+                                    cb_func = make_update_reason_cb(t_ins_id, f"delay_{t_ins_id}")
+                                    t_cols[2].text_input("遅延理由", value=current_delay_reason, key=f"delay_{t_ins_id}", on_change=cb_func, label_visibility="collapsed", placeholder="遅延理由を入力してEnter")
+                    
+                    with col_ex2:
+                        with st.popover("✉️"):
+                            st.markdown("**LINE送信用テキスト**")
+                            st.code(copy_text, language="text")
+                            
             if not has_visible_items: st.info("現在、該当する対応必要項目はありません。")
         
         if prop_val and type_val:
@@ -1176,27 +1225,6 @@ def main():
                     if a not in area_groups: area_groups[a] = []
                     area_groups[a].append(r)
                 
-                # ③ 未完了項目のテキスト化とコピー機能
-                if recs:
-                    with st.expander("📝 LINE送信用テキスト生成（クリックで開く）", expanded=False):
-                        copy_lines = [f"【未完了の是正総数】 {len(recs)}件\n"]
-                        for a_name, a_recs in area_groups.items():
-                            copy_lines.append(f"■ 部位: {a_name}")
-                            for r in a_recs:
-                                c_floor = r.get('floor_level', '')
-                                c_w = r.get('work_type', '')
-                                c_detail = r.get('issue_detail', '')
-                                c_stat = r.get('progress_status')
-                                stat_text = "写真待ち" if c_stat in ["is_waiting_fix", "是正待ち"] else "確認待ち"
-                                head_text = "" if type_val.startswith("【検査機関】") or c_floor == "一式" else f"【{c_floor} {c_w}】".strip()
-                                copy_lines.append(f"{head_text} {c_detail} {stat_text}".strip())
-                            copy_lines.append("") # 空行
-                        
-                        copy_text = "\n".join(copy_lines)
-                        st.code(copy_text, language="text")
-                        st.info("↑ 右上のコピーボタン（📄のアイコン）をクリックしてLINE等に貼り付けてください")
-                        st.markdown("<br>", unsafe_allow_html=True)
-
                 edit_w_opts = WORK_OPTS_KIKAN if type_val.startswith("【検査機関】") else WORK_OPTS_SHANAI if type_val in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if type_val == "躯体検査" else WORK_OPTS_HAIKIN if type_val == "配筋検査" else WORK_OPTS_CHUKAN if type_val == "中間検査" else WORK_OPTS_DANNETSU if type_val == "断熱検査" else WORK_OPTS_STANDARD
 
                 for a_name, a_recs in area_groups.items():
