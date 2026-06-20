@@ -152,7 +152,7 @@ def sort_properties_by_handover(props_list):
     return sorted(props_list, key=get_handover_key)
 
 # ==========================================
-# 2. スマート電子黒板カメラ
+# 2. スマート電子黒板カメラ（📁ライブラリ / 📷カメラ 独立版 + PC非表示機能）
 # ==========================================
 SMART_CAMERA_HTML = """<!DOCTYPE html>
 <html lang="ja">
@@ -161,30 +161,42 @@ SMART_CAMERA_HTML = """<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
         body { margin: 0; padding: 5px; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background-color: transparent;}
+        .btn-group { display: flex; gap: 10px; width: 100%; max-width: 400px; }
         .upload-btn {
-            display: block; width: 100%; max-width: 400px; padding: 18px 20px;
-            color: white; border-radius: 8px; font-size: 16px; font-weight: bold; text-align: center; cursor: pointer; 
-            box-sizing: border-box; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            flex: 1; padding: 15px 5px;
+            color: white; border-radius: 8px; font-size: 14px; font-weight: bold; text-align: center; cursor: pointer; 
+            box-sizing: border-box; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: flex; justify-content: center; align-items: center;
         }
         input[type="file"] { display: none; }
     </style>
 </head>
 <body>
-    <label class="upload-btn" id="upload-label" style="background-color: #28a745;">
-        <span id="btn-text">黒板付きで撮影 ／ 選択</span>
-        <input type="file" accept="image/*" id="file-input">
-    </label>
+    <div class="btn-group">
+        <label class="upload-btn" id="lbl-lib" style="background-color: #27AE60;">
+            <span id="txt-lib">📁 ライブラリ</span>
+            <input type="file" accept="image/*" id="file-lib">
+        </label>
+        <label class="upload-btn" id="lbl-cam" style="background-color: #2980B9;">
+            <span id="txt-cam">📷 カメラ起動</span>
+            <input type="file" accept="image/*" capture="environment" id="file-cam">
+        </label>
+    </div>
     <script>
+        // スマホ・タブレット判定（iPadOS 13+のデスクトップモードにも対応）
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
+                         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        
+        // PCならカメラボタンを隠す（A案）
+        if (!isMobile) {
+            document.getElementById('lbl-cam').style.display = 'none';
+        }
+
         let b = { propName: "", inspType: "", inspDate: "", locationText: "", issueDetail: "", mode: "insp" };
         window.addEventListener("message", function(e) {
             if (e.data.type === "streamlit:render" && e.data.args) {
                 b.propName = e.data.args.propName || ""; b.inspType = e.data.args.inspType || ""; 
                 b.inspDate = e.data.args.inspDate || ""; b.locationText = e.data.args.locationText || ""; 
                 b.issueDetail = e.data.args.issueDetail || ""; b.mode = e.data.args.mode || "insp";
-                if(b.mode === 'fix') {
-                    document.getElementById('upload-label').style.backgroundColor = '#007bff';
-                    document.getElementById('btn-text').innerText = '是正写真を撮影';
-                }
             }
         });
 
@@ -203,11 +215,12 @@ SMART_CAMERA_HTML = """<!DOCTYPE html>
 
         function sendToStreamlit(val) { window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}, "*"); }
 
-        const input = document.getElementById('file-input');
-        input.addEventListener('change', function(e) {
+        function handleFile(e) {
             const file = e.target.files[0]; if (!file) return;
-            document.getElementById('upload-label').style.backgroundColor = '#f39c12';
-            document.getElementById('btn-text').innerHTML = '合成中...お待ちください';
+            document.getElementById('lbl-lib').style.backgroundColor = '#f39c12';
+            document.getElementById('lbl-cam').style.backgroundColor = '#f39c12';
+            document.getElementById('txt-lib').innerHTML = '合成中...';
+            document.getElementById('txt-cam').innerHTML = 'お待ちを';
 
             const reader = new FileReader();
             reader.onload = function(event) {
@@ -239,16 +252,22 @@ SMART_CAMERA_HTML = """<!DOCTYPE html>
                     wrapTextAndReturnY(ctx, b.issueDetail, textX, ty, dw, ls, 3);
 
                     sendToStreamlit(canvas.toDataURL('image/jpeg', 0.6));
-                    document.getElementById('upload-label').style.backgroundColor = '#2ecc71';
-                    document.getElementById('btn-text').innerHTML = 'セット完了';
+                    document.getElementById('lbl-lib').style.backgroundColor = '#2ecc71';
+                    document.getElementById('lbl-cam').style.backgroundColor = '#2ecc71';
+                    document.getElementById('txt-lib').innerHTML = '✅ 完了';
+                    document.getElementById('txt-cam').innerHTML = '✅ 完了';
                 };
                 img.src = event.target.result;
             };
             reader.readAsDataURL(file);
-        });
+        }
+
+        document.getElementById('file-lib').addEventListener('change', handleFile);
+        document.getElementById('file-cam').addEventListener('change', handleFile);
+
         window.onload = function() {
             window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1}, "*");
-            window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: 80}, "*");
+            window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: 75}, "*");
         };
     </script>
 </body>
@@ -264,6 +283,7 @@ _smart_camera = components.declare_component("smart_cam_planb", path=temp_dir)
 # ==========================================
 st.set_page_config(page_title="Felix検査App", layout="wide", initial_sidebar_state="collapsed")
 
+# 🌟 CSSデザイン注入（固定戻るボタン等のデザイン）
 st.markdown("""
 <style>
     [data-testid="collapsedControl"] { display: none !important; }
@@ -275,11 +295,32 @@ st.markdown("""
     .record-box { border-bottom: 2px solid #EEEEEE; padding-bottom: 20px; margin-bottom: 20px; }
     .badge-wrap { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: bold; margin-left: 5px; color: #d93025; }
     
-    /* 🌟 差し戻し等のインライン小ボタン用の調整 */
     div[data-testid="column"] button { height: 35px !important; font-size: 12px !important; font-weight: normal !important; padding: 0 !important; }
 
+    /* 🌟 左上に固定(フロート)する「戻るボタン」専用のCSSクラス */
+    .floating-back-btn {
+        position: fixed !important;
+        top: 15px !important;
+        left: 15px !important;
+        z-index: 999999 !important;
+        width: auto !important;
+    }
+    .floating-back-btn button {
+        background-color: #34495e !important;
+        color: white !important;
+        border-radius: 30px !important;
+        padding: 5px 20px !important;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;
+        border: 2px solid white !important;
+        font-size: 14px !important;
+        font-weight: bold !important;
+        height: auto !important;
+        min-height: 40px !important;
+    }
+    .floating-back-btn button p { color: white !important; margin: 0 !important; }
+
     @media print {
-        .stButton, .stTextInput, .stRadio, .stSelectbox, .stCheckbox, [data-testid="stExpander"] { display: none !important; }
+        .stButton, .stTextInput, .stRadio, .stSelectbox, .stCheckbox, [data-testid="stExpander"], .floating-back-btn { display: none !important; }
         .admin-delete-box, hr { display: none !important; }
         .main .block-container { padding: 0 !important; margin: 0 !important; max-width: 100% !important; }
     }
@@ -307,7 +348,7 @@ INSPECTOR_OPTS = ["工事監理チーム", "建設部", "不動産事業部", "�
 # ==========================================
 # 5. セッション管理 
 # ==========================================
-for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "edit_prop_target", "skip_render_ids", "show_bulk_confirm", "edit_saved_records", "cached_records", "cached_target_id", "temp_photo", "prev_floor", "prev_area", "splash_done"]:
+for key in ["role", "active_menu", "pre_selected_prop", "delete_target", "edit_prop_target", "skip_render_ids", "show_bulk_confirm", "edit_saved_records", "cached_records", "cached_target_id", "temp_photo", "prev_floor", "prev_area", "splash_done", "logout_triggered"]:
     if key not in st.session_state: st.session_state[key] = None
 
 if st.session_state.skip_render_ids is None: st.session_state.skip_render_ids = []
@@ -315,11 +356,7 @@ if "issue_saved" not in st.session_state: st.session_state.issue_saved = False
 if "drill_target" not in st.session_state or not isinstance(st.session_state.drill_target, dict): st.session_state.drill_target = None
 if "current_box" not in st.session_state or not isinstance(st.session_state.current_box, dict): st.session_state.current_box = None
 if st.session_state.splash_done is None: st.session_state.splash_done = False
-
-qp = st.query_params
 if "target_area" not in st.session_state: st.session_state.target_area = None
-if qp.get("area") == "tokai": st.session_state.target_area = "東海エリア"
-elif qp.get("area") == "kanto": st.session_state.target_area = "関東エリア"
 
 def jump_to_menu(menu_name, prop_id=None):
     st.session_state.active_menu = menu_name
@@ -343,17 +380,103 @@ def jump_to_menu(menu_name, prop_id=None):
 # 6. メイン画面・機能
 # ==========================================
 def main():
-    if st.session_state.role is None:
-        if qp.get("mode") == "partner":
-            st.session_state.role = "partner"
-            st.session_state.active_menu = "ホーム"
-        else:
-            st.session_state.role = "admin"
-            st.session_state.active_menu = "ホーム"
-        st.session_state.splash_done = False
-        st.rerun()
-        return
 
+    # 🌟 JavaScript注入（「⬅ 戻る」と書かれたボタンを左上に固定させる魔法のスクリプト）
+    components.html("""
+    <script>
+    function floatBackButton() {
+        const doc = window.parent.document;
+        const buttons = Array.from(doc.querySelectorAll('button'));
+        buttons.forEach(b => {
+            if(b.innerText.includes('⬅ 戻る')) {
+                const container = b.closest('div.stButton');
+                if(container && !container.classList.contains('floating-back-btn')) {
+                    container.classList.add('floating-back-btn');
+                }
+            }
+        });
+    }
+    // 即時実行 ＋ 画面が再描画された時にも自動で拾い上げる監視システム
+    floatBackButton();
+    const observer = new MutationObserver(floatBackButton);
+    observer.observe(window.parent.document.body, {childList: true, subtree: true});
+    </script>
+    """, height=0)
+
+    # ログアウト処理の実行
+    if st.session_state.logout_triggered:
+        components.html("<script>localStorage.removeItem('felix_user_auth');</script>", height=0)
+        time.sleep(0.5)
+        st.session_state.clear()
+        st.rerun()
+
+    # 🌟【最重要】PWA回避・自動ログイン＆初回ロール選択画面
+    if st.session_state.role is None:
+        role_html = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <style>
+            body { font-family: 'Helvetica Neue', Arial, sans-serif; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f8f9fa; }
+            .btn { display: block; width: 100%; max-width: 320px; padding: 18px; margin: 12px 0; font-size: 16px; font-weight: bold; color: white; border: none; border-radius: 8px; cursor: pointer; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: opacity 0.2s; }
+            .btn:active { opacity: 0.8; }
+            .btn-admin { background-color: #2C3E50; }
+            .btn-partner-tokai { background-color: #27AE60; }
+            .btn-partner-kanto { background-color: #2980B9; }
+            h2 { color: #333; margin-bottom: 20px; font-size: 20px; text-align: center; }
+            p { color: #666; font-size: 13px; text-align: center; margin-bottom: 30px; }
+        </style>
+        </head>
+        <body>
+            <div id="loading"><h3>認証情報を確認中...</h3></div>
+            <div id="selector" style="display: none; width: 100%; text-align: center;">
+                <h2>ログインアカウントの選択</h2>
+                <p>※一度選択すると、次回以降はこの画面をスキップして自動で開きます。</p>
+                <button class="btn btn-admin" onclick="setRole('admin', '')">💻 管理者として入室</button>
+                <button class="btn btn-partner-tokai" onclick="setRole('partner', '東海エリア')">🛠️ 協力業者 (東海エリア)</button>
+                <button class="btn btn-partner-kanto" onclick="setRole('partner', '関東エリア')">🛠️ 協力業者 (関東エリア)</button>
+            </div>
+            <script>
+                function sendToStreamlit(data) {
+                    window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setComponentValue", value: data}, "*");
+                }
+                function setRole(role, area) {
+                    const data = {role: role, area: area};
+                    localStorage.setItem('felix_user_auth', JSON.stringify(data));
+                    sendToStreamlit(data);
+                }
+                window.onload = function() {
+                    window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1}, "*");
+                    window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: 500}, "*");
+                    const saved = localStorage.getItem('felix_user_auth');
+                    if (saved) {
+                        try {
+                            const data = JSON.parse(saved);
+                            if (data.role) { sendToStreamlit(data); return; }
+                        } catch(e) {}
+                    }
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('selector').style.display = 'block';
+                };
+            </script>
+        </body>
+        </html>
+        """
+        temp_dir_auth = os.path.join(tempfile.gettempdir(), "felix_auth_comp")
+        os.makedirs(temp_dir_auth, exist_ok=True)
+        with open(os.path.join(temp_dir_auth, "index.html"), "w", encoding="utf-8") as f: f.write(role_html)
+        _auth_menu = components.declare_component("auth_menu", path=temp_dir_auth)
+        auth_res = _auth_menu(key="auth_comp")
+
+        if auth_res:
+            st.session_state.role = auth_res.get("role")
+            st.session_state.target_area = auth_res.get("area")
+            st.session_state.active_menu = "ホーム"
+            st.session_state.splash_done = False
+            st.rerun()
+        st.stop() # 認証待ち中はこれ以降のコードを実行しない
+
+    # --- 認証済み以降の処理 ---
     confirm_cnt = 0
     if st.session_state.role == "admin":
         wait_conf_recs = db_get("inspection_records", "select=record_id&progress_status=eq.確認待ち")
@@ -375,9 +498,9 @@ def main():
         selected_menu = st.radio("移動先を選択", menu_opts, index=menu_opts.index(st.session_state.active_menu), format_func=format_menu, label_visibility="collapsed")
         
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("ログアウト"):
-            for k in list(st.session_state.keys()): del st.session_state[k]
-            st.query_params.clear(); st.rerun()
+        if st.button("ログアウト / アカウントの切り替え"):
+            st.session_state.logout_triggered = True
+            st.rerun()
 
     if selected_menu != st.session_state.active_menu:
         jump_to_menu(selected_menu, st.session_state.pre_selected_prop)
@@ -538,7 +661,7 @@ def main():
                     if del_pw == "2011":
                         db_delete_property(prop_id); st.session_state.delete_target = None; st.session_state.current_box = None; st.rerun()
                     else: st.error("パスワードが違います")
-                if col_n.button("No (キャンセル)", key=f"no_{key_suffix}"): st.session_state.delete_target = None; st.rerun()
+                if col_n.button("キャンセル", key=f"no_{key_suffix}"): st.session_state.delete_target = None; st.rerun()
                 st.markdown("---")
 
     # ----------------------------------------
@@ -592,6 +715,11 @@ def main():
             cb = st.session_state.current_box
             if not isinstance(cb, dict): cb = {}
             c_name = cb.get('name', ''); c_type = cb.get('type', ''); c_id = cb.get('id', ''); c_prop_id = cb.get('prop_id', ''); c_inspector = cb.get('inspector', '')
+            
+            # ⬅ 戻るボタン（CSSの魔法で左上に固定されます）
+            if st.button("⬅ 戻る", key="back_from_insp"):
+                st.session_state.current_box = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None; st.session_state.prev_floor = None; st.session_state.prev_area = None; st.rerun()
+            
             st.subheader(f"{c_name} / {c_type}")
 
             cb_data = cb.copy()
@@ -601,7 +729,7 @@ def main():
             
             if st.session_state.get("edit_saved_records"):
                 st.markdown("#### 今回保存した指摘データの確認・修正")
-                if st.button("＜ 検査登録に戻る", key="back_top", use_container_width=True): st.session_state.edit_saved_records = False; st.rerun()
+                if st.button("⬅ 戻る", key="back_to_edit_top"): st.session_state.edit_saved_records = False; st.rerun()
                 st.markdown("---")
                 
                 saved_recs = db_get("inspection_records", f"inspection_id=eq.{c_id}")
@@ -689,7 +817,6 @@ def main():
                         st.markdown('</div>', unsafe_allow_html=True)
                         
                 st.markdown("---")
-                if st.button("＜ 検査登録に戻る", key="back_bottom", use_container_width=True): st.session_state.edit_saved_records = False; st.rerun()
 
             elif not st.session_state.issue_saved:
                 prev_f = st.session_state.prev_floor; prev_a = st.session_state.prev_area
@@ -754,16 +881,13 @@ def main():
                         record_data = {
                             "record_id": str(uuid.uuid4()), "inspection_id": c_id, "property_id": c_prop_id, 
                             "floor_level": f, "area": a, "work_type": w, "issue_detail": final_desc, 
-                            "progress_status": initial_status, 
-                            "line_notified": True  # 💡 新規登録時は通知済み(スルー)扱いにして暴発を防ぐ
+                            "progress_status": initial_status, "line_notified": True
                         }
                         threading.Thread(target=bg_save_inspection, args=(active_photo, record_data)).start()
                         st.session_state.issue_saved = True; st.session_state.temp_photo = None
                         st.session_state.prev_floor = f; st.session_state.prev_area = a; st.rerun()
                     else: st.error("工種・内容・写真はすべて必須です")
                 
-                if st.button("終了"): st.session_state.current_box = None; st.session_state.temp_photo = None; st.session_state.prev_floor = None; st.session_state.prev_area = None; st.rerun()
-
                 if st.session_state.temp_photo:
                     st.markdown("<p style='font-size:12px; color:gray; margin-top:10px;'>▼ プレビュー (1/4縮小表示)</p>", unsafe_allow_html=True)
                     st.image(st.session_state.temp_photo, width=250)
@@ -772,7 +896,7 @@ def main():
                 st.success("保存完了（次の入力が可能です）") 
                 if st.button("続けて次を登録", use_container_width=True): st.session_state.issue_saved = False; st.session_state.temp_photo = None; st.rerun()
                 if st.button("保存データを確認・修正", use_container_width=True): st.session_state.edit_saved_records = True; st.rerun()
-                if st.button("検査全体を終了", use_container_width=True): st.session_state.current_box = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.temp_photo = None; st.session_state.prev_floor = None; st.session_state.prev_area = None; st.rerun()
+                
 
     # ----------------------------------------
     # メニュー: 3. 検査内容確認（管理者専用）
@@ -803,7 +927,6 @@ def main():
                 tree[p]["types"][t] = tree[p]["types"].get(t, 0) + 1
         if search_verify: tree = {k: v for k, v in tree.items() if search_verify in k}
 
-        # 物件アコーディオンの重複表示を合体排除
         sorted_tree_keys = []
         for p in all_props:
             p_name = p.get('property_name')
@@ -828,8 +951,11 @@ def main():
         target_id_str = f"verif_{prop_val}_{type_val}" if prop_val else None
 
         if prop_val and type_val:
-            if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.cached_records = None; st.rerun()
             
+            # ⬅ 戻るボタン（固定）
+            if st.button("⬅ 戻る", key="back_from_verify"): 
+                st.session_state.drill_target = None; st.session_state.cached_records = None; st.rerun()
+
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
             if t_ids:
                 if st.session_state.cached_records is None or st.session_state.cached_target_id != target_id_str:
@@ -908,12 +1034,13 @@ def main():
     # メニュー: 4-A. 是正実施（協力業者専用）
     # ----------------------------------------
     elif st.session_state.active_menu == "是正実施（協力業者）":
-        st.header("定是正実施")
+        # 🌟 誤字の修正（定是正実施 → 是正実施）
+        st.header("是正実施")
         if st.session_state.target_area:
             st.success(f"現在の表示エリア：【 {st.session_state.target_area} 】")
             t_area = st.session_state.target_area
         else:
-            st.warning("URLにエリア指定がありません。正しいURLからアクセスしてください。")
+            st.warning("エリア情報がありません。一度ログアウトして再選択してください。")
             t_area = None
         search_fix = st.text_input("物件名で検索（一部入力でも可）", key="search_fix")
 
@@ -981,8 +1108,11 @@ def main():
             if not has_visible_items: st.info("該当する対応必要項目はありません。")
         
         if prop_val and type_val:
-            if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
             
+            # ⬅ 戻るボタン（固定）
+            if st.button("⬅ 戻る", key="back_from_fix"): 
+                st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
+
             cb_data = {"prop": prop_val, "type": type_val}
             json_str = json.dumps(cb_data, ensure_ascii=False)
             components.html(f"<script>localStorage.setItem(\"felix_partner_session\", JSON.stringify({json_str}));</script>", height=0)
@@ -1109,7 +1239,6 @@ def main():
             for p_idx, p_name in enumerate(sorted_tree_keys):
                 v_data = tree[p_name]; p_id = v_data.get("prop_id"); p_hdate = prop_hdate_map.get(p_id)
                 
-                # ①引渡し日数・超過日数の計算と表示 (❗️アラート用)
                 h_disp = " (引渡し未設定)"
                 is_overdue = False
                 if p_hdate:
@@ -1130,7 +1259,6 @@ def main():
                 if v_data["types"]:
                     has_visible_items = True
                     
-                    # ーー ③ 全検査分をまとめたLINE送信用テキスト作成 ーー
                     p_inspections = [i for i in all_ins if isinstance(i, dict) and i.get('property_name') == p_name]
                     p_ins_ids = [str(i.get('inspection_id')) for i in p_inspections]
                     p_recs = [r for r in all_recs_for_tree if str(r.get('inspection_id')) in p_ins_ids]
@@ -1162,11 +1290,9 @@ def main():
                         
                     copy_text = "\n".join(copy_lines)
                     
-                    # レイアウト（10:1で分割し、右側にメール送信ボタン）
                     col_ex1, col_ex2 = st.columns([10, 1])
                     with col_ex1:
                         with st.expander(f"{p_name}{h_disp}"):
-                            # 超過している場合はExpander直下に赤文字太字で警告
                             if is_overdue:
                                 st.markdown(f"<div style='color:#E74C3C; font-weight:bold; margin-bottom:15px; font-size:16px;'>🚨 引渡し日（{p_hdate}）を超過しています！至急対応してください。</div>", unsafe_allow_html=True)
                             
@@ -1183,7 +1309,6 @@ def main():
                                     st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
                                 t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#E74C3C; font-size: 13px;'>{badge_text}</span></div>", unsafe_allow_html=True)
                                 
-                                # ②遅延理由の入力と自動保存（コールバック利用）
                                 if t_ins_id:
                                     def make_update_reason_cb(ins_id, key):
                                         def _update():
@@ -1202,7 +1327,10 @@ def main():
             if not has_visible_items: st.info("現在、該当する対応必要項目はありません。")
         
         if prop_val and type_val:
-            if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
+            
+            # ⬅ 戻るボタン（固定）
+            if st.button("⬅ 戻る", key="back_from_dash"): 
+                st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
             
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
             if t_ids:
@@ -1384,7 +1512,9 @@ def main():
         if prop_val and type_val:
             target_id_str = f"done_{prop_val}_{type_val}"
             
-            if st.button("＜ 物件選択に戻る"): st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
+            # ⬅ 戻るボタン（固定）
+            if st.button("⬅ 戻る", key="back_from_done"): 
+                st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
             
             target_ins = None; t_ids = []
             all_ins = db_get("inspections", "select=*")
