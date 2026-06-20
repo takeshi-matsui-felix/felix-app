@@ -152,7 +152,7 @@ def sort_properties_by_handover(props_list):
     return sorted(props_list, key=get_handover_key)
 
 # ==========================================
-# 2. スマート電子黒板カメラ（📁ライブラリ / 📷カメラ 独立版）
+# 2. スマート電子黒板カメラ（📁ライブラリ / 📷カメラ 独立版 + PC非表示機能）
 # ==========================================
 SMART_CAMERA_HTML = """<!DOCTYPE html>
 <html lang="ja">
@@ -182,6 +182,15 @@ SMART_CAMERA_HTML = """<!DOCTYPE html>
         </label>
     </div>
     <script>
+        // スマホ・タブレット判定（iPadOS 13+のデスクトップモードにも対応）
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
+                         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        
+        // PCならカメラボタンを隠す（A案）
+        if (!isMobile) {
+            document.getElementById('lbl-cam').style.display = 'none';
+        }
+
         let b = { propName: "", inspType: "", inspDate: "", locationText: "", issueDetail: "", mode: "insp" };
         window.addEventListener("message", function(e) {
             if (e.data.type === "streamlit:render" && e.data.args) {
@@ -1025,7 +1034,8 @@ def main():
     # メニュー: 4-A. 是正実施（協力業者専用）
     # ----------------------------------------
     elif st.session_state.active_menu == "是正実施（協力業者）":
-        st.header("定是正実施")
+        # 🌟 誤字の修正（定是正実施 → 是正実施）
+        st.header("是正実施")
         if st.session_state.target_area:
             st.success(f"現在の表示エリア：【 {st.session_state.target_area} 】")
             t_area = st.session_state.target_area
