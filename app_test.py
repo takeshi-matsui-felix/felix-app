@@ -120,7 +120,8 @@ def bg_save_inspection(photo_b64, record_data):
 
 def bg_save_correction(rec_id, fix_photo_b64):
     fix_url = upload_to_storage(fix_photo_b64)
-    db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "fix_photo_url": fix_url})
+    # 🌟 協力業者が是正写真をアップした時、絶対にロボットに見つからないように強制的に True で上書き
+    db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "fix_photo_url": fix_url, "line_notified": True})
 
 def bg_patch_record(rec_id, photo_b64, up_data):
     if photo_b64:
@@ -881,7 +882,9 @@ def main():
                         record_data = {
                             "record_id": str(uuid.uuid4()), "inspection_id": c_id, "property_id": c_prop_id, 
                             "floor_level": f, "area": a, "work_type": w, "issue_detail": final_desc, 
-                            "progress_status": initial_status, "line_notified": True
+                            "progress_status": initial_status, 
+                            # 🌟 新規登録時は絶対にロボットに送らせない（True）
+                            "line_notified": True
                         }
                         threading.Thread(target=bg_save_inspection, args=(active_photo, record_data)).start()
                         st.session_state.issue_saved = True; st.session_state.temp_photo = None
@@ -896,7 +899,7 @@ def main():
                 st.success("保存完了（次の入力が可能です）") 
                 if st.button("続けて次を登録", use_container_width=True): st.session_state.issue_saved = False; st.session_state.temp_photo = None; st.rerun()
                 if st.button("保存データを確認・修正", use_container_width=True): st.session_state.edit_saved_records = True; st.rerun()
-                # 🌟 今回復活した一番大事な終了ボタンです！！
+                # 終了ボタン
                 if st.button("内容を保存して検査を終了する", use_container_width=True): st.session_state.current_box = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None; st.session_state.prev_floor = None; st.session_state.prev_area = None; st.rerun()
                 
 
@@ -972,7 +975,8 @@ def main():
 
                 st.info(f"この検査（{prop_val} / {type_val}）には、現在 {len(recs)}件 のデータがあります。")
                 if st.button("この検査をすべて承認して業者（是正実施）に送る", type="primary"):
-                    for r in recs: db_patch("inspection_records", r['record_id'], {"progress_status": "是正待ち"})
+                    # 🌟 承認して業者に送る時もロボットに送らせない（True）
+                    for r in recs: db_patch("inspection_records", r['record_id'], {"progress_status": "是正待ち", "line_notified": True})
                     st.success("一括承認が完了しました。協力業者へ表示されます。"); st.session_state.drill_target = None; st.session_state.cached_records = None; st.rerun()
                 st.markdown("---")
                 
@@ -1026,7 +1030,8 @@ def main():
 
                         c1, c2 = st.columns(2)
                         if c1.button("個別承認（業者へ送る）", key=f"vok_{rec_id}", type="primary"):
-                            db_patch("inspection_records", rec_id, {"progress_status": "是正待ち"}); st.session_state.cached_records = None; st.rerun()
+                            # 🌟 個別承認時もロボットに送らせない（True）
+                            db_patch("inspection_records", rec_id, {"progress_status": "是正待ち", "line_notified": True}); st.session_state.cached_records = None; st.rerun()
                         if c2.button("指摘を削除", key=f"vdel_{rec_id}"):
                             db_delete_record(rec_id); st.session_state.cached_records = None; st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
@@ -1036,6 +1041,7 @@ def main():
     # メニュー: 4-A. 是正実施（協力業者専用）
     # ----------------------------------------
     elif st.session_state.active_menu == "是正実施（協力業者）":
+        # 🌟 誤字の修正（定是正実施 → 是正実施）
         st.header("是正実施")
         if st.session_state.target_area:
             st.success(f"現在の表示エリア：【 {st.session_state.target_area} 】")
@@ -1176,6 +1182,7 @@ def main():
                                 )
                                 if st.button("完了報告", key=f"s_{rec_id}", type="primary"):
                                     if up: 
+                                        # 🌟 ここで実行されるbg_save_correctionの中で line_notified: True に上書きされます！
                                         threading.Thread(target=bg_save_correction, args=(rec_id, up)).start()
                                         st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                         st.session_state.skip_render_ids.append(rec_id); st.rerun()
@@ -1408,7 +1415,8 @@ def main():
                                     if st.button("写真を保存して完了にする", key=f"s_{rec_id}", type="primary"):
                                         if up: 
                                             fix_url = upload_to_storage(up)
-                                            db_patch("inspection_records", rec_id, {"progress_status": "完了", "fix_photo_url": fix_url})
+                                            # 🌟 管理者が代わりに写真アップした時もロボットに送らせない（True）
+                                            db_patch("inspection_records", rec_id, {"progress_status": "完了", "fix_photo_url": fix_url, "line_notified": True})
                                             st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                             st.session_state.skip_render_ids.append(rec_id); st.rerun()
                                         else: st.error("写真をセットしてください")
@@ -1418,16 +1426,18 @@ def main():
                                     if f_photo: st.markdown(f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
                                     ca, cb = st.columns(2)
                                     if ca.button("承認（完了へ）", key=f"ok_{rec_id}", type="primary"): 
-                                        db_patch("inspection_records", rec_id, {"progress_status": "完了"})
+                                        # 🌟 管理者が承認した時もロボットに送らせない（True）
+                                        db_patch("inspection_records", rec_id, {"progress_status": "完了", "line_notified": True})
                                         st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                         st.session_state.skip_render_ids.append(rec_id); st.rerun()
                                     reason = cb.text_input("否認理由を入力", key=f"re_{rec_id}", label_visibility="collapsed", placeholder="否認理由があれば入力")
                                     
+                                    # 🚨🔥🔥 ここのみ、ロボットに拾わせるための False（引き金）を仕掛ける！！ 🔥🔥🚨
                                     if cb.button("否認（差し戻し）", key=f"ng_{rec_id}"): 
                                         db_patch("inspection_records", rec_id, {
                                             "progress_status": "是正待ち", 
                                             "reject_reason": reason,
-                                            "line_notified": False
+                                            "line_notified": False  # <--- ロボットよ、これだけ拾ってLINEに送れ！
                                         })
                                         st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                         st.session_state.skip_render_ids.append(rec_id); st.rerun()
@@ -1446,7 +1456,8 @@ def main():
                             with st.spinner("一括処理中..."):
                                 for r in conf_recs:
                                     rid = r.get('record_id')
-                                    if rid: db_patch("inspection_records", rid, {"progress_status": "完了"})
+                                    # 🌟 一括承認時もロボットに送らせない（True）
+                                    if rid: db_patch("inspection_records", rid, {"progress_status": "完了", "line_notified": True})
                             st.success("すべて承認しました"); st.session_state.show_bulk_confirm = False; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
                         if c_no.button("キャンセル", use_container_width=True): st.session_state.show_bulk_confirm = False; st.rerun()
 
@@ -1588,7 +1599,8 @@ def main():
                         with col_undo:
                             if st.session_state.role == "admin":
                                 if st.button("↩️ 完了取消", key=f"undo_{rec_id}_{idx}"):
-                                    db_patch("inspection_records", rec_id, {"progress_status": "是正確認中"})
+                                    # 🌟 完了を取り消してダッシュボードに戻す時もロボットに送らせない（True）
+                                    db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "line_notified": True})
                                     st.session_state.cached_records = None
                                     st.success("完了を取り消し、ダッシュボードに復活させました！")
                                     time.sleep(1)
