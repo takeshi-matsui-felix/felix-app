@@ -152,7 +152,7 @@ def sort_properties_by_handover(props_list):
     return sorted(props_list, key=get_handover_key)
 
 # ==========================================
-# 2. スマート電子黒板カメラ
+# 2. スマート電子黒板カメラ（📁ライブラリ / 📷カメラ 独立版）
 # ==========================================
 SMART_CAMERA_HTML = """<!DOCTYPE html>
 <html lang="ja">
@@ -161,19 +161,26 @@ SMART_CAMERA_HTML = """<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
         body { margin: 0; padding: 5px; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background-color: transparent;}
+        .btn-group { display: flex; gap: 10px; width: 100%; max-width: 400px; }
         .upload-btn {
-            display: block; width: 100%; max-width: 400px; padding: 18px 20px;
-            color: white; border-radius: 8px; font-size: 16px; font-weight: bold; text-align: center; cursor: pointer; 
-            box-sizing: border-box; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            flex: 1; padding: 15px 5px;
+            color: white; border-radius: 8px; font-size: 14px; font-weight: bold; text-align: center; cursor: pointer; 
+            box-sizing: border-box; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: flex; justify-content: center; align-items: center;
         }
         input[type="file"] { display: none; }
     </style>
 </head>
 <body>
-    <label class="upload-btn" id="upload-label" style="background-color: #28a745;">
-        <span id="btn-text">黒板付きで撮影 ／ 選択</span>
-        <input type="file" accept="image/*" capture="environment" id="file-input">
-    </label>
+    <div class="btn-group">
+        <label class="upload-btn" id="lbl-lib" style="background-color: #27AE60;">
+            <span id="txt-lib">📁 ライブラリ</span>
+            <input type="file" accept="image/*" id="file-lib">
+        </label>
+        <label class="upload-btn" id="lbl-cam" style="background-color: #2980B9;">
+            <span id="txt-cam">📷 カメラ起動</span>
+            <input type="file" accept="image/*" capture="environment" id="file-cam">
+        </label>
+    </div>
     <script>
         let b = { propName: "", inspType: "", inspDate: "", locationText: "", issueDetail: "", mode: "insp" };
         window.addEventListener("message", function(e) {
@@ -181,10 +188,6 @@ SMART_CAMERA_HTML = """<!DOCTYPE html>
                 b.propName = e.data.args.propName || ""; b.inspType = e.data.args.inspType || ""; 
                 b.inspDate = e.data.args.inspDate || ""; b.locationText = e.data.args.locationText || ""; 
                 b.issueDetail = e.data.args.issueDetail || ""; b.mode = e.data.args.mode || "insp";
-                if(b.mode === 'fix') {
-                    document.getElementById('upload-label').style.backgroundColor = '#007bff';
-                    document.getElementById('btn-text').innerText = '是正写真を撮影';
-                }
             }
         });
 
@@ -203,11 +206,12 @@ SMART_CAMERA_HTML = """<!DOCTYPE html>
 
         function sendToStreamlit(val) { window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}, "*"); }
 
-        const input = document.getElementById('file-input');
-        input.addEventListener('change', function(e) {
+        function handleFile(e) {
             const file = e.target.files[0]; if (!file) return;
-            document.getElementById('upload-label').style.backgroundColor = '#f39c12';
-            document.getElementById('btn-text').innerHTML = '合成中...お待ちください';
+            document.getElementById('lbl-lib').style.backgroundColor = '#f39c12';
+            document.getElementById('lbl-cam').style.backgroundColor = '#f39c12';
+            document.getElementById('txt-lib').innerHTML = '合成中...';
+            document.getElementById('txt-cam').innerHTML = 'お待ちを';
 
             const reader = new FileReader();
             reader.onload = function(event) {
@@ -239,16 +243,22 @@ SMART_CAMERA_HTML = """<!DOCTYPE html>
                     wrapTextAndReturnY(ctx, b.issueDetail, textX, ty, dw, ls, 3);
 
                     sendToStreamlit(canvas.toDataURL('image/jpeg', 0.6));
-                    document.getElementById('upload-label').style.backgroundColor = '#2ecc71';
-                    document.getElementById('btn-text').innerHTML = 'セット完了';
+                    document.getElementById('lbl-lib').style.backgroundColor = '#2ecc71';
+                    document.getElementById('lbl-cam').style.backgroundColor = '#2ecc71';
+                    document.getElementById('txt-lib').innerHTML = '✅ 完了';
+                    document.getElementById('txt-cam').innerHTML = '✅ 完了';
                 };
                 img.src = event.target.result;
             };
             reader.readAsDataURL(file);
-        });
+        }
+
+        document.getElementById('file-lib').addEventListener('change', handleFile);
+        document.getElementById('file-cam').addEventListener('change', handleFile);
+
         window.onload = function() {
             window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1}, "*");
-            window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: 80}, "*");
+            window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: 75}, "*");
         };
     </script>
 </body>
@@ -264,6 +274,7 @@ _smart_camera = components.declare_component("smart_cam_planb", path=temp_dir)
 # ==========================================
 st.set_page_config(page_title="Felix検査App", layout="wide", initial_sidebar_state="collapsed")
 
+# 🌟 CSSデザイン注入（固定戻るボタン等のデザイン）
 st.markdown("""
 <style>
     [data-testid="collapsedControl"] { display: none !important; }
@@ -275,12 +286,32 @@ st.markdown("""
     .record-box { border-bottom: 2px solid #EEEEEE; padding-bottom: 20px; margin-bottom: 20px; }
     .badge-wrap { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: bold; margin-left: 5px; color: #d93025; }
     
-    /* 🌟 戻るボタンやインライン小ボタン用の調整 */
-    .back-btn-container { margin-bottom: 15px; }
     div[data-testid="column"] button { height: 35px !important; font-size: 12px !important; font-weight: normal !important; padding: 0 !important; }
 
+    /* 🌟 左上に固定(フロート)する「戻るボタン」専用のCSSクラス */
+    .floating-back-btn {
+        position: fixed !important;
+        top: 15px !important;
+        left: 15px !important;
+        z-index: 999999 !important;
+        width: auto !important;
+    }
+    .floating-back-btn button {
+        background-color: #34495e !important;
+        color: white !important;
+        border-radius: 30px !important;
+        padding: 5px 20px !important;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;
+        border: 2px solid white !important;
+        font-size: 14px !important;
+        font-weight: bold !important;
+        height: auto !important;
+        min-height: 40px !important;
+    }
+    .floating-back-btn button p { color: white !important; margin: 0 !important; }
+
     @media print {
-        .stButton, .stTextInput, .stRadio, .stSelectbox, .stCheckbox, [data-testid="stExpander"] { display: none !important; }
+        .stButton, .stTextInput, .stRadio, .stSelectbox, .stCheckbox, [data-testid="stExpander"], .floating-back-btn { display: none !important; }
         .admin-delete-box, hr { display: none !important; }
         .main .block-container { padding: 0 !important; margin: 0 !important; max-width: 100% !important; }
     }
@@ -340,6 +371,29 @@ def jump_to_menu(menu_name, prop_id=None):
 # 6. メイン画面・機能
 # ==========================================
 def main():
+
+    # 🌟 JavaScript注入（「⬅ 戻る」と書かれたボタンを左上に固定させる魔法のスクリプト）
+    components.html("""
+    <script>
+    function floatBackButton() {
+        const doc = window.parent.document;
+        const buttons = Array.from(doc.querySelectorAll('button'));
+        buttons.forEach(b => {
+            if(b.innerText.includes('⬅ 戻る')) {
+                const container = b.closest('div.stButton');
+                if(container && !container.classList.contains('floating-back-btn')) {
+                    container.classList.add('floating-back-btn');
+                }
+            }
+        });
+    }
+    // 即時実行 ＋ 画面が再描画された時にも自動で拾い上げる監視システム
+    floatBackButton();
+    const observer = new MutationObserver(floatBackButton);
+    observer.observe(window.parent.document.body, {childList: true, subtree: true});
+    </script>
+    """, height=0)
+
     # ログアウト処理の実行
     if st.session_state.logout_triggered:
         components.html("<script>localStorage.removeItem('felix_user_auth');</script>", height=0)
@@ -587,7 +641,7 @@ def main():
                     db_patch_property(prop_id, {"property_name": new_name, "handover_date": nh_str})
                     if new_name != p_name: db_patch_inspections_by_prop(prop_id, new_name)
                     st.success("変更を保存しました"); st.session_state.edit_prop_target = None; st.rerun()
-                if col_n.button("⬅ 戻る (キャンセル)", key=f"cancel_name_{key_suffix}"): st.session_state.edit_prop_target = None; st.rerun()
+                if col_n.button("キャンセル", key=f"cancel_name_{key_suffix}"): st.session_state.edit_prop_target = None; st.rerun()
                 st.markdown("---")
                 
             if st.session_state.delete_target == prop_id:
@@ -598,7 +652,7 @@ def main():
                     if del_pw == "2011":
                         db_delete_property(prop_id); st.session_state.delete_target = None; st.session_state.current_box = None; st.rerun()
                     else: st.error("パスワードが違います")
-                if col_n.button("⬅ 戻る (キャンセル)", key=f"no_{key_suffix}"): st.session_state.delete_target = None; st.rerun()
+                if col_n.button("キャンセル", key=f"no_{key_suffix}"): st.session_state.delete_target = None; st.rerun()
                 st.markdown("---")
 
     # ----------------------------------------
@@ -653,11 +707,9 @@ def main():
             if not isinstance(cb, dict): cb = {}
             c_name = cb.get('name', ''); c_type = cb.get('type', ''); c_id = cb.get('id', ''); c_prop_id = cb.get('prop_id', ''); c_inspector = cb.get('inspector', '')
             
-            # ⬅ 戻るボタンの配置
-            st.markdown('<div class="back-btn-container">', unsafe_allow_html=True)
-            if st.button("⬅ 検査一覧に戻る (現在の作業を終了)", use_container_width=True):
+            # ⬅ 戻るボタン（CSSの魔法で左上に固定されます）
+            if st.button("⬅ 戻る", key="back_from_insp"):
                 st.session_state.current_box = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None; st.session_state.prev_floor = None; st.session_state.prev_area = None; st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
             
             st.subheader(f"{c_name} / {c_type}")
 
@@ -668,7 +720,7 @@ def main():
             
             if st.session_state.get("edit_saved_records"):
                 st.markdown("#### 今回保存した指摘データの確認・修正")
-                if st.button("＜ 検査登録に戻る", key="back_top", use_container_width=True): st.session_state.edit_saved_records = False; st.rerun()
+                if st.button("⬅ 戻る", key="back_to_edit_top"): st.session_state.edit_saved_records = False; st.rerun()
                 st.markdown("---")
                 
                 saved_recs = db_get("inspection_records", f"inspection_id=eq.{c_id}")
@@ -756,7 +808,6 @@ def main():
                         st.markdown('</div>', unsafe_allow_html=True)
                         
                 st.markdown("---")
-                if st.button("＜ 検査登録に戻る", key="back_bottom", use_container_width=True): st.session_state.edit_saved_records = False; st.rerun()
 
             elif not st.session_state.issue_saved:
                 prev_f = st.session_state.prev_floor; prev_a = st.session_state.prev_area
@@ -867,7 +918,6 @@ def main():
                 tree[p]["types"][t] = tree[p]["types"].get(t, 0) + 1
         if search_verify: tree = {k: v for k, v in tree.items() if search_verify in k}
 
-        # 物件アコーディオンの重複表示を合体排除
         sorted_tree_keys = []
         for p in all_props:
             p_name = p.get('property_name')
@@ -892,10 +942,10 @@ def main():
         target_id_str = f"verif_{prop_val}_{type_val}" if prop_val else None
 
         if prop_val and type_val:
-            st.markdown('<div class="back-btn-container">', unsafe_allow_html=True)
-            if st.button("⬅ 物件・検査選択に戻る", use_container_width=True): 
+            
+            # ⬅ 戻るボタン（固定）
+            if st.button("⬅ 戻る", key="back_from_verify"): 
                 st.session_state.drill_target = None; st.session_state.cached_records = None; st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
 
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
             if t_ids:
@@ -980,7 +1030,7 @@ def main():
             st.success(f"現在の表示エリア：【 {st.session_state.target_area} 】")
             t_area = st.session_state.target_area
         else:
-            st.warning("エリア指定がありません。一度ログアウトして再選択してください。")
+            st.warning("エリア情報がありません。一度ログアウトして再選択してください。")
             t_area = None
         search_fix = st.text_input("物件名で検索（一部入力でも可）", key="search_fix")
 
@@ -1048,10 +1098,10 @@ def main():
             if not has_visible_items: st.info("該当する対応必要項目はありません。")
         
         if prop_val and type_val:
-            st.markdown('<div class="back-btn-container">', unsafe_allow_html=True)
-            if st.button("⬅ 物件・検査選択に戻る", use_container_width=True): 
+            
+            # ⬅ 戻るボタン（固定）
+            if st.button("⬅ 戻る", key="back_from_fix"): 
                 st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
 
             cb_data = {"prop": prop_val, "type": type_val}
             json_str = json.dumps(cb_data, ensure_ascii=False)
@@ -1267,10 +1317,10 @@ def main():
             if not has_visible_items: st.info("現在、該当する対応必要項目はありません。")
         
         if prop_val and type_val:
-            st.markdown('<div class="back-btn-container">', unsafe_allow_html=True)
-            if st.button("⬅ 物件・検査選択に戻る", use_container_width=True): 
+            
+            # ⬅ 戻るボタン（固定）
+            if st.button("⬅ 戻る", key="back_from_dash"): 
                 st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
             
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
             if t_ids:
@@ -1452,10 +1502,9 @@ def main():
         if prop_val and type_val:
             target_id_str = f"done_{prop_val}_{type_val}"
             
-            st.markdown('<div class="back-btn-container">', unsafe_allow_html=True)
-            if st.button("⬅ 物件・検査選択に戻る", use_container_width=True): 
+            # ⬅ 戻るボタン（固定）
+            if st.button("⬅ 戻る", key="back_from_done"): 
                 st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
             
             target_ins = None; t_ids = []
             all_ins = db_get("inspections", "select=*")
