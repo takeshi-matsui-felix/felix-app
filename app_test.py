@@ -896,6 +896,8 @@ def main():
                 st.success("保存完了（次の入力が可能です）") 
                 if st.button("続けて次を登録", use_container_width=True): st.session_state.issue_saved = False; st.session_state.temp_photo = None; st.rerun()
                 if st.button("保存データを確認・修正", use_container_width=True): st.session_state.edit_saved_records = True; st.rerun()
+                # 🌟 今回復活した一番大事な終了ボタンです！！
+                if st.button("内容を保存して検査を終了する", use_container_width=True): st.session_state.current_box = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None; st.session_state.prev_floor = None; st.session_state.prev_area = None; st.rerun()
                 
 
     # ----------------------------------------
@@ -1034,7 +1036,6 @@ def main():
     # メニュー: 4-A. 是正実施（協力業者専用）
     # ----------------------------------------
     elif st.session_state.active_menu == "是正実施（協力業者）":
-        # 🌟 誤字の修正（定是正実施 → 是正実施）
         st.header("是正実施")
         if st.session_state.target_area:
             st.success(f"現在の表示エリア：【 {st.session_state.target_area} 】")
