@@ -271,6 +271,7 @@ _smart_camera = components.declare_component("smart_cam_planb", path=temp_dir)
 # ==========================================
 st.set_page_config(page_title="Felix検査App", layout="wide", initial_sidebar_state="collapsed")
 
+# 🌟 印刷スタイル・改ページ用CSSの強化（画像巨大化ロジック追加）
 st.markdown("""
 <style>
     [data-testid="collapsedControl"] { display: none !important; }
@@ -305,10 +306,38 @@ st.markdown("""
     }
     .floating-back-btn button p { color: white !important; margin: 0 !important; }
 
+    /* 通常時（画面）の写真サイズ */
+    .report-img {
+        width: 100%;
+        max-height: 250px;
+        object-fit: contain;
+        border-radius: 4px;
+    }
+
     @media print {
         .stButton, .stTextInput, .stRadio, .stSelectbox, .stCheckbox, [data-testid="stExpander"], .floating-back-btn { display: none !important; }
         .admin-delete-box, hr { display: none !important; }
+        
+        /* 余白を極限まで削ってA4用紙全体を使う */
         .main .block-container { padding: 0 !important; margin: 0 !important; max-width: 100% !important; }
+        
+        /* 🌟 印刷時のみ写真を巨大化（A4紙のバランスに合わせて400pxまで解放） */
+        .report-img {
+            max-height: 400px !important;
+        }
+
+        .report-item {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            padding-bottom: 25px !important; /* 項目間の余白を広げて見やすく */
+        }
+        .page-break {
+            page-break-before: always !important;
+            break-before: page !important;
+            height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -751,7 +780,7 @@ def main():
                         rec_id = r.get('record_id')
                         if not rec_id: continue
                         floor = r.get('floor_level', ''); area = r.get('area', ''); detail = r.get('issue_detail', ''); orig_w = r.get('work_type', '')
-                        head_text = "" if c_type.startswith("【検査機関】") or floor == "一式" else f"【{floor} {area}】".strip()
+                        head_text = "" if c_type.startswith("【検査機関】") or floor == "one" or floor == "一式" else f"【{floor} {area}】".strip()
                         title = f"{head_text} {detail}" if head_text else f"【指摘内容】 {detail}"
                         
                         with st.container():
@@ -759,7 +788,7 @@ def main():
                             st.markdown(f"**{title}**")
                             if r.get('issue_photo_url'): 
                                 photo_url = r.get('issue_photo_url')
-                                st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
+                                st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" class="report-img"></a>', unsafe_allow_html=True)
                                 
                             with st.expander("内容を修正・差し替え・削除"):
                                 new_f = floor; new_a = area; sel_temp = None; default_w = ""
@@ -917,7 +946,7 @@ def main():
                                     err_count += 1
                                     continue
                                 
-                                initial_status = "確認待ち" if c_inspector == "工事監理チーム" else "是正待ち"
+                                initial_status = "確認待ち" if c_inspector in ["工事監理チーム", "検査機関"] else "是正待ち"
                                 db_rec = {
                                     "record_id": str(uuid.uuid4()), "inspection_id": c_id, "property_id": c_prop_id, 
                                     "floor_level": rec["floor_level"], "area": rec["area"], "work_type": rec["work_type"], 
@@ -1013,7 +1042,6 @@ def main():
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_verify_floor")
                     if sel_floor != "すべて表示": recs = [r for r in recs if r.get('floor_level') == sel_floor]
 
-                # 🌟 工種フィルターの追加
                 if recs:
                     works_in_recs = sorted(list(set([r.get('work_type') or 'その他' for r in recs])))
                     sel_work = st.selectbox("🛠️ 担当工種で絞り込む", ["すべて表示"] + works_in_recs, key="filter_verify_work")
@@ -1058,7 +1086,7 @@ def main():
                         
                         if r.get('issue_photo_url'): 
                             photo_url = r.get('issue_photo_url')
-                            st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
+                            st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" class="report-img"></a>', unsafe_allow_html=True)
                         
                         with st.expander("指摘内容・写真を直前修正する"):
                             f_idx = FLOOR_OPTS[1:].index(floor) if floor in FLOOR_OPTS[1:] else 0
@@ -1198,7 +1226,6 @@ def main():
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_partner_fix_floor")
                     if sel_floor != "すべて表示": recs = [r for r in recs if r.get('floor_level') == sel_floor]
                 
-                # 🌟 工種フィルターの追加
                 if recs:
                     works_in_recs = sorted(list(set([r.get('work_type') or 'その他' for r in recs])))
                     sel_work = st.selectbox("🛠️ 担当工種で絞り込む", ["すべて表示"] + works_in_recs, key="filter_partner_fix_work")
@@ -1234,7 +1261,7 @@ def main():
                                 st.markdown("**【指摘箇所（Before）】**")
                                 if r.get('issue_photo_url'): 
                                     photo_url = r.get('issue_photo_url')
-                                    st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
+                                    st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" class="report-img"></a>', unsafe_allow_html=True)
                                 else: st.write("写真なし")
                                     
                             with c2:
@@ -1418,7 +1445,6 @@ def main():
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_dash_floor")
                     if sel_floor != "すべて表示": recs = [r for r in recs if r.get('floor_level') == sel_floor]
                 
-                # 🌟 工種フィルターの追加
                 if recs:
                     works_in_recs = sorted(list(set([r.get('work_type') or 'その他' for r in recs])))
                     sel_work = st.selectbox("🛠️ 担当工種で絞り込む", ["すべて表示"] + works_in_recs, key="filter_dash_work")
@@ -1481,7 +1507,7 @@ def main():
                             i_photo = r.get('issue_photo_url'); f_photo = r.get('fix_photo_url')
                             with c1:
                                 st.markdown("**【指摘箇所（Before）】**")
-                                if i_photo: st.markdown(f'<a href="{i_photo}" target="_blank"><img src="{i_photo}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
+                                if i_photo: st.markdown(f'<a href="{i_photo}" target="_blank"><img src="{i_photo}" class="report-img"></a>', unsafe_allow_html=True)
                                 else: st.write("写真なし")
                             with c2:
                                 if p_stat == "是正待ち":
@@ -1503,7 +1529,7 @@ def main():
                                     if up: st.image(up, width=250)
                                 elif p_stat == "是正確認中":
                                     st.markdown("**【是正写真（After）】**")
-                                    if f_photo: st.markdown(f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
+                                    if f_photo: st.markdown(f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" class="report-img"></a>', unsafe_allow_html=True)
                                     ca, cb = st.columns(2)
                                     if ca.button("承認（完了へ）", key=f"ok_{rec_id}", type="primary"): 
                                         with st.spinner("処理中..."):
@@ -1662,20 +1688,24 @@ def main():
                     
                 issue_count = 1
                 for w_name, w_recs in w_groups.items():
-                    st.markdown(f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px;'>■ 工種: {w_name}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px; page-break-after: avoid; break-after: avoid;'>■ 工種: {w_name}</div>", unsafe_allow_html=True)
                     for idx, r in enumerate(w_recs):
                         rec_id = r.get('record_id')
                         if not rec_id: continue
+                        
+                        if issue_count == 4 or (issue_count > 4 and (issue_count - 4) % 4 == 0):
+                            st.markdown('<div class="page-break"></div>', unsafe_allow_html=True)
+                            
                         floor = r.get('floor_level', ''); area = r.get('area')
                         loc_text = "" if type_val.startswith("【検査機関】") or floor == "one" or floor == "一式" else f"【{floor} {area}】"
                         detail = r.get('issue_detail', '')
                         i_photo = r.get("issue_photo_url"); f_photo = r.get("fix_photo_url")
                         no_img_html = '<div style="text-align:center; padding:30px; color:#999; border:1px solid #eee;">写真なし</div>'
                         
-                        img_b = f'<a href="{i_photo}" target="_blank"><img src="{i_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;"></a>' if i_photo else no_img_html
-                        img_a = f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;"></a>' if f_photo else no_img_html
+                        img_b = f'<a href="{i_photo}" target="_blank"><img src="{i_photo}" class="report-img"></a>' if i_photo else no_img_html
+                        img_a = f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" class="report-img"></a>' if f_photo else no_img_html
                         
-                        st.markdown('<div style="page-break-inside: avoid; border-bottom: 1px dashed #ccc; padding: 15px 0; margin-bottom: 10px;">', unsafe_allow_html=True)
+                        st.markdown('<div class="report-item" style="page-break-inside: avoid; break-inside: avoid; border-bottom: 1px dashed #ccc; padding: 15px 0; margin-bottom: 10px;">', unsafe_allow_html=True)
                         
                         col_title, col_undo = st.columns([8, 2])
                         with col_title:
