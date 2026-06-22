@@ -7,6 +7,7 @@ import base64
 import io
 import os
 import tempfile
+import threading
 import json
 import time
 
@@ -40,6 +41,7 @@ def check_and_clear_am3_cache():
     if now.hour >= 3 and st.session_state.last_cache_clear_date != today_str:
         st.session_state.db_cache = {}
         st.session_state.last_cache_clear_date = today_str
+        print("\n【定期クリーンアップ発動】毎朝AM3:00のキャッシュ初期化が正常に完了しました。\n")
 
 def get_cached_data(cache_key, fetch_func, *args, **kwargs):
     check_and_clear_am3_cache()
@@ -680,7 +682,6 @@ def main():
             ins_date = c1.date_input("検査日時", datetime.date.today())
             inspector = c2.selectbox("検査員", INSPECTOR_OPTS)
             
-            # 🌟 通信エラー（フォルダ作成失敗）をここで確実にキャッチする
             if st.button("検査スタート"):
                 prop_name = target.get('property_name'); prop_id = target.get('property_id')
                 if prop_name != "-- 選択 --" and ins_type != "-- 選択 --":
@@ -693,7 +694,7 @@ def main():
                         st.session_state.pre_selected_prop = prop_id
                         st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None
                         st.session_state.prev_floor = None; st.session_state.prev_area = None
-                        st.session_state.pending_records = [] # 新規開始時はストックを空にする
+                        st.session_state.pending_records = []
                         st.rerun()
                     else:
                         st.error("通信エラー：サーバーとの接続に失敗しました。電波の良い場所でもう一度お試しください。")
@@ -718,7 +719,6 @@ def main():
                 if st.button("⬅ 戻る", key="back_to_edit_top"): st.session_state.edit_saved_records = False; st.rerun()
                 st.markdown("---")
                 
-                # 🌟 アウトボックス（未送信）のデータを表示
                 if st.session_state.pending_records:
                     st.markdown("<h5 style='color:#E74C3C;'>⚠️ スマホ内に一時保存中のデータ（終了ボタンで一括送信されます）</h5>", unsafe_allow_html=True)
                     for idx, rec in enumerate(st.session_state.pending_records):
@@ -735,7 +735,6 @@ def main():
                             st.markdown('</div>', unsafe_allow_html=True)
                     st.markdown("---")
 
-                # サーバー送信済みのデータを表示（既存ロジック）
                 st.markdown("##### サーバーへ送信済みの過去データ")
                 saved_recs = db_get("inspection_records", f"inspection_id=eq.{c_id}")
                 if not saved_recs: st.info("サーバーに保存された過去の指摘データはありません。")
@@ -810,7 +809,6 @@ def main():
                                 
                                 c_save, c_del = st.columns(2)
                                 if c_save.button("この内容で上書き", key=f"ed_save_{rec_id}", type="primary"):
-                                    # 🌟 安全な同期処理へ変更
                                     with st.spinner("保存中..."):
                                         up_data = {"floor_level": new_f, "area": new_a, "work_type": new_w, "issue_detail": final_desc}
                                         if new_photo:
@@ -882,7 +880,6 @@ def main():
                 )
                 if photo_input: st.session_state.temp_photo = photo_input
 
-                # 🌟 アウトボックス方式：通信ゼロでスマホのメモリにストックするだけ！
                 if st.button("この内容で一時保存（通信なし）", type="primary"):
                     active_photo = st.session_state.temp_photo
                     if w and final_desc != "" and active_photo is not None:
@@ -908,7 +905,6 @@ def main():
                 if st.button("続けて次を登録", use_container_width=True): st.session_state.issue_saved = False; st.session_state.temp_photo = None; st.rerun()
                 if st.button("保存データを確認・修正", use_container_width=True): st.session_state.edit_saved_records = True; st.rerun()
                 
-                # 🌟 一括送信（同期通信で確実保存）
                 if st.button("内容を保存して検査を終了する（サーバーへ送信）", use_container_width=True): 
                     if not st.session_state.pending_records:
                         st.session_state.current_box = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None; st.session_state.prev_floor = None; st.session_state.prev_area = None; st.rerun()
@@ -1017,9 +1013,15 @@ def main():
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_verify_floor")
                     if sel_floor != "すべて表示": recs = [r for r in recs if r.get('floor_level') == sel_floor]
 
+                # 🌟 工種フィルターの追加
+                if recs:
+                    works_in_recs = sorted(list(set([r.get('work_type') or 'その他' for r in recs])))
+                    sel_work = st.selectbox("🛠️ 担当工種で絞り込む", ["すべて表示"] + works_in_recs, key="filter_verify_work")
+                    if sel_work != "すべて表示":
+                        recs = [r for r in recs if (r.get('work_type') or 'その他') == sel_work]
+
                 st.info(f"この検査（{prop_val} / {type_val}）には、現在 {len(recs)}件 のデータがあります。")
                 if st.button("この検査をすべて承認して業者（是正実施）に送る", type="primary"):
-                    # 🌟 承認も安全な同期処理に変更
                     with st.spinner("一括承認処理中..."):
                         success_flag = True
                         for r in recs:
@@ -1075,7 +1077,6 @@ def main():
                                 locationText=loc_str, issueDetail=disp_d, mode="insp", key=f"vp_{rec_id}"
                             )
                             if st.button("この内容で修正保存", key=f"vsave_{rec_id}"):
-                                # 🌟 直前修正も安全な同期処理へ変更
                                 with st.spinner("保存中..."):
                                     up_data = {"floor_level": new_f, "area": new_a, "issue_detail": new_d.strip(), "work_type": new_w}
                                     if new_p:
@@ -1174,7 +1175,6 @@ def main():
             if not has_visible_items: st.info("該当する対応必要項目はありません。")
         
         if prop_val and type_val:
-            
             if st.button("⬅ 戻る", key="back_from_fix"): 
                 st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
 
@@ -1197,6 +1197,13 @@ def main():
                     floors_in_recs = sorted(list(set([r.get('floor_level', 'one') for r in recs if r.get('floor_level')])))
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_partner_fix_floor")
                     if sel_floor != "すべて表示": recs = [r for r in recs if r.get('floor_level') == sel_floor]
+                
+                # 🌟 工種フィルターの追加
+                if recs:
+                    works_in_recs = sorted(list(set([r.get('work_type') or 'その他' for r in recs])))
+                    sel_work = st.selectbox("🛠️ 担当工種で絞り込む", ["すべて表示"] + works_in_recs, key="filter_partner_fix_work")
+                    if sel_work != "すべて表示":
+                        recs = [r for r in recs if (r.get('work_type') or 'その他') == sel_work]
                 
                 w_groups = {}
                 for r in recs:
@@ -1240,7 +1247,6 @@ def main():
                                 )
                                 if st.button("完了報告", key=f"s_{rec_id}", type="primary"):
                                     if up: 
-                                        # 🌟 完了報告も安全な同期処理へ変更
                                         with st.spinner("送信中..."):
                                             fix_url = upload_to_storage(up)
                                             if fix_url and fix_url != up:
@@ -1397,7 +1403,6 @@ def main():
             if not has_visible_items: st.info("現在、該当する対応必要項目はありません。")
         
         if prop_val and type_val:
-            
             if st.button("⬅ 戻る", key="back_from_dash"): 
                 st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
             
@@ -1413,6 +1418,13 @@ def main():
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_dash_floor")
                     if sel_floor != "すべて表示": recs = [r for r in recs if r.get('floor_level') == sel_floor]
                 
+                # 🌟 工種フィルターの追加
+                if recs:
+                    works_in_recs = sorted(list(set([r.get('work_type') or 'その他' for r in recs])))
+                    sel_work = st.selectbox("🛠️ 担当工種で絞り込む", ["すべて表示"] + works_in_recs, key="filter_dash_work")
+                    if sel_work != "すべて表示":
+                        recs = [r for r in recs if (r.get('work_type') or 'その他') == sel_work]
+
                 recs = sort_records(recs)
                 area_groups = {}
                 for r in recs:
@@ -1503,7 +1515,6 @@ def main():
                                     
                                     if cb.button("否認（差し戻し）", key=f"ng_{rec_id}"): 
                                         with st.spinner("処理中..."):
-                                            # 🚨 ロボットに見つけさせる唯一のフラグ
                                             db_patch("inspection_records", rec_id, {"progress_status": "是正待ち", "reject_reason": reason, "line_notified": False})
                                             st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                             st.session_state.skip_render_ids.append(rec_id)
