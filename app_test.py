@@ -271,7 +271,6 @@ _smart_camera = components.declare_component("smart_cam_planb", path=temp_dir)
 # ==========================================
 st.set_page_config(page_title="Felix検査App", layout="wide", initial_sidebar_state="collapsed")
 
-# 🌟 印刷スタイル・改ページ用CSSの強化（画像巨大化ロジック追加）
 st.markdown("""
 <style>
     [data-testid="collapsedControl"] { display: none !important; }
@@ -306,7 +305,6 @@ st.markdown("""
     }
     .floating-back-btn button p { color: white !important; margin: 0 !important; }
 
-    /* 通常時（画面）の写真サイズ */
     .report-img {
         width: 100%;
         max-height: 250px;
@@ -318,10 +316,8 @@ st.markdown("""
         .stButton, .stTextInput, .stRadio, .stSelectbox, .stCheckbox, [data-testid="stExpander"], .floating-back-btn { display: none !important; }
         .admin-delete-box, hr { display: none !important; }
         
-        /* 余白を極限まで削ってA4用紙全体を使う */
         .main .block-container { padding: 0 !important; margin: 0 !important; max-width: 100% !important; }
         
-        /* 🌟 印刷時のみ写真を巨大化（A4紙のバランスに合わせて400pxまで解放） */
         .report-img {
             max-height: 400px !important;
         }
@@ -329,7 +325,7 @@ st.markdown("""
         .report-item {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
-            padding-bottom: 25px !important; /* 項目間の余白を広げて見やすく */
+            padding-bottom: 25px !important;
         }
         .page-break {
             page-break-before: always !important;
@@ -498,7 +494,7 @@ def main():
         return m
 
     if st.session_state.role == "admin":
-        menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
+        menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "定是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
     else:
         menu_opts = ["ホーム", "是正実施（協力業者）", "完了分一覧（共通）"]
         
@@ -1118,7 +1114,7 @@ def main():
                         c1, c2 = st.columns(2)
                         if c1.button("個別承認（業者へ送る）", key=f"vok_{rec_id}", type="primary"):
                             with st.spinner("処理中..."):
-                                db_patch("inspection_records", rec_id, {"progress_status": "是正待ち", "line_notified": True})
+                                db_patch("inspection_records", rec_id, {"progress_status": "定是正待ち", "line_notified": True})
                                 st.session_state.cached_records = None
                             st.rerun()
                         if c2.button("指摘を削除", key=f"vdel_{rec_id}"):
@@ -1289,7 +1285,7 @@ def main():
     # ----------------------------------------
     # メニュー: 4-B. 是正ダッシュボード（管理者用）
     # ----------------------------------------
-    elif st.session_state.active_menu == "是正ダッシュボード（管理者用）":
+    elif st.session_state.active_menu == "定是正ダッシュボード（管理者用）":
         st.header("是正ダッシュボード（確認・実施）")
         sel_area = st.radio("表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key="area_dash")
         t_area = sel_area if sel_area != "すべて表示" else None
@@ -1300,7 +1296,7 @@ def main():
         all_props = db_get("properties", "select=*")
         all_props = sort_properties_by_handover(all_props)
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
-        prop_hdate_map = {p.get('property_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
+        prop_hdate_map = {p.get('project_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
         
         ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
         tree = {}; tree_counts = {}
@@ -1482,7 +1478,7 @@ def main():
                             
                             if r.get('reject_reason'): st.error(f"否認理由: {r.get('reject_reason')}")
                             
-                            if st.checkbox("是正内容編集", key=f"edit_chk_{rec_id}"):
+                            if st.checkbox("定是正内容編集", key=f"edit_chk_{rec_id}"):
                                 st.markdown("#### データ編集")
                                 new_detail = st.text_area("指摘内容を変更", value=detail, key=f"edit_d_{rec_id}")
                                 idx_w = edit_w_opts.index(w) if w in edit_w_opts else 0
@@ -1511,7 +1507,7 @@ def main():
                                 else: st.write("写真なし")
                             with c2:
                                 if p_stat == "是正待ち":
-                                    st.markdown("**【是正写真を撮影（After）】**")
+                                    st.markdown("**【定是正写真を撮影（After）】**")
                                     loc_str = f"{floor} {area} {w}".strip()
                                     disp_d = detail[:80] + "..." if len(detail)>80 else detail
                                     up = _smart_camera(propName=prop_val, inspType=type_val, inspDate=datetime.date.today().strftime("%Y/%m/%d"), locationText=loc_str, issueDetail=disp_d, mode="fix", key=f"fix_cam_{rec_id}")
@@ -1688,11 +1684,11 @@ def main():
                     
                 issue_count = 1
                 for w_name, w_recs in w_groups.items():
-                    st.markdown(f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px; page-break-after: avoid; break-after: avoid;'>■ 工種: {w_name}</div>", unsafe_allow_html=True)
                     for idx, r in enumerate(w_recs):
                         rec_id = r.get('record_id')
                         if not rec_id: continue
                         
+                        # 🌟 ご提案通りの3件・4件での強制改ページ
                         if issue_count == 4 or (issue_count > 4 and (issue_count - 4) % 4 == 0):
                             st.markdown('<div class="page-break"></div>', unsafe_allow_html=True)
                             
@@ -1705,13 +1701,31 @@ def main():
                         img_b = f'<a href="{i_photo}" target="_blank"><img src="{i_photo}" class="report-img"></a>' if i_photo else no_img_html
                         img_a = f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" class="report-img"></a>' if f_photo else no_img_html
                         
-                        st.markdown('<div class="report-item" style="page-break-inside: avoid; break-inside: avoid; border-bottom: 1px dashed #ccc; padding: 15px 0; margin-bottom: 10px;">', unsafe_allow_html=True)
+                        # 🌟 工種の最初の1件目（idx==0）の時だけ、同じHTMLブロックの最上部に工種ヘッダーを埋め込む
+                        # これにより、ヘッダーと中身が別ページに泣き別れるバグを100%完全防御します。
+                        header_html = ""
+                        if idx == 0:
+                            header_html = f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px;'>■ 工種: {w_name}</div>"
                         
-                        col_title, col_undo = st.columns([8, 2])
-                        with col_title:
-                            st.markdown(f'<div style="font-size:14px; font-weight:bold; margin-top:5px;">No.{issue_count} {loc_text}</div>', unsafe_allow_html=True)
-                        with col_undo:
-                            if st.session_state.role == "admin":
+                        # 全てをカプセル化した1つのHTMLブロックとして出力
+                        st.markdown(f"""
+                            {header_html}
+                            <div class="report-item" style="page-break-inside: avoid; break-inside: avoid; border-bottom: 1px dashed #ccc; padding: 15px 0; margin-bottom: 10px;">
+                                <div style="font-size:14px; font-weight:bold; margin-top:5px;">No.{issue_count} {loc_text}</div>
+                                <div style="font-size:14px; margin-bottom:12px; line-height:1.4; margin-top:5px;"><strong>指摘内容：</strong> {detail}</div>
+                                <table style="width:100%; table-layout:fixed; border-collapse:collapse; border:none;">
+                                    <tr>
+                                        <td style="width:50%; text-align:center; vertical-align:top; padding-right:5px;"><div style="font-size:12px; color:#555; margin-bottom:4px;">[ Before（指摘時） ]</div>{img_b}</td>
+                                        <td style="width:50%; text-align:center; vertical-align:top; padding-left:5px;"><div style="font-size:12px; color:#555; margin-bottom:4px;">[ After（是正後） ]</div>{img_a}</td>
+                                    </tr>
+                                </table>
+                            </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # 完了取消ボタンは下部に完全独立配置（印刷レイアウトを絶対に破壊しません）
+                        if st.session_state.role == "admin":
+                            c_space, c_undo = st.columns([8, 2])
+                            with c_undo:
                                 if st.button("↩️ 完了取消", key=f"undo_{rec_id}_{idx}"):
                                     with st.spinner("処理中..."):
                                         db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "line_notified": True})
@@ -1719,17 +1733,6 @@ def main():
                                     st.success("完了を取り消し、ダッシュボードに復活させました！")
                                     time.sleep(1)
                                     st.rerun()
-
-                        st.markdown(f"""
-                            <div style="font-size:14px; margin-bottom:12px; line-height:1.4; margin-top:5px;"><strong>指摘内容：</strong> {detail}</div>
-                            <table style="width:100%; table-layout:fixed; border-collapse:collapse; border:none;">
-                                <tr>
-                                    <td style="width:50%; text-align:center; vertical-align:top; padding-right:5px;"><div style="font-size:12px; color:#555; margin-bottom:4px;">[ Before（指摘時） ]</div>{img_b}</td>
-                                    <td style="width:50%; text-align:center; vertical-align:top; padding-left:5px;"><div style="font-size:12px; color:#555; margin-bottom:4px;">[ After（是正後） ]</div>{img_a}</td>
-                                </tr>
-                            </table>
-                        </div>
-                        """, unsafe_allow_html=True)
                         issue_count += 1
 
 if __name__ == "__main__":
