@@ -271,6 +271,7 @@ _smart_camera = components.declare_component("smart_cam_planb", path=temp_dir)
 # ==========================================
 st.set_page_config(page_title="Felix検査App", layout="wide", initial_sidebar_state="collapsed")
 
+# 🌟 印刷スタイル・改ページ用CSSの強化（画像巨大化ロジック追加）
 st.markdown("""
 <style>
     [data-testid="collapsedControl"] { display: none !important; }
@@ -305,14 +306,30 @@ st.markdown("""
     }
     .floating-back-btn button p { color: white !important; margin: 0 !important; }
 
+    /* 通常時（画面）の写真サイズ */
+    .report-img {
+        width: 100%;
+        max-height: 250px;
+        object-fit: contain;
+        border-radius: 4px;
+    }
+
     @media print {
         .stButton, .stTextInput, .stRadio, .stSelectbox, .stCheckbox, [data-testid="stExpander"], .floating-back-btn { display: none !important; }
         .admin-delete-box, hr { display: none !important; }
+        
+        /* 余白を極限まで削ってA4用紙全体を使う */
         .main .block-container { padding: 0 !important; margin: 0 !important; max-width: 100% !important; }
         
+        /* 🌟 印刷時のみ写真を巨大化（A4紙のバランスに合わせて400pxまで解放） */
+        .report-img {
+            max-height: 400px !important;
+        }
+
         .report-item {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
+            padding-bottom: 25px !important; /* 項目間の余白を広げて見やすく */
         }
         .page-break {
             page-break-before: always !important;
@@ -327,7 +344,7 @@ st.markdown("""
 
 FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
 AREA_OPTS_STANDARD = ["-- 選択 --", "玄関", "廊下・階段・ENT", "LDK", "キッチン", "洋室", "洗面室", "UB", "トイレ", "バルコニー", "外部", "フリー項目"]
-AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バル কুল", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
+AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バルコニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
 WORK_OPTS_STANDARD = ["-- 選択 --", "基礎工事(鉄筋)", "基礎工事(型枠)", "フレーミング", "FM", "造作", "内装", "電気", "設備", "ガス", "清掃", "サッシ", "外壁", "外構", "コーキング", "リペア", "その他"]
 WORK_OPTS_HAIKIN = ["-- 選択 --", "基礎工事(鉄筋)", "水道", "ガス", "その他"]
 WORK_OPTS_KUTAI = ["-- 選択 --", "フレーミング", "電気", "水道", "防水", "その他"]
@@ -771,7 +788,7 @@ def main():
                             st.markdown(f"**{title}**")
                             if r.get('issue_photo_url'): 
                                 photo_url = r.get('issue_photo_url')
-                                st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
+                                st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" class="report-img"></a>', unsafe_allow_html=True)
                                 
                             with st.expander("内容を修正・差し替え・削除"):
                                 new_f = floor; new_a = area; sel_temp = None; default_w = ""
@@ -1069,7 +1086,7 @@ def main():
                         
                         if r.get('issue_photo_url'): 
                             photo_url = r.get('issue_photo_url')
-                            st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
+                            st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" class="report-img"></a>', unsafe_allow_html=True)
                         
                         with st.expander("指摘内容・写真を直前修正する"):
                             f_idx = FLOOR_OPTS[1:].index(floor) if floor in FLOOR_OPTS[1:] else 0
@@ -1244,7 +1261,7 @@ def main():
                                 st.markdown("**【指摘箇所（Before）】**")
                                 if r.get('issue_photo_url'): 
                                     photo_url = r.get('issue_photo_url')
-                                    st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
+                                    st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" class="report-img"></a>', unsafe_allow_html=True)
                                 else: st.write("写真なし")
                                     
                             with c2:
@@ -1490,7 +1507,7 @@ def main():
                             i_photo = r.get('issue_photo_url'); f_photo = r.get('fix_photo_url')
                             with c1:
                                 st.markdown("**【指摘箇所（Before）】**")
-                                if i_photo: st.markdown(f'<a href="{i_photo}" target="_blank"><img src="{i_photo}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
+                                if i_photo: st.markdown(f'<a href="{i_photo}" target="_blank"><img src="{i_photo}" class="report-img"></a>', unsafe_allow_html=True)
                                 else: st.write("写真なし")
                             with c2:
                                 if p_stat == "是正待ち":
@@ -1512,7 +1529,7 @@ def main():
                                     if up: st.image(up, width=250)
                                 elif p_stat == "是正確認中":
                                     st.markdown("**【是正写真（After）】**")
-                                    if f_photo: st.markdown(f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
+                                    if f_photo: st.markdown(f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" class="report-img"></a>', unsafe_allow_html=True)
                                     ca, cb = st.columns(2)
                                     if ca.button("承認（完了へ）", key=f"ok_{rec_id}", type="primary"): 
                                         with st.spinner("処理中..."):
@@ -1685,8 +1702,8 @@ def main():
                         i_photo = r.get("issue_photo_url"); f_photo = r.get("fix_photo_url")
                         no_img_html = '<div style="text-align:center; padding:30px; color:#999; border:1px solid #eee;">写真なし</div>'
                         
-                        img_b = f'<a href="{i_photo}" target="_blank"><img src="{i_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;"></a>' if i_photo else no_img_html
-                        img_a = f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;"></a>' if f_photo else no_img_html
+                        img_b = f'<a href="{i_photo}" target="_blank"><img src="{i_photo}" class="report-img"></a>' if i_photo else no_img_html
+                        img_a = f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" class="report-img"></a>' if f_photo else no_img_html
                         
                         st.markdown('<div class="report-item" style="page-break-inside: avoid; break-inside: avoid; border-bottom: 1px dashed #ccc; padding: 15px 0; margin-bottom: 10px;">', unsafe_allow_html=True)
                         
