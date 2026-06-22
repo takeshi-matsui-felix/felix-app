@@ -271,7 +271,6 @@ _smart_camera = components.declare_component("smart_cam_planb", path=temp_dir)
 # ==========================================
 st.set_page_config(page_title="Felix検査App", layout="wide", initial_sidebar_state="collapsed")
 
-# 🌟 印刷スタイル・改ページ用CSSの強化
 st.markdown("""
 <style>
     [data-testid="collapsedControl"] { display: none !important; }
@@ -311,7 +310,6 @@ st.markdown("""
         .admin-delete-box, hr { display: none !important; }
         .main .block-container { padding: 0 !important; margin: 0 !important; max-width: 100% !important; }
         
-        /* 🌟 PDF印刷時のハーフ見切れ・崩れを絶対に防ぐ防衛CSS */
         .report-item {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
@@ -329,7 +327,7 @@ st.markdown("""
 
 FLOOR_OPTS = ["-- 選択 --", "101","102","103","201","202","203","301","302","303","共用部","外部"]
 AREA_OPTS_STANDARD = ["-- 選択 --", "玄関", "廊下・階段・ENT", "LDK", "キッチン", "洋室", "洗面室", "UB", "トイレ", "バルコニー", "外部", "フリー項目"]
-AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バルコニー", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
+AREA_OPTS_SHANAI = ["-- 選択 --", "玄関", "トイレ", "キッチン", "LDK", "バル কুল", "洋室", "洗面室", "UB", "廊下・階段・ENT", "外部", "フリー項目"]
 WORK_OPTS_STANDARD = ["-- 選択 --", "基礎工事(鉄筋)", "基礎工事(型枠)", "フレーミング", "FM", "造作", "内装", "電気", "設備", "ガス", "清掃", "サッシ", "外壁", "外構", "コーキング", "リペア", "その他"]
 WORK_OPTS_HAIKIN = ["-- 選択 --", "基礎工事(鉄筋)", "水道", "ガス", "その他"]
 WORK_OPTS_KUTAI = ["-- 選択 --", "フレーミング", "電気", "水道", "防水", "その他"]
@@ -343,7 +341,6 @@ INSP_OPTS = [
     "【検査機関】配筋検査", "【検査機関】躯体検査", "【検査機関】断熱検査", "【検査機関】中間検査", "【検査機関】完了検査"
 ]
 SHANAI_KENSA_TYPES = ["社内検査(設計)", "社内検査(建設)", "社内検査(マーケ)", "社内検査(不動産)"]
-# 🌟 ユーザー修正反映分：「検査機関」をオプションに追加
 INSPECTOR_OPTS = ["工事監理チーム", "建設部", "不動産事業部", "マーケティング部", "検査機関"]
 
 # ==========================================
@@ -707,7 +704,7 @@ def main():
                     if res_ok:
                         st.session_state.current_box = {"id": nid, "prop_id": prop_id, "name": prop_name, "type": ins_type, "inspector": inspector}
                         st.session_state.pre_selected_prop = prop_id
-                        st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.temp_photo = None
+                        st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None
                         st.session_state.prev_floor = None; st.session_state.prev_area = None
                         st.session_state.pending_records = []
                         st.rerun()
@@ -932,7 +929,7 @@ def main():
                                     err_count += 1
                                     continue
                                 
-                                initial_status = "確認待ち" if c_inspector == "工事監理チーム" else "定是正待ち"
+                                initial_status = "確認待ち" if c_inspector in ["工事監理チーム", "検査機関"] else "是正待ち"
                                 db_rec = {
                                     "record_id": str(uuid.uuid4()), "inspection_id": c_id, "property_id": c_prop_id, 
                                     "floor_level": rec["floor_level"], "area": rec["area"], "work_type": rec["work_type"], 
@@ -1028,7 +1025,6 @@ def main():
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_verify_floor")
                     if sel_floor != "すべて表示": recs = [r for r in recs if r.get('floor_level') == sel_floor]
 
-                # 🛠️ 担当工種絞り込みフィルター（自動連動）
                 if recs:
                     works_in_recs = sorted(list(set([r.get('work_type') or 'その他' for r in recs])))
                     sel_work = st.selectbox("🛠️ 担当工種で絞り込む", ["すべて表示"] + works_in_recs, key="filter_verify_work")
@@ -1213,7 +1209,6 @@ def main():
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_partner_fix_floor")
                     if sel_floor != "すべて表示": recs = [r for r in recs if r.get('floor_level') == sel_floor]
                 
-                # 🛠️ 担当工種絞り込みフィルター（自動連動）
                 if recs:
                     works_in_recs = sorted(list(set([r.get('work_type') or 'その他' for r in recs])))
                     sel_work = st.selectbox("🛠️ 担当工種で絞り込む", ["すべて表示"] + works_in_recs, key="filter_partner_fix_work")
@@ -1277,7 +1272,7 @@ def main():
     # ----------------------------------------
     # メニュー: 4-B. 是正ダッシュボード（管理者用）
     # ----------------------------------------
-    elif st.session_state.active_menu == "開是正ダッシュボード（管理者用）":
+    elif st.session_state.active_menu == "是正ダッシュボード（管理者用）":
         st.header("是正ダッシュボード（確認・実施）")
         sel_area = st.radio("表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key="area_dash")
         t_area = sel_area if sel_area != "すべて表示" else None
@@ -1299,7 +1294,7 @@ def main():
             ins = ins_map.get(iid)
             if ins:
                 p_id = ins.get('property_id')
-                if t_area && prop_area_map.get(p_id) != t_area: continue
+                if t_area and prop_area_map.get(p_id) != t_area: continue
                 p = ins.get('property_name', '不明'); t = ins.get('inspection_type', '不明')
                 if p not in tree: tree[p] = {"types": set(), "prop_id": p_id}
                 tree[p]["types"].add(t)
@@ -1433,7 +1428,6 @@ def main():
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_dash_floor")
                     if sel_floor != "すべて表示": recs = [r for r in recs if r.get('floor_level') == sel_floor]
                 
-                # 🛠️ 担当工種絞り込みフィルター（自動連動）
                 if recs:
                     works_in_recs = sorted(list(set([r.get('work_type') or 'その他' for r in recs])))
                     sel_work = st.selectbox("🛠️ 担当工種で絞り込む", ["すべて表示"] + works_in_recs, key="filter_dash_work")
@@ -1677,13 +1671,11 @@ def main():
                     
                 issue_count = 1
                 for w_name, w_recs in w_groups.items():
-                    # 🌟 工種ヘッダーがページの最下部に孤立するのを防ぐスタイル（break-after: avoid）を適用
                     st.markdown(f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px; page-break-after: avoid; break-after: avoid;'>■ 工種: {w_name}</div>", unsafe_allow_html=True)
                     for idx, r in enumerate(w_recs):
                         rec_id = r.get('record_id')
                         if not rec_id: continue
                         
-                        # 🌟【最重要】1ページ目はタイトル込みで3件、2ページ目以降は4件ずつで確実にPDFを強制改ページ
                         if issue_count == 4 or (issue_count > 4 and (issue_count - 4) % 4 == 0):
                             st.markdown('<div class="page-break"></div>', unsafe_allow_html=True)
                             
@@ -1696,7 +1688,6 @@ def main():
                         img_b = f'<a href="{i_photo}" target="_blank"><img src="{i_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;"></a>' if i_photo else no_img_html
                         img_a = f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" style="width:100%; max-height:250px; object-fit:contain; border-radius:4px;"></a>' if f_photo else no_img_html
                         
-                        # 🌟 クラス名「report-item」を付与して見切れを徹底防御
                         st.markdown('<div class="report-item" style="page-break-inside: avoid; break-inside: avoid; border-bottom: 1px dashed #ccc; padding: 15px 0; margin-bottom: 10px;">', unsafe_allow_html=True)
                         
                         col_title, col_undo = st.columns([8, 2])
