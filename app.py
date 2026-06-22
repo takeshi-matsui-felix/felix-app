@@ -7,7 +7,6 @@ import base64
 import io
 import os
 import tempfile
-import threading
 import json
 import time
 
@@ -32,6 +31,8 @@ if "db_cache" not in st.session_state:
     st.session_state.db_cache = {}
 if "last_cache_clear_date" not in st.session_state:
     st.session_state.last_cache_clear_date = None
+if "pending_records" not in st.session_state:
+    st.session_state.pending_records = []
 
 def check_and_clear_am3_cache():
     now = datetime.datetime.now()
@@ -39,7 +40,6 @@ def check_and_clear_am3_cache():
     if now.hour >= 3 and st.session_state.last_cache_clear_date != today_str:
         st.session_state.db_cache = {}
         st.session_state.last_cache_clear_date = today_str
-        print("\n【定期クリーンアップ発動】毎朝AM3:00のキャッシュ初期化が正常に完了しました。\n")
 
 def get_cached_data(cache_key, fetch_func, *args, **kwargs):
     check_and_clear_am3_cache()
@@ -69,12 +69,18 @@ def db_get(table, params=""):
     return get_cached_data(cache_key, _raw_db_get, table, params)
 
 def db_post(table, data): 
-    requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, json=data)
-    clear_specific_cache(table)
+    try:
+        res = requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, json=data)
+        clear_specific_cache(table)
+        return res.status_code in [200, 201, 204]
+    except: return False
 
 def db_patch(table, record_id, data): 
-    requests.patch(f"{SUPABASE_URL}/rest/v1/{table}?record_id=eq.{record_id}", headers=HEADERS, json=data)
-    clear_specific_cache(table)
+    try:
+        res = requests.patch(f"{SUPABASE_URL}/rest/v1/{table}?record_id=eq.{record_id}", headers=HEADERS, json=data)
+        clear_specific_cache(table)
+        return res.status_code in [200, 204]
+    except: return False
 
 def db_patch_property(prop_id, data): 
     requests.patch(f"{SUPABASE_URL}/rest/v1/properties?property_id=eq.{prop_id}", headers=HEADERS, json=data)
@@ -113,22 +119,6 @@ def upload_to_storage(base64_str):
         return f"{SUPABASE_URL}/storage/v1/object/public/photos/{filename}"
     except Exception: return base64_str
 
-def bg_save_inspection(photo_b64, record_data):
-    saved_url = upload_to_storage(photo_b64)
-    if saved_url: record_data["issue_photo_url"] = saved_url
-    db_post("inspection_records", record_data)
-
-def bg_save_correction(rec_id, fix_photo_b64):
-    fix_url = upload_to_storage(fix_photo_b64)
-    # 🌟 協力業者が是正写真をアップした時、絶対にロボットに見つからないように強制的に True で上書き
-    db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "fix_photo_url": fix_url, "line_notified": True})
-
-def bg_patch_record(rec_id, photo_b64, up_data):
-    if photo_b64:
-        url = upload_to_storage(photo_b64)
-        if url: up_data["issue_photo_url"] = url
-    db_patch("inspection_records", rec_id, up_data)
-
 # ==========================================
 # 物件・指摘の並び替えアルゴリズム
 # ==========================================
@@ -153,7 +143,7 @@ def sort_properties_by_handover(props_list):
     return sorted(props_list, key=get_handover_key)
 
 # ==========================================
-# 2. スマート電子黒板カメラ（📁ライブラリ / 📷カメラ 独立版 + PC非表示機能）
+# 2. スマート電子黒板カメラ
 # ==========================================
 SMART_CAMERA_HTML = """<!DOCTYPE html>
 <html lang="ja">
@@ -183,14 +173,9 @@ SMART_CAMERA_HTML = """<!DOCTYPE html>
         </label>
     </div>
     <script>
-        // スマホ・タブレット判定（iPadOS 13+のデスクトップモードにも対応）
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
                          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-        
-        // PCならカメラボタンを隠す（A案）
-        if (!isMobile) {
-            document.getElementById('lbl-cam').style.display = 'none';
-        }
+        if (!isMobile) { document.getElementById('lbl-cam').style.display = 'none'; }
 
         let b = { propName: "", inspType: "", inspDate: "", locationText: "", issueDetail: "", mode: "insp" };
         window.addEventListener("message", function(e) {
@@ -280,11 +265,10 @@ with open(os.path.join(temp_dir, "index.html"), "w", encoding="utf-8") as f: f.w
 _smart_camera = components.declare_component("smart_cam_planb", path=temp_dir)
 
 # ==========================================
-# 3. UI設定 (プランB: 上部メニュー ＆ 印刷最適化)
+# 3. UI設定
 # ==========================================
 st.set_page_config(page_title="Felix検査App", layout="wide", initial_sidebar_state="collapsed")
 
-# 🌟 CSSデザイン注入（固定戻るボタン等のデザイン）
 st.markdown("""
 <style>
     [data-testid="collapsedControl"] { display: none !important; }
@@ -298,7 +282,6 @@ st.markdown("""
     
     div[data-testid="column"] button { height: 35px !important; font-size: 12px !important; font-weight: normal !important; padding: 0 !important; }
 
-    /* 🌟 左上に固定(フロート)する「戻るボタン」専用のCSSクラス */
     .floating-back-btn {
         position: fixed !important;
         top: 15px !important;
@@ -382,7 +365,6 @@ def jump_to_menu(menu_name, prop_id=None):
 # ==========================================
 def main():
 
-    # 🌟 JavaScript注入（「⬅ 戻る」と書かれたボタンを左上に固定させる魔法のスクリプト）
     components.html("""
     <script>
     function floatBackButton() {
@@ -397,21 +379,18 @@ def main():
             }
         });
     }
-    // 即時実行 ＋ 画面が再描画された時にも自動で拾い上げる監視システム
     floatBackButton();
     const observer = new MutationObserver(floatBackButton);
     observer.observe(window.parent.document.body, {childList: true, subtree: true});
     </script>
     """, height=0)
 
-    # ログアウト処理の実行
     if st.session_state.logout_triggered:
         components.html("<script>localStorage.removeItem('felix_user_auth');</script>", height=0)
         time.sleep(0.5)
         st.session_state.clear()
         st.rerun()
 
-    # 🌟【最重要】PWA回避・自動ログイン＆初回ロール選択画面
     if st.session_state.role is None:
         role_html = """
         <!DOCTYPE html>
@@ -475,9 +454,8 @@ def main():
             st.session_state.active_menu = "ホーム"
             st.session_state.splash_done = False
             st.rerun()
-        st.stop() # 認証待ち中はこれ以降のコードを実行しない
+        st.stop()
 
-    # --- 認証済み以降の処理 ---
     confirm_cnt = 0
     if st.session_state.role == "admin":
         wait_conf_recs = db_get("inspection_records", "select=record_id&progress_status=eq.確認待ち")
@@ -702,22 +680,29 @@ def main():
             ins_date = c1.date_input("検査日時", datetime.date.today())
             inspector = c2.selectbox("検査員", INSPECTOR_OPTS)
             
+            # 🌟 通信エラー（フォルダ作成失敗）をここで確実にキャッチする
             if st.button("検査スタート"):
                 prop_name = target.get('property_name'); prop_id = target.get('property_id')
                 if prop_name != "-- 選択 --" and ins_type != "-- 選択 --":
                     nid = str(uuid.uuid4())
-                    db_post("inspections", {"inspection_id": nid, "property_id": prop_id, "property_name": prop_name, "inspection_type": ins_type, "inspection_date": str(ins_date), "inspector": inspector})
-                    st.session_state.current_box = {"id": nid, "prop_id": prop_id, "name": prop_name, "type": ins_type, "inspector": inspector}
-                    st.session_state.pre_selected_prop = prop_id
-                    st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None
-                    st.session_state.prev_floor = None; st.session_state.prev_area = None; st.rerun()
+                    with st.spinner("通信中..."):
+                        res_ok = db_post("inspections", {"inspection_id": nid, "property_id": prop_id, "property_name": prop_name, "inspection_type": ins_type, "inspection_date": str(ins_date), "inspector": inspector})
+                    
+                    if res_ok:
+                        st.session_state.current_box = {"id": nid, "prop_id": prop_id, "name": prop_name, "type": ins_type, "inspector": inspector}
+                        st.session_state.pre_selected_prop = prop_id
+                        st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None
+                        st.session_state.prev_floor = None; st.session_state.prev_area = None
+                        st.session_state.pending_records = [] # 新規開始時はストックを空にする
+                        st.rerun()
+                    else:
+                        st.error("通信エラー：サーバーとの接続に失敗しました。電波の良い場所でもう一度お試しください。")
                 else: st.error("物件と検査種類を選んでください")
         else:
             cb = st.session_state.current_box
             if not isinstance(cb, dict): cb = {}
             c_name = cb.get('name', ''); c_type = cb.get('type', ''); c_id = cb.get('id', ''); c_prop_id = cb.get('prop_id', ''); c_inspector = cb.get('inspector', '')
             
-            # ⬅ 戻るボタン（CSSの魔法で左上に固定されます）
             if st.button("⬅ 戻る", key="back_from_insp"):
                 st.session_state.current_box = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None; st.session_state.prev_floor = None; st.session_state.prev_area = None; st.rerun()
             
@@ -729,95 +714,117 @@ def main():
             components.html(f"<script>localStorage.setItem('felix_session', JSON.stringify({json_str}));</script>", height=0)
             
             if st.session_state.get("edit_saved_records"):
-                st.markdown("#### 今回保存した指摘データの確認・修正")
+                st.markdown("#### 今回の検査で記録した指摘データ")
                 if st.button("⬅ 戻る", key="back_to_edit_top"): st.session_state.edit_saved_records = False; st.rerun()
                 st.markdown("---")
                 
+                # 🌟 アウトボックス（未送信）のデータを表示
+                if st.session_state.pending_records:
+                    st.markdown("<h5 style='color:#E74C3C;'>⚠️ スマホ内に一時保存中のデータ（終了ボタンで一括送信されます）</h5>", unsafe_allow_html=True)
+                    for idx, rec in enumerate(st.session_state.pending_records):
+                        with st.container():
+                            st.markdown('<div class="record-box" style="border:2px solid #E74C3C; padding:10px; border-radius:5px;">', unsafe_allow_html=True)
+                            head_text = "" if c_type.startswith("【検査機関】") or rec['floor_level'] == "一式" else f"【{rec['floor_level']} {rec['area']}】".strip()
+                            title = f"{head_text} {rec['issue_detail']}" if head_text else f"【指摘内容】 {rec['issue_detail']}"
+                            st.markdown(f"**{title}**")
+                            st.image(rec["photo_b64"], width=250)
+                            
+                            if st.button("この未送信データを削除（撮り直す場合）", key=f"del_pend_{rec['temp_id']}"):
+                                st.session_state.pending_records = [r for r in st.session_state.pending_records if r['temp_id'] != rec['temp_id']]
+                                st.rerun()
+                            st.markdown('</div>', unsafe_allow_html=True)
+                    st.markdown("---")
+
+                # サーバー送信済みのデータを表示（既存ロジック）
+                st.markdown("##### サーバーへ送信済みの過去データ")
                 saved_recs = db_get("inspection_records", f"inspection_id=eq.{c_id}")
-                if not saved_recs: st.info("まだ保存された指摘データはありません。")
+                if not saved_recs: st.info("サーバーに保存された過去の指摘データはありません。")
                 else:
                     if c_type in SHANAI_KENSA_TYPES:
                         floors_in_recs = sorted(list(set([r.get('floor_level', '一式') for r in saved_recs if r.get('floor_level')])))
                         sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_edit_floor")
                         if sel_floor != "すべて表示": saved_recs = [r for r in saved_recs if r.get('floor_level') == sel_floor]
                 
-                edit_w_opts = WORK_OPTS_KIKAN if c_type.startswith("【検査機関】") else WORK_OPTS_SHANAI if c_type in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if c_type == "躯体検査" else WORK_OPTS_HAIKIN if c_type == "配筋検査" else WORK_OPTS_CHUKAN if c_type == "中間検査" else WORK_OPTS_DANNETSU if c_type == "断熱検査" else WORK_OPTS_STANDARD
-                saved_recs = sort_records(saved_recs)
+                    edit_w_opts = WORK_OPTS_KIKAN if c_type.startswith("【検査機関】") else WORK_OPTS_SHANAI if c_type in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if c_type == "躯体検査" else WORK_OPTS_HAIKIN if c_type == "配筋検査" else WORK_OPTS_CHUKAN if c_type == "中間検査" else WORK_OPTS_DANNETSU if c_type == "断熱検査" else WORK_OPTS_STANDARD
+                    saved_recs = sort_records(saved_recs)
 
-                for r in saved_recs:
-                    rec_id = r.get('record_id')
-                    if not rec_id: continue
-                    floor = r.get('floor_level', ''); area = r.get('area', ''); detail = r.get('issue_detail', ''); orig_w = r.get('work_type', '')
-                    head_text = "" if c_type.startswith("【検査機関】") or floor == "一式" else f"【{floor} {area}】".strip()
-                    title = f"{head_text} {detail}" if head_text else f"【指摘内容】 {detail}"
-                    
-                    with st.container():
-                        st.markdown('<div class="record-box">', unsafe_allow_html=True)
-                        st.markdown(f"**{title}**")
-                        if r.get('issue_photo_url'): 
-                            photo_url = r.get('issue_photo_url')
-                            st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
-                            
-                        with st.expander("内容を修正・差し替え・削除"):
-                            new_f = floor; new_a = area; sel_temp = None; default_w = ""
-                            if not c_type.startswith("【検査機関】"):
-                                a_opts = AREA_OPTS_SHANAI if c_type in SHANAI_KENSA_TYPES else AREA_OPTS_STANDARD
-                                if c_type not in ["配筋検査", "躯体検査", "断熱検査", "中間検査"]:
-                                    f_idx = FLOOR_OPTS[1:].index(floor) if floor in FLOOR_OPTS[1:] else 0
-                                    new_f = st.radio("階層を変更", FLOOR_OPTS[1:], index=f_idx, horizontal=True, key=f"ef_{rec_id}")
-                                    a_idx = a_opts[1:].index(area) if area in a_opts[1:] else 0
-                                    new_a = st.radio("部位を変更", a_opts[1:], index=a_idx, horizontal=True, key=f"ea_{rec_id}")
-                                
-                                cat_dict = ISSUE_TEMPLATES.get(c_type, {}) if c_type in ["配筋検査", "躯体検査", "断熱検査", "中間検査"] else ISSUE_TEMPLATES.get("社内検査(設計)", {}).get(new_a, {}) if c_type in SHANAI_KENSA_TYPES else {}
-                                if not isinstance(cat_dict, dict): cat_dict = {}
-                                cat_keys = list(cat_dict.keys())
-                                sel_cat = st.radio("分類を変更", cat_keys, horizontal=True, key=f"ecat_{rec_id}") if cat_keys else None
-                                
-                                if sel_cat:
-                                    detail_dict = cat_dict.get(sel_cat, {})
-                                    temp_list = list(detail_dict.keys()) + ["その他（フリー項目）"]
-                                    sel_temp = st.radio("よくある指摘事項", temp_list, key=f"etemp_{rec_id}", horizontal=True)
-                                    default_w = detail_dict.get(sel_temp, "") if sel_temp != "その他（フリー項目）" else ""
-                            
-                            edit_desc_val = detail.split(":", 1)[1] if ":" in detail else detail.split("：", 1)[1] if "：" in detail else detail
-                            st.markdown("##### 詳細・場所の追記を変更")
-                            new_detail = st.text_area("詳細情報を変更", value=edit_desc_val, label_visibility="collapsed", key=f"ed_desc_{rec_id}")
-                            
-                            disp_w_opts = edit_w_opts[1:]
-                            if default_w in disp_w_opts: w_idx = disp_w_opts.index(default_w)
-                            elif orig_w in disp_w_opts: w_idx = disp_w_opts.index(orig_w)
-                            else: w_idx = 0
-                            new_w = st.radio("工種を変更", disp_w_opts, index=w_idx, horizontal=True, key=f"ed_work_{rec_id}_{sel_cat}_{sel_temp}")
-                            
-                            if sel_temp == "その他（フリー項目）": final_desc = new_detail.strip()
-                            else: final_desc = (sel_temp + ("：" + new_detail.strip() if new_detail.strip() != "" else "")) if sel_temp else new_detail.strip()
-                            if final_desc == "": final_desc = detail 
-                            
-                            loc_parts = [str(new_f), str(new_a)]
-                            if not c_type.startswith("【検査機関】") and sel_cat: loc_parts.append(str(sel_cat))
-                            loc_str = " ".join(loc_parts).strip()
-                            disp_desc = final_desc[:80] + "..." if len(final_desc) > 80 else final_desc
-                            
-                            st.write("写真を差し替える場合のみ撮影/選択してください")
-                            new_photo = _smart_camera(
-                                propName=c_name, inspType=c_type, inspDate=datetime.date.today().strftime("%Y/%m/%d"), 
-                                locationText=loc_str, issueDetail=disp_desc, mode="insp", key=f"ed_cam_{rec_id}"
-                            )
-                            
-                            c_save, c_del = st.columns(2)
-                            if c_save.button("この内容で上書き", key=f"ed_save_{rec_id}", type="primary"):
-                                up_data = {"floor_level": new_f, "area": new_a, "work_type": new_w, "issue_detail": final_desc}
-                                threading.Thread(target=bg_patch_record, args=(rec_id, new_photo, up_data)).start()
-                                st.rerun()
-                            if c_del.button("この指摘を削除", key=f"ed_del_{rec_id}"): 
-                                db_delete_record(rec_id); st.rerun()
-                            if new_photo: 
-                                st.markdown("<p style='font-size:12px; color:gray; margin-top:10px;'>▼ 差し替え用プレビュー (縮小表示)</p>", unsafe_allow_html=True)
-                                st.image(new_photo, width=250)
-                                
-                        st.markdown('</div>', unsafe_allow_html=True)
+                    for r in saved_recs:
+                        rec_id = r.get('record_id')
+                        if not rec_id: continue
+                        floor = r.get('floor_level', ''); area = r.get('area', ''); detail = r.get('issue_detail', ''); orig_w = r.get('work_type', '')
+                        head_text = "" if c_type.startswith("【検査機関】") or floor == "一式" else f"【{floor} {area}】".strip()
+                        title = f"{head_text} {detail}" if head_text else f"【指摘内容】 {detail}"
                         
-                st.markdown("---")
+                        with st.container():
+                            st.markdown('<div class="record-box">', unsafe_allow_html=True)
+                            st.markdown(f"**{title}**")
+                            if r.get('issue_photo_url'): 
+                                photo_url = r.get('issue_photo_url')
+                                st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
+                                
+                            with st.expander("内容を修正・差し替え・削除"):
+                                new_f = floor; new_a = area; sel_temp = None; default_w = ""
+                                if not c_type.startswith("【検査機関】"):
+                                    a_opts = AREA_OPTS_SHANAI if c_type in SHANAI_KENSA_TYPES else AREA_OPTS_STANDARD
+                                    if c_type not in ["配筋検査", "躯体検査", "断熱検査", "中間検査"]:
+                                        f_idx = FLOOR_OPTS[1:].index(floor) if floor in FLOOR_OPTS[1:] else 0
+                                        new_f = st.radio("階層を変更", FLOOR_OPTS[1:], index=f_idx, horizontal=True, key=f"ef_{rec_id}")
+                                        a_idx = a_opts[1:].index(area) if area in a_opts[1:] else 0
+                                        new_a = st.radio("部位を変更", a_opts[1:], index=a_idx, horizontal=True, key=f"ea_{rec_id}")
+                                    
+                                    cat_dict = ISSUE_TEMPLATES.get(c_type, {}) if c_type in ["配筋検査", "躯体検査", "断熱検査", "中間検査"] else ISSUE_TEMPLATES.get("社内検査(設計)", {}).get(new_a, {}) if c_type in SHANAI_KENSA_TYPES else {}
+                                    if not isinstance(cat_dict, dict): cat_dict = {}
+                                    cat_keys = list(cat_dict.keys())
+                                    sel_cat = st.radio("分類を変更", cat_keys, horizontal=True, key=f"ecat_{rec_id}") if cat_keys else None
+                                    
+                                    if sel_cat:
+                                        detail_dict = cat_dict.get(sel_cat, {})
+                                        temp_list = list(detail_dict.keys()) + ["その他（フリー項目）"]
+                                        sel_temp = st.radio("よくある指摘事項", temp_list, key=f"etemp_{rec_id}", horizontal=True)
+                                        default_w = detail_dict.get(sel_temp, "") if sel_temp != "その他（フリー項目）" else ""
+                                
+                                edit_desc_val = detail.split(":", 1)[1] if ":" in detail else detail.split("：", 1)[1] if "：" in detail else detail
+                                st.markdown("##### 詳細・場所の追記を変更")
+                                new_detail = st.text_area("詳細情報を変更", value=edit_desc_val, label_visibility="collapsed", key=f"ed_desc_{rec_id}")
+                                
+                                disp_w_opts = edit_w_opts[1:]
+                                if default_w in disp_w_opts: w_idx = disp_w_opts.index(default_w)
+                                elif orig_w in disp_w_opts: w_idx = disp_w_opts.index(orig_w)
+                                else: w_idx = 0
+                                new_w = st.radio("工種を変更", disp_w_opts, index=w_idx, horizontal=True, key=f"ed_work_{rec_id}_{sel_cat}_{sel_temp}")
+                                
+                                if sel_temp == "その他（フリー項目）": final_desc = new_detail.strip()
+                                else: final_desc = (sel_temp + ("：" + new_detail.strip() if new_detail.strip() != "" else "")) if sel_temp else new_detail.strip()
+                                if final_desc == "": final_desc = detail 
+                                
+                                loc_parts = [str(new_f), str(new_a)]
+                                if not c_type.startswith("【検査機関】") and sel_cat: loc_parts.append(str(sel_cat))
+                                loc_str = " ".join(loc_parts).strip()
+                                disp_desc = final_desc[:80] + "..." if len(final_desc) > 80 else final_desc
+                                
+                                st.write("写真を差し替える場合のみ撮影/選択してください")
+                                new_photo = _smart_camera(
+                                    propName=c_name, inspType=c_type, inspDate=datetime.date.today().strftime("%Y/%m/%d"), 
+                                    locationText=loc_str, issueDetail=disp_desc, mode="insp", key=f"ed_cam_{rec_id}"
+                                )
+                                
+                                c_save, c_del = st.columns(2)
+                                if c_save.button("この内容で上書き", key=f"ed_save_{rec_id}", type="primary"):
+                                    # 🌟 安全な同期処理へ変更
+                                    with st.spinner("保存中..."):
+                                        up_data = {"floor_level": new_f, "area": new_a, "work_type": new_w, "issue_detail": final_desc}
+                                        if new_photo:
+                                            url = upload_to_storage(new_photo)
+                                            if url and url != new_photo: up_data["issue_photo_url"] = url
+                                        db_patch("inspection_records", rec_id, up_data)
+                                    st.rerun()
+                                if c_del.button("この指摘を削除", key=f"ed_del_{rec_id}"): 
+                                    db_delete_record(rec_id); st.rerun()
+                                if new_photo: 
+                                    st.markdown("<p style='font-size:12px; color:gray; margin-top:10px;'>▼ 差し替え用プレビュー (縮小表示)</p>", unsafe_allow_html=True)
+                                    st.image(new_photo, width=250)
+                                    
+                            st.markdown('</div>', unsafe_allow_html=True)
 
             elif not st.session_state.issue_saved:
                 prev_f = st.session_state.prev_floor; prev_a = st.session_state.prev_area
@@ -875,20 +882,21 @@ def main():
                 )
                 if photo_input: st.session_state.temp_photo = photo_input
 
-                if st.button("この内容で保存", type="primary"):
+                # 🌟 アウトボックス方式：通信ゼロでスマホのメモリにストックするだけ！
+                if st.button("この内容で一時保存（通信なし）", type="primary"):
                     active_photo = st.session_state.temp_photo
                     if w and final_desc != "" and active_photo is not None:
-                        initial_status = "確認待ち" if c_inspector == "工事監理チーム" else "是正待ち"
                         record_data = {
-                            "record_id": str(uuid.uuid4()), "inspection_id": c_id, "property_id": c_prop_id, 
+                            "temp_id": str(uuid.uuid4()),
                             "floor_level": f, "area": a, "work_type": w, "issue_detail": final_desc, 
-                            "progress_status": initial_status, 
-                            # 🌟 新規登録時は絶対にロボットに送らせない（True）
-                            "line_notified": True
+                            "photo_b64": active_photo
                         }
-                        threading.Thread(target=bg_save_inspection, args=(active_photo, record_data)).start()
-                        st.session_state.issue_saved = True; st.session_state.temp_photo = None
-                        st.session_state.prev_floor = f; st.session_state.prev_area = a; st.rerun()
+                        st.session_state.pending_records.append(record_data)
+                        st.session_state.issue_saved = True
+                        st.session_state.temp_photo = None
+                        st.session_state.prev_floor = f
+                        st.session_state.prev_area = a
+                        st.rerun()
                     else: st.error("工種・内容・写真はすべて必須です")
                 
                 if st.session_state.temp_photo:
@@ -896,11 +904,49 @@ def main():
                     st.image(st.session_state.temp_photo, width=250)
 
             else:
-                st.success("保存完了（次の入力が可能です）") 
+                st.success("一時保存しました（まだサーバーには送信されていません）") 
                 if st.button("続けて次を登録", use_container_width=True): st.session_state.issue_saved = False; st.session_state.temp_photo = None; st.rerun()
                 if st.button("保存データを確認・修正", use_container_width=True): st.session_state.edit_saved_records = True; st.rerun()
-                # 終了ボタン
-                if st.button("内容を保存して検査を終了する", use_container_width=True): st.session_state.current_box = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None; st.session_state.prev_floor = None; st.session_state.prev_area = None; st.rerun()
+                
+                # 🌟 一括送信（同期通信で確実保存）
+                if st.button("内容を保存して検査を終了する（サーバーへ送信）", use_container_width=True): 
+                    if not st.session_state.pending_records:
+                        st.session_state.current_box = None; st.session_state.issue_saved = False; st.session_state.edit_saved_records = False; st.session_state.cached_records = None; st.session_state.temp_photo = None; st.session_state.prev_floor = None; st.session_state.prev_area = None; st.rerun()
+                    else:
+                        with st.spinner(f"全 {len(st.session_state.pending_records)} 件のデータを送信中...（このまま画面を閉じないでください）"):
+                            err_count = 0
+                            for rec in st.session_state.pending_records:
+                                url = upload_to_storage(rec["photo_b64"])
+                                if not url or url == rec["photo_b64"]:
+                                    err_count += 1
+                                    continue
+                                
+                                initial_status = "確認待ち" if c_inspector == "工事監理チーム" else "是正待ち"
+                                db_rec = {
+                                    "record_id": str(uuid.uuid4()), "inspection_id": c_id, "property_id": c_prop_id, 
+                                    "floor_level": rec["floor_level"], "area": rec["area"], "work_type": rec["work_type"], 
+                                    "issue_detail": rec["issue_detail"], "progress_status": initial_status, "line_notified": True,
+                                    "issue_photo_url": url
+                                }
+                                res = requests.post(f"{SUPABASE_URL}/rest/v1/inspection_records", headers=HEADERS, json=db_rec)
+                                if res.status_code not in [200, 201, 204]:
+                                    err_count += 1
+                            
+                            if err_count == 0:
+                                clear_specific_cache("inspection_records")
+                                st.success("すべてのデータを正常に保存しました！")
+                                st.session_state.pending_records = []
+                                st.session_state.current_box = None
+                                st.session_state.issue_saved = False
+                                st.session_state.edit_saved_records = False
+                                st.session_state.cached_records = None
+                                st.session_state.temp_photo = None
+                                st.session_state.prev_floor = None
+                                st.session_state.prev_area = None
+                                time.sleep(1.5)
+                                st.rerun()
+                            else:
+                                st.error(f"一部のデータの送信に失敗しました（{err_count}件エラー）。電波の良い場所でもう一度「終了する」ボタンを押してください。")
                 
 
     # ----------------------------------------
@@ -956,8 +1002,6 @@ def main():
         target_id_str = f"verif_{prop_val}_{type_val}" if prop_val else None
 
         if prop_val and type_val:
-            
-            # ⬅ 戻るボタン（固定）
             if st.button("⬅ 戻る", key="back_from_verify"): 
                 st.session_state.drill_target = None; st.session_state.cached_records = None; st.rerun()
 
@@ -975,9 +1019,16 @@ def main():
 
                 st.info(f"この検査（{prop_val} / {type_val}）には、現在 {len(recs)}件 のデータがあります。")
                 if st.button("この検査をすべて承認して業者（是正実施）に送る", type="primary"):
-                    # 🌟 承認して業者に送る時もロボットに送らせない（True）
-                    for r in recs: db_patch("inspection_records", r['record_id'], {"progress_status": "是正待ち", "line_notified": True})
-                    st.success("一括承認が完了しました。協力業者へ表示されます。"); st.session_state.drill_target = None; st.session_state.cached_records = None; st.rerun()
+                    # 🌟 承認も安全な同期処理に変更
+                    with st.spinner("一括承認処理中..."):
+                        success_flag = True
+                        for r in recs:
+                            res = requests.patch(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{r['record_id']}", headers=HEADERS, json={"progress_status": "是正待ち", "line_notified": True})
+                            if res.status_code not in [200, 204]: success_flag = False
+                        clear_specific_cache("inspection_records")
+                        if success_flag:
+                            st.success("一括承認が完了しました。協力業者へ表示されます。"); st.session_state.drill_target = None; st.session_state.cached_records = None; time.sleep(1); st.rerun()
+                        else: st.error("一部の処理に失敗しました。再度お試しください。")
                 st.markdown("---")
                 
                 edit_w_opts = WORK_OPTS_KIKAN if type_val.startswith("【検査機関】") else WORK_OPTS_SHANAI if type_val in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if type_val == "躯体検査" else WORK_OPTS_HAIKIN if type_val == "配筋検査" else WORK_OPTS_CHUKAN if type_val == "中間検査" else WORK_OPTS_DANNETSU if type_val == "断熱検査" else WORK_OPTS_STANDARD
@@ -1024,14 +1075,23 @@ def main():
                                 locationText=loc_str, issueDetail=disp_d, mode="insp", key=f"vp_{rec_id}"
                             )
                             if st.button("この内容で修正保存", key=f"vsave_{rec_id}"):
-                                up_data = {"floor_level": new_f, "area": new_a, "issue_detail": new_d.strip(), "work_type": new_w}
-                                threading.Thread(target=bg_patch_record, args=(rec_id, new_p, up_data)).start(); st.session_state.cached_records = None; st.rerun()
+                                # 🌟 直前修正も安全な同期処理へ変更
+                                with st.spinner("保存中..."):
+                                    up_data = {"floor_level": new_f, "area": new_a, "issue_detail": new_d.strip(), "work_type": new_w}
+                                    if new_p:
+                                        url = upload_to_storage(new_p)
+                                        if url and url != new_p: up_data["issue_photo_url"] = url
+                                    db_patch("inspection_records", rec_id, up_data)
+                                    st.session_state.cached_records = None
+                                st.rerun()
                             if new_p: st.image(new_p, caption="差し替えプレビュー", width=250)
 
                         c1, c2 = st.columns(2)
                         if c1.button("個別承認（業者へ送る）", key=f"vok_{rec_id}", type="primary"):
-                            # 🌟 個別承認時もロボットに送らせない（True）
-                            db_patch("inspection_records", rec_id, {"progress_status": "是正待ち", "line_notified": True}); st.session_state.cached_records = None; st.rerun()
+                            with st.spinner("処理中..."):
+                                db_patch("inspection_records", rec_id, {"progress_status": "是正待ち", "line_notified": True})
+                                st.session_state.cached_records = None
+                            st.rerun()
                         if c2.button("指摘を削除", key=f"vdel_{rec_id}"):
                             db_delete_record(rec_id); st.session_state.cached_records = None; st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
@@ -1041,7 +1101,6 @@ def main():
     # メニュー: 4-A. 是正実施（協力業者専用）
     # ----------------------------------------
     elif st.session_state.active_menu == "是正実施（協力業者）":
-        # 🌟 誤字の修正（定是正実施 → 是正実施）
         st.header("是正実施")
         if st.session_state.target_area:
             st.success(f"現在の表示エリア：【 {st.session_state.target_area} 】")
@@ -1116,7 +1175,6 @@ def main():
         
         if prop_val and type_val:
             
-            # ⬅ 戻るボタン（固定）
             if st.button("⬅ 戻る", key="back_from_fix"): 
                 st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
 
@@ -1182,10 +1240,14 @@ def main():
                                 )
                                 if st.button("完了報告", key=f"s_{rec_id}", type="primary"):
                                     if up: 
-                                        # 🌟 ここで実行されるbg_save_correctionの中で line_notified: True に上書きされます！
-                                        threading.Thread(target=bg_save_correction, args=(rec_id, up)).start()
-                                        st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
-                                        st.session_state.skip_render_ids.append(rec_id); st.rerun()
+                                        # 🌟 完了報告も安全な同期処理へ変更
+                                        with st.spinner("送信中..."):
+                                            fix_url = upload_to_storage(up)
+                                            if fix_url and fix_url != up:
+                                                db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "fix_photo_url": fix_url, "line_notified": True})
+                                                st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
+                                                st.session_state.skip_render_ids.append(rec_id)
+                                        st.rerun()
                                     else: st.error("写真が必要です")
                                 if up: st.image(up, caption="プレビュー", width=250)
                             st.markdown('</div>', unsafe_allow_html=True)
@@ -1336,7 +1398,6 @@ def main():
         
         if prop_val and type_val:
             
-            # ⬅ 戻るボタン（固定）
             if st.button("⬅ 戻る", key="back_from_dash"): 
                 st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
             
@@ -1394,9 +1455,14 @@ def main():
                                 
                                 col_u, col_d = st.columns(2)
                                 if col_u.button("更新を保存", key=f"edit_save_{rec_id}"):
-                                    up_data = {"work_type": new_w, "issue_detail": new_detail}
-                                    threading.Thread(target=bg_patch_record, args=(rec_id, new_photo, up_data)).start()
-                                    st.session_state.cached_records = None; st.rerun()
+                                    with st.spinner("保存中..."):
+                                        up_data = {"work_type": new_w, "issue_detail": new_detail}
+                                        if new_photo:
+                                            url = upload_to_storage(new_photo)
+                                            if url and url != new_photo: up_data["issue_photo_url"] = url
+                                        db_patch("inspection_records", rec_id, up_data)
+                                        st.session_state.cached_records = None
+                                    st.rerun()
                                 if col_d.button("この指摘を削除", key=f"edit_del_{rec_id}"): db_delete_record(rec_id); st.session_state.cached_records = None; st.rerun()
 
                             c1, c2 = st.columns(2)
@@ -1414,11 +1480,13 @@ def main():
                                     
                                     if st.button("写真を保存して完了にする", key=f"s_{rec_id}", type="primary"):
                                         if up: 
-                                            fix_url = upload_to_storage(up)
-                                            # 🌟 管理者が代わりに写真アップした時もロボットに送らせない（True）
-                                            db_patch("inspection_records", rec_id, {"progress_status": "完了", "fix_photo_url": fix_url, "line_notified": True})
-                                            st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
-                                            st.session_state.skip_render_ids.append(rec_id); st.rerun()
+                                            with st.spinner("送信中..."):
+                                                fix_url = upload_to_storage(up)
+                                                if fix_url and fix_url != up:
+                                                    db_patch("inspection_records", rec_id, {"progress_status": "完了", "fix_photo_url": fix_url, "line_notified": True})
+                                                    st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
+                                                    st.session_state.skip_render_ids.append(rec_id)
+                                            st.rerun()
                                         else: st.error("写真をセットしてください")
                                     if up: st.image(up, width=250)
                                 elif p_stat == "是正確認中":
@@ -1426,21 +1494,20 @@ def main():
                                     if f_photo: st.markdown(f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" style="width:250px; border-radius:4px; margin-bottom:10px;"></a>', unsafe_allow_html=True)
                                     ca, cb = st.columns(2)
                                     if ca.button("承認（完了へ）", key=f"ok_{rec_id}", type="primary"): 
-                                        # 🌟 管理者が承認した時もロボットに送らせない（True）
-                                        db_patch("inspection_records", rec_id, {"progress_status": "完了", "line_notified": True})
-                                        st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
-                                        st.session_state.skip_render_ids.append(rec_id); st.rerun()
+                                        with st.spinner("処理中..."):
+                                            db_patch("inspection_records", rec_id, {"progress_status": "完了", "line_notified": True})
+                                            st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
+                                            st.session_state.skip_render_ids.append(rec_id)
+                                        st.rerun()
                                     reason = cb.text_input("否認理由を入力", key=f"re_{rec_id}", label_visibility="collapsed", placeholder="否認理由があれば入力")
                                     
-                                    # 🚨🔥🔥 ここのみ、ロボットに拾わせるための False（引き金）を仕掛ける！！ 🔥🔥🚨
                                     if cb.button("否認（差し戻し）", key=f"ng_{rec_id}"): 
-                                        db_patch("inspection_records", rec_id, {
-                                            "progress_status": "是正待ち", 
-                                            "reject_reason": reason,
-                                            "line_notified": False  # <--- ロボットよ、これだけ拾ってLINEに送れ！
-                                        })
-                                        st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
-                                        st.session_state.skip_render_ids.append(rec_id); st.rerun()
+                                        with st.spinner("処理中..."):
+                                            # 🚨 ロボットに見つけさせる唯一のフラグ
+                                            db_patch("inspection_records", rec_id, {"progress_status": "是正待ち", "reject_reason": reason, "line_notified": False})
+                                            st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
+                                            st.session_state.skip_render_ids.append(rec_id)
+                                        st.rerun()
                             st.markdown('</div>', unsafe_allow_html=True)
 
                 conf_recs = [r for r in recs if r.get('progress_status') == '是正確認中' and r.get('record_id') not in st.session_state.skip_render_ids]
@@ -1454,11 +1521,17 @@ def main():
                         c_yes, c_no = st.columns(2)
                         if c_yes.button("はい、承認を確定します", type="primary", use_container_width=True):
                             with st.spinner("一括処理中..."):
+                                success_flag = True
                                 for r in conf_recs:
                                     rid = r.get('record_id')
-                                    # 🌟 一括承認時もロボットに送らせない（True）
-                                    if rid: db_patch("inspection_records", rid, {"progress_status": "完了", "line_notified": True})
-                            st.success("すべて承認しました"); st.session_state.show_bulk_confirm = False; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
+                                    if rid:
+                                        res = requests.patch(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{rid}", headers=HEADERS, json={"progress_status": "完了", "line_notified": True})
+                                        if res.status_code not in [200, 204]: success_flag = False
+                            if success_flag:
+                                clear_specific_cache("inspection_records")
+                                st.success("すべて承認しました"); st.session_state.show_bulk_confirm = False; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; time.sleep(1); st.rerun()
+                            else:
+                                st.error("一部の処理に失敗しました。再度お試しください。")
                         if c_no.button("キャンセル", use_container_width=True): st.session_state.show_bulk_confirm = False; st.rerun()
 
 
@@ -1524,7 +1597,6 @@ def main():
         if prop_val and type_val:
             target_id_str = f"done_{prop_val}_{type_val}"
             
-            # ⬅ 戻るボタン（固定）
             if st.button("⬅ 戻る", key="back_from_done"): 
                 st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
             
@@ -1555,10 +1627,11 @@ def main():
                     del_pass = st.text_input("削除用パスワードを入力 (5963)", type="password", key=f"del_pass_all")
                     if st.button(f"この検査（{type_val}）のデータを完全に削除する", key=f"del_btn_all"):
                         if del_pass == DELETE_PASSWORD:
-                            for iid in t_ids:
-                                requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{iid}", headers=HEADERS)
-                                requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{iid}", headers=HEADERS)
-                            st.success("すべてのデータの削除が完了しました"); st.session_state.drill_target = None; st.session_state.cached_records = None; st.rerun()
+                            with st.spinner("データ削除中..."):
+                                for iid in t_ids:
+                                    requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{iid}", headers=HEADERS)
+                                    requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{iid}", headers=HEADERS)
+                            st.success("すべてのデータの削除が完了しました"); st.session_state.drill_target = None; st.session_state.cached_records = None; time.sleep(1); st.rerun()
                         else: st.error("パスワードが違います")
                     st.markdown("<hr class='admin-delete-box'>", unsafe_allow_html=True)
 
@@ -1599,9 +1672,9 @@ def main():
                         with col_undo:
                             if st.session_state.role == "admin":
                                 if st.button("↩️ 完了取消", key=f"undo_{rec_id}_{idx}"):
-                                    # 🌟 完了を取り消してダッシュボードに戻す時もロボットに送らせない（True）
-                                    db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "line_notified": True})
-                                    st.session_state.cached_records = None
+                                    with st.spinner("処理中..."):
+                                        db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "line_notified": True})
+                                        st.session_state.cached_records = None
                                     st.success("完了を取り消し、ダッシュボードに復活させました！")
                                     time.sleep(1)
                                     st.rerun()
@@ -1622,5 +1695,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        st.error("システムエラーが発生しました。")
+        st.error("システムエラーが発生しました。電波の良い場所でやり直してください。")
         if st.button("システム復旧"): st.session_state.clear(); st.rerun()
