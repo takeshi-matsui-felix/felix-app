@@ -494,7 +494,7 @@ def main():
         return m
 
     if st.session_state.role == "admin":
-        menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "定是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
+        menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正ダッシュボード（管理者用）", "完了分一覧（共通）"]
     else:
         menu_opts = ["ホーム", "是正実施（協力業者）", "完了分一覧（共通）"]
         
@@ -1114,7 +1114,7 @@ def main():
                         c1, c2 = st.columns(2)
                         if c1.button("個別承認（業者へ送る）", key=f"vok_{rec_id}", type="primary"):
                             with st.spinner("処理中..."):
-                                db_patch("inspection_records", rec_id, {"progress_status": "定是正待ち", "line_notified": True})
+                                db_patch("inspection_records", rec_id, {"progress_status": "是正待ち", "line_notified": True})
                                 st.session_state.cached_records = None
                             st.rerun()
                         if c2.button("指摘を削除", key=f"vdel_{rec_id}"):
@@ -1285,7 +1285,7 @@ def main():
     # ----------------------------------------
     # メニュー: 4-B. 是正ダッシュボード（管理者用）
     # ----------------------------------------
-    elif st.session_state.active_menu == "定是正ダッシュボード（管理者用）":
+    elif st.session_state.active_menu == "是正ダッシュボード（管理者用）":
         st.header("是正ダッシュボード（確認・実施）")
         sel_area = st.radio("表示エリアで絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True, key="area_dash")
         t_area = sel_area if sel_area != "すべて表示" else None
@@ -1296,7 +1296,7 @@ def main():
         all_props = db_get("properties", "select=*")
         all_props = sort_properties_by_handover(all_props)
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
-        prop_hdate_map = {p.get('project_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
+        prop_hdate_map = {p.get('property_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
         
         ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
         tree = {}; tree_counts = {}
@@ -1478,7 +1478,7 @@ def main():
                             
                             if r.get('reject_reason'): st.error(f"否認理由: {r.get('reject_reason')}")
                             
-                            if st.checkbox("定是正内容編集", key=f"edit_chk_{rec_id}"):
+                            if st.checkbox("是正内容編集", key=f"edit_chk_{rec_id}"):
                                 st.markdown("#### データ編集")
                                 new_detail = st.text_area("指摘内容を変更", value=detail, key=f"edit_d_{rec_id}")
                                 idx_w = edit_w_opts.index(w) if w in edit_w_opts else 0
@@ -1507,7 +1507,7 @@ def main():
                                 else: st.write("写真なし")
                             with c2:
                                 if p_stat == "是正待ち":
-                                    st.markdown("**【定是正写真を撮影（After）】**")
+                                    st.markdown("**【是正写真を撮影（After）】**")
                                     loc_str = f"{floor} {area} {w}".strip()
                                     disp_d = detail[:80] + "..." if len(detail)>80 else detail
                                     up = _smart_camera(propName=prop_val, inspType=type_val, inspDate=datetime.date.today().strftime("%Y/%m/%d"), locationText=loc_str, issueDetail=disp_d, mode="fix", key=f"fix_cam_{rec_id}")
@@ -1517,7 +1517,13 @@ def main():
                                             with st.spinner("送信中..."):
                                                 fix_url = upload_to_storage(up)
                                                 if fix_url and fix_url != up:
-                                                    db_patch("inspection_records", rec_id, {"progress_status": "完了", "fix_photo_url": fix_url, "line_notified": True})
+                                                    # 🌟 個別承認時に承認日を自動記録
+                                                    db_patch("inspection_records", rec_id, {
+                                                        "progress_status": "完了", 
+                                                        "fix_photo_url": fix_url, 
+                                                        "line_notified": True,
+                                                        "approved_date": str(datetime.date.today())
+                                                    })
                                                     st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                                     st.session_state.skip_render_ids.append(rec_id)
                                             st.rerun()
@@ -1529,7 +1535,12 @@ def main():
                                     ca, cb = st.columns(2)
                                     if ca.button("承認（完了へ）", key=f"ok_{rec_id}", type="primary"): 
                                         with st.spinner("処理中..."):
-                                            db_patch("inspection_records", rec_id, {"progress_status": "完了", "line_notified": True})
+                                            # 🌟 個別承認時に承認日を自動記録
+                                            db_patch("inspection_records", rec_id, {
+                                                "progress_status": "完了", 
+                                                "line_notified": True,
+                                                "approved_date": str(datetime.date.today())
+                                            })
                                             st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                             st.session_state.skip_render_ids.append(rec_id)
                                         st.rerun()
@@ -1558,7 +1569,12 @@ def main():
                                 for r in conf_recs:
                                     rid = r.get('record_id')
                                     if rid:
-                                        res = requests.patch(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{rid}", headers=HEADERS, json={"progress_status": "完了", "line_notified": True})
+                                        # 🌟 一括承認時に承認日を自動記録
+                                        res = requests.patch(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{rid}", headers=HEADERS, json={
+                                            "progress_status": "完了", 
+                                            "line_notified": True,
+                                            "approved_date": str(datetime.date.today())
+                                        })
                                         if res.status_code not in [200, 204]: success_flag = False
                             if success_flag:
                                 clear_specific_cache("inspection_records")
@@ -1688,7 +1704,6 @@ def main():
                         rec_id = r.get('record_id')
                         if not rec_id: continue
                         
-                        # 🌟 ご提案通りの3件・4件での強制改ページ
                         if issue_count == 4 or (issue_count > 4 and (issue_count - 4) % 4 == 0):
                             st.markdown('<div class="page-break"></div>', unsafe_allow_html=True)
                             
@@ -1696,22 +1711,27 @@ def main():
                         loc_text = "" if type_val.startswith("【検査機関】") or floor == "one" or floor == "一式" else f"【{floor} {area}】"
                         detail = r.get('issue_detail', '')
                         i_photo = r.get("issue_photo_url"); f_photo = r.get("fix_photo_url")
-                        no_img_html = '<div style="text-align:center; padding:30px; color:#999; border:1px solid #eee;">写真なし</div>'
                         
+                        # 🌟 承認日の取得（未設定の場合は非表示になるよう制御）
+                        app_date = r.get('approved_date')
+                        app_date_str = f"<span style='background-color:#f1f3f4; padding:3px 8px; border-radius:4px;'>承認日: {app_date}</span>" if app_date else ""
+
+                        no_img_html = '<div style="text-align:center; padding:30px; color:#999; border:1px solid #eee;">写真なし</div>'
                         img_b = f'<a href="{i_photo}" target="_blank"><img src="{i_photo}" class="report-img"></a>' if i_photo else no_img_html
                         img_a = f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" class="report-img"></a>' if f_photo else no_img_html
                         
-                        # 🌟 工種の最初の1件目（idx==0）の時だけ、同じHTMLブロックの最上部に工種ヘッダーを埋め込む
-                        # これにより、ヘッダーと中身が別ページに泣き別れるバグを100%完全防御します。
                         header_html = ""
                         if idx == 0:
                             header_html = f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px;'>■ 工種: {w_name}</div>"
                         
-                        # 全てをカプセル化した1つのHTMLブロックとして出力
+                        # 🌟 A案デザイン：No.〇〇の右側にさりげなく印字するレイアウト
                         st.markdown(f"""
                             {header_html}
                             <div class="report-item" style="page-break-inside: avoid; break-inside: avoid; border-bottom: 1px dashed #ccc; padding: 15px 0; margin-bottom: 10px;">
-                                <div style="font-size:14px; font-weight:bold; margin-top:5px;">No.{issue_count} {loc_text}</div>
+                                <div style="display: flex; justify-content: space-between; align-items: flex-end;">
+                                    <div style="font-size:14px; font-weight:bold; margin-top:5px;">No.{issue_count} {loc_text}</div>
+                                    <div style="font-size:11px; color:#555; font-weight:bold;">{app_date_str}</div>
+                                </div>
                                 <div style="font-size:14px; margin-bottom:12px; line-height:1.4; margin-top:5px;"><strong>指摘内容：</strong> {detail}</div>
                                 <table style="width:100%; table-layout:fixed; border-collapse:collapse; border:none;">
                                     <tr>
@@ -1722,13 +1742,17 @@ def main():
                             </div>
                         """, unsafe_allow_html=True)
                         
-                        # 完了取消ボタンは下部に完全独立配置（印刷レイアウトを絶対に破壊しません）
                         if st.session_state.role == "admin":
                             c_space, c_undo = st.columns([8, 2])
                             with c_undo:
                                 if st.button("↩️ 完了取消", key=f"undo_{rec_id}_{idx}"):
                                     with st.spinner("処理中..."):
-                                        db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "line_notified": True})
+                                        # 🌟 完了取消時は承認日をリセット（Noneに戻す）
+                                        db_patch("inspection_records", rec_id, {
+                                            "progress_status": "是正確認中", 
+                                            "line_notified": True,
+                                            "approved_date": None
+                                        })
                                         st.session_state.cached_records = None
                                     st.success("完了を取り消し、ダッシュボードに復活させました！")
                                     time.sleep(1)
