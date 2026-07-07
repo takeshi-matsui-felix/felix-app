@@ -550,7 +550,7 @@ def main():
                 function sendVal(action) {{
                     let val = {{ action: action }};
                     if(action === 'resume') {{ val.data = JSON.parse(localStorage.getItem('{ls_key}')); }}
-                    window.parent.postMessage({{isStreamlitMessage: true, type: "streamlit:setComponentValue", value: data}, "*");
+                    window.parent.postMessage({{isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}}, "*");
                 }}
                 const saved = localStorage.getItem('{ls_key}');
                 if(saved) {{
@@ -835,7 +835,6 @@ def main():
                                 c_save, c_del = st.columns(2)
                                 if c_save.button("この内容で上書き", key=f"ed_save_{rec_id}", type="primary"):
                                     with st.spinner("保存中..."):
-                                        # 🌟 二重防衛：データ編集時にも line_notified: True を明示
                                         up_data = {"floor_level": new_f, "area": new_a, "work_type": new_w, "issue_detail": final_desc, "line_notified": True}
                                         if new_photo:
                                             url = upload_to_storage(new_photo)
@@ -943,7 +942,6 @@ def main():
                                     err_count += 1
                                     continue
                                 
-                                # 🌟 【タイポ完全修正】 "定是正待ち" を正しい "是正待ち" に根絶
                                 initial_status = "確認待ち" if c_inspector in ["工事監理チーム", "検査機関"] else "是正待ち"
                                 db_rec = {
                                     "record_id": str(uuid.uuid4()), "inspection_id": c_id, "property_id": c_prop_id, 
@@ -1004,7 +1002,7 @@ def main():
         sorted_tree_keys = []
         for p in all_props:
             p_name = p.get('property_name')
-            if p_name in tree && p_name not in sorted_tree_keys: 
+            if p_name in tree and p_name not in sorted_tree_keys: 
                 sorted_tree_keys.append(p_name)
         for k in tree.keys():
             if k not in sorted_tree_keys: sorted_tree_keys.append(k)
@@ -1104,7 +1102,6 @@ def main():
                             )
                             if st.button("この内容で修正保存", key=f"vsave_{rec_id}"):
                                 with st.spinner("保存中..."):
-                                    # 🌟 二重防衛：直前修正時にも line_notified: True を明示
                                     up_data = {"floor_level": new_f, "area": new_a, "issue_detail": new_d.strip(), "work_type": new_w, "line_notified": True}
                                     if new_p:
                                         url = upload_to_storage(new_p)
@@ -1493,7 +1490,6 @@ def main():
                                 col_u, col_d = st.columns(2)
                                 if col_u.button("更新を保存", key=f"edit_save_{rec_id}"):
                                     with st.spinner("保存中..."):
-                                        # 🌟 二重防衛：データ編集時にも line_notified: True を明示
                                         up_data = {"work_type": new_w, "issue_detail": new_detail, "line_notified": True}
                                         if new_photo:
                                             url = upload_to_storage(new_photo)
@@ -1571,7 +1567,6 @@ def main():
                                 for r in conf_recs:
                                     rid = r.get('record_id')
                                     if rid:
-                                        # 🌟 【タイポ完全修正】 "定是正待ち" を "是正待ち" へ
                                         res = requests.patch(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{rid}", headers=HEADERS, json={
                                             "progress_status": "完了", 
                                             "line_notified": True,
