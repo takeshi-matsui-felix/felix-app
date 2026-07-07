@@ -835,7 +835,7 @@ def main():
                                 c_save, c_del = st.columns(2)
                                 if c_save.button("この内容で上書き", key=f"ed_save_{rec_id}", type="primary"):
                                     with st.spinner("保存中..."):
-                                        up_data = {"floor_level": new_f, "area": new_a, "work_type": new_w, "issue_detail": final_desc}
+                                        up_data = {"floor_level": new_f, "area": new_a, "work_type": new_w, "issue_detail": final_desc, "line_notified": True}
                                         if new_photo:
                                             url = upload_to_storage(new_photo)
                                             if url and url != new_photo: up_data["issue_photo_url"] = url
@@ -1102,7 +1102,7 @@ def main():
                             )
                             if st.button("この内容で修正保存", key=f"vsave_{rec_id}"):
                                 with st.spinner("保存中..."):
-                                    up_data = {"floor_level": new_f, "area": new_a, "issue_detail": new_d.strip(), "work_type": new_w}
+                                    up_data = {"floor_level": new_f, "area": new_a, "issue_detail": new_d.strip(), "work_type": new_w, "line_notified": True}
                                     if new_p:
                                         url = upload_to_storage(new_p)
                                         if url and url != new_p: up_data["issue_photo_url"] = url
@@ -1490,7 +1490,7 @@ def main():
                                 col_u, col_d = st.columns(2)
                                 if col_u.button("更新を保存", key=f"edit_save_{rec_id}"):
                                     with st.spinner("保存中..."):
-                                        up_data = {"work_type": new_w, "issue_detail": new_detail}
+                                        up_data = {"work_type": new_w, "issue_detail": new_detail, "line_notified": True}
                                         if new_photo:
                                             url = upload_to_storage(new_photo)
                                             if url and url != new_photo: up_data["issue_photo_url"] = url
@@ -1517,7 +1517,6 @@ def main():
                                             with st.spinner("送信中..."):
                                                 fix_url = upload_to_storage(up)
                                                 if fix_url and fix_url != up:
-                                                    # 🌟 個別承認時に承認日を自動記録
                                                     db_patch("inspection_records", rec_id, {
                                                         "progress_status": "完了", 
                                                         "fix_photo_url": fix_url, 
@@ -1535,7 +1534,6 @@ def main():
                                     ca, cb = st.columns(2)
                                     if ca.button("承認（完了へ）", key=f"ok_{rec_id}", type="primary"): 
                                         with st.spinner("処理中..."):
-                                            # 🌟 個別承認時に承認日を自動記録
                                             db_patch("inspection_records", rec_id, {
                                                 "progress_status": "完了", 
                                                 "line_notified": True,
@@ -1569,7 +1567,6 @@ def main():
                                 for r in conf_recs:
                                     rid = r.get('record_id')
                                     if rid:
-                                        # 🌟 一括承認時に承認日を自動記録
                                         res = requests.patch(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{rid}", headers=HEADERS, json={
                                             "progress_status": "完了", 
                                             "line_notified": True,
@@ -1712,7 +1709,6 @@ def main():
                         detail = r.get('issue_detail', '')
                         i_photo = r.get("issue_photo_url"); f_photo = r.get("fix_photo_url")
                         
-                        # 🌟 承認日の取得（未設定の場合は非表示になるよう制御）
                         app_date = r.get('approved_date')
                         app_date_str = f"<span style='background-color:#f1f3f4; padding:3px 8px; border-radius:4px;'>承認日: {app_date}</span>" if app_date else ""
 
@@ -1724,7 +1720,6 @@ def main():
                         if idx == 0:
                             header_html = f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px;'>■ 工種: {w_name}</div>"
                         
-                        # 🌟 A案デザイン：No.〇〇の右側にさりげなく印字するレイアウト
                         st.markdown(f"""
                             {header_html}
                             <div class="report-item" style="page-break-inside: avoid; break-inside: avoid; border-bottom: 1px dashed #ccc; padding: 15px 0; margin-bottom: 10px;">
@@ -1747,7 +1742,6 @@ def main():
                             with c_undo:
                                 if st.button("↩️ 完了取消", key=f"undo_{rec_id}_{idx}"):
                                     with st.spinner("処理中..."):
-                                        # 🌟 完了取消時は承認日をリセット（Noneに戻す）
                                         db_patch("inspection_records", rec_id, {
                                             "progress_status": "是正確認中", 
                                             "line_notified": True,
