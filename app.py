@@ -92,9 +92,13 @@ def db_patch_inspections_by_prop(prop_id, new_name):
     requests.patch(f"{SUPABASE_URL}/rest/v1/inspections?property_id=eq.{prop_id}", headers=HEADERS, json={"property_name": new_name})
     clear_specific_cache("inspections")
 
+# 🌟 エラー監視機能を強化した db_patch_inspection
 def db_patch_inspection(ins_id, data):
-    requests.patch(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{ins_id}", headers=HEADERS, json=data)
-    clear_specific_cache("inspections")
+    try:
+        res = requests.patch(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{ins_id}", headers=HEADERS, json=data)
+        clear_specific_cache("inspections")
+        return res.status_code in [200, 204]
+    except: return False
 
 def db_delete_record(record_id): 
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
@@ -1409,14 +1413,22 @@ def main():
                                 t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#E74C3C; font-size: 13px;'>{badge_text}</span></div>", unsafe_allow_html=True)
                                 
                                 if t_ins_id:
+                                    # 🌟 Streamlit特有の消滅バグを防ぐため、session_stateのキーを安全に初期化
+                                    reason_key = f"delay_{t_ins_id}"
+                                    if reason_key not in st.session_state:
+                                        st.session_state[reason_key] = current_delay_reason
+
                                     def make_update_reason_cb(ins_id, key):
                                         def _update():
-                                            db_patch_inspection(ins_id, {"delay_reason": st.session_state[key]})
-                                            st.toast("遅延理由を保存しました")
+                                            ok = db_patch_inspection(ins_id, {"delay_reason": st.session_state[key]})
+                                            if ok:
+                                                st.toast("遅延理由を保存しました")
+                                            else:
+                                                st.error("保存失敗: Supabaseの権限(RLS)設定によりブロックされました。")
                                         return _update
                                     
-                                    cb_func = make_update_reason_cb(t_ins_id, f"delay_{t_ins_id}")
-                                    t_cols[2].text_input("遅延理由", value=current_delay_reason, key=f"delay_{t_ins_id}", on_change=cb_func, label_visibility="collapsed", placeholder="遅延理由を入力してEnter")
+                                    cb_func = make_update_reason_cb(t_ins_id, reason_key)
+                                    t_cols[2].text_input("遅延理由", key=reason_key, on_change=cb_func, label_visibility="collapsed", placeholder="遅延理由を入力してEnter")
                     
                     with col_ex2:
                         with st.popover("✉️"):
