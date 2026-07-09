@@ -92,13 +92,9 @@ def db_patch_inspections_by_prop(prop_id, new_name):
     requests.patch(f"{SUPABASE_URL}/rest/v1/inspections?property_id=eq.{prop_id}", headers=HEADERS, json={"property_name": new_name})
     clear_specific_cache("inspections")
 
-# 🌟 エラー監視機能を強化した db_patch_inspection
 def db_patch_inspection(ins_id, data):
-    try:
-        res = requests.patch(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{ins_id}", headers=HEADERS, json=data)
-        clear_specific_cache("inspections")
-        return res.status_code in [200, 204]
-    except: return False
+    requests.patch(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{ins_id}", headers=HEADERS, json=data)
+    clear_specific_cache("inspections")
 
 def db_delete_record(record_id): 
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
@@ -989,8 +985,8 @@ def main():
         all_props = sort_properties_by_handover(all_props)
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
         prop_hdate_map = {p.get('property_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
-        
-        ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
+
+ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
         tree = {}
         for r in all_recs_for_tree:
             if not isinstance(r, dict): continue
@@ -1049,6 +1045,36 @@ def main():
                         recs = [r for r in recs if (r.get('work_type') or 'その他') == sel_work]
 
                 st.info(f"この検査（{prop_val} / {type_val}）には、現在 {len(recs)}件 のデータがあります。")
+                
+                with st.expander("🔄 この検査の物件を変更する（間違えて登録した場合）"):
+                    st.warning("※この検査に含まれるすべての写真と指摘データを、別の物件に移動させます。")
+                    prop_opts = [p for p in all_props if p.get('property_name') != prop_val]
+                    if prop_opts:
+                        new_prop_sel = st.selectbox("移動先の正しい物件を選択", prop_opts, format_func=lambda x: f"[{x.get('area')}] {x.get('property_name')}", key="move_prop_sel")
+                        if st.button("この物件にデータを移動する", type="primary", key="move_prop_btn"):
+                            with st.spinner("データ移動中..."):
+                                new_p_id = new_prop_sel.get("property_id")
+                                new_p_name = new_prop_sel.get("property_name")
+                                success_flag = True
+                                for iid in t_ids:
+                                    r1 = requests.patch(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{iid}", headers=HEADERS, json={"property_id": new_p_id, "property_name": new_p_name})
+                                    r2 = requests.patch(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{iid}", headers=HEADERS, json={"property_id": new_p_id})
+                                    if r1.status_code not in [200, 204] or r2.status_code not in [200, 204]:
+                                        success_flag = False
+                                
+                                if success_flag:
+                                    clear_specific_cache("inspections")
+                                    clear_specific_cache("inspection_records")
+                                    st.success(f"「{new_p_name}」へ移動が完了しました！")
+                                    st.session_state.drill_target = None
+                                    st.session_state.cached_records = None
+                                    time.sleep(1.5)
+                                    st.rerun()
+                                else:
+                                    st.error("移動に失敗しました。時間をおいて再試行してください。")
+                    else:
+                        st.info("他に移動できる物件がありません。先に物件登録を行ってください。")
+
                 if st.button("この検査をすべて承認して業者（是正実施）に送る", type="primary"):
                     with st.spinner("一括承認処理中..."):
                         success_flag = True
@@ -1413,7 +1439,6 @@ def main():
                                 t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#E74C3C; font-size: 13px;'>{badge_text}</span></div>", unsafe_allow_html=True)
                                 
                                 if t_ins_id:
-                                    # 🌟 Streamlit特有の消滅バグを防ぐため、session_stateのキーを安全に初期化
                                     reason_key = f"delay_{t_ins_id}"
                                     if reason_key not in st.session_state:
                                         st.session_state[reason_key] = current_delay_reason
