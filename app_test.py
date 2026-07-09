@@ -984,10 +984,11 @@ def main():
         all_props = db_get("properties", "select=*")
         all_props = sort_properties_by_handover(all_props)
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
-        prop_hdate_map = {p.get('property_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
-
-ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
+       prop_hdate_map = {p.get('property_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
+        
+        ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
         tree = {}
+        for r in all_recs_for_tree:
         for r in all_recs_for_tree:
             if not isinstance(r, dict): continue
             ins = ins_map.get(r.get('inspection_id'))
