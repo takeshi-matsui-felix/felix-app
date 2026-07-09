@@ -54,7 +54,6 @@ def clear_specific_cache(target_prefix):
     keys_to_del = [k for k in st.session_state.db_cache.keys() if k.startswith(target_prefix)]
     for k in keys_to_del: del st.session_state.db_cache[k]
 
-# DB操作関数群
 def _raw_db_get(table, params):
     url = f"{SUPABASE_URL}/rest/v1/{table}?{params}"
     try:
@@ -93,8 +92,11 @@ def db_patch_inspections_by_prop(prop_id, new_name):
     clear_specific_cache("inspections")
 
 def db_patch_inspection(ins_id, data):
-    requests.patch(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{ins_id}", headers=HEADERS, json=data)
-    clear_specific_cache("inspections")
+    try:
+        res = requests.patch(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{ins_id}", headers=HEADERS, json=data)
+        clear_specific_cache("inspections")
+        return res.status_code in [200, 204]
+    except: return False
 
 def db_delete_record(record_id): 
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
@@ -984,11 +986,10 @@ def main():
         all_props = db_get("properties", "select=*")
         all_props = sort_properties_by_handover(all_props)
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
-       prop_hdate_map = {p.get('property_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
+        prop_hdate_map = {p.get('property_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
         
         ins_map = {i.get('inspection_id'): i for i in all_ins if isinstance(i, dict) and i.get('inspection_id')}
         tree = {}
-        for r in all_recs_for_tree:
         for r in all_recs_for_tree:
             if not isinstance(r, dict): continue
             ins = ins_map.get(r.get('inspection_id'))
@@ -1484,6 +1485,36 @@ def main():
                     sel_work = st.selectbox("🛠️ 担当工種で絞り込む", ["すべて表示"] + works_in_recs, key="filter_dash_work")
                     if sel_work != "すべて表示":
                         recs = [r for r in recs if (r.get('work_type') or 'その他') == sel_work]
+                        
+                # 🌟 是正ダッシュボードにも「物件変更機能（間違えて登録した場合のお引越し）」を追加！
+                with st.expander("🔄 この検査の物件を変更する（間違えて登録した場合）"):
+                    st.warning("※この検査に含まれるすべての写真と指摘データを、別の物件に移動させます。")
+                    prop_opts = [p for p in all_props if p.get('property_name') != prop_val]
+                    if prop_opts:
+                        new_prop_sel = st.selectbox("移動先の正しい物件を選択", prop_opts, format_func=lambda x: f"[{x.get('area')}] {x.get('property_name')}", key="move_prop_sel_dash")
+                        if st.button("この物件にデータを移動する", type="primary", key="move_prop_btn_dash"):
+                            with st.spinner("データ移動中..."):
+                                new_p_id = new_prop_sel.get("property_id")
+                                new_p_name = new_prop_sel.get("property_name")
+                                success_flag = True
+                                for iid in t_ids:
+                                    r1 = requests.patch(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{iid}", headers=HEADERS, json={"property_id": new_p_id, "property_name": new_p_name})
+                                    r2 = requests.patch(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{iid}", headers=HEADERS, json={"property_id": new_p_id})
+                                    if r1.status_code not in [200, 204] or r2.status_code not in [200, 204]:
+                                        success_flag = False
+                                
+                                if success_flag:
+                                    clear_specific_cache("inspections")
+                                    clear_specific_cache("inspection_records")
+                                    st.success(f"「{new_p_name}」へ移動が完了しました！")
+                                    st.session_state.drill_target = None
+                                    st.session_state.cached_records = None
+                                    time.sleep(1.5)
+                                    st.rerun()
+                                else:
+                                    st.error("移動に失敗しました。時間をおいて再試行してください。")
+                    else:
+                        st.info("他に移動できる物件がありません。先に物件登録を行ってください。")
 
                 recs = sort_records(recs)
                 area_groups = {}
@@ -1497,11 +1528,17 @@ def main():
                 
                 edit_w_opts = WORK_OPTS_KIKAN if type_val.startswith("【検査機関】") else WORK_OPTS_SHANAI if type_val in SHANAI_KENSA_TYPES else WORK_OPTS_KUTAI if type_val == "躯体検査" else WORK_OPTS_HAIKIN if type_val == "配筋検査" else WORK_OPTS_CHUKAN if type_val == "中間検査" else WORK_OPTS_DANNETSU if type_val == "断熱検査" else WORK_OPTS_STANDARD
 
+                issue_count = 1
                 for a_name, a_recs in area_groups.items():
-                    st.subheader(f"■ 部位: {a_name}")
+                    # 🌟 ダッシュボードにも印刷用ページ区切りの魔法を追加
+                    st.markdown(f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px; page-break-after: avoid; break-after: avoid;'>■ 部位: {a_name}</div>", unsafe_allow_html=True)
                     for r_idx, r in enumerate(a_recs):
                         rec_id = r.get('record_id')
                         if not rec_id: continue 
+                        
+                        if issue_count == 4 or (issue_count > 4 and (issue_count - 4) % 4 == 0):
+                            st.markdown('<div class="page-break"></div>', unsafe_allow_html=True)
+                            
                         floor = r.get('floor_level', ''); area = r.get('area', ''); detail = r.get('issue_detail', '')
                         w = r.get('work_type', ''); p_stat = r.get('progress_status')
                         head_text = "" if type_val.startswith("【検査機関】") or floor == "一式" else f"【{floor} {w}】".strip()
@@ -1509,7 +1546,7 @@ def main():
                         
                         c_box = st.container()
                         with c_box:
-                            st.markdown('<div class="record-box">', unsafe_allow_html=True)
+                            st.markdown('<div class="record-box report-item">', unsafe_allow_html=True)
                             
                             if p_stat == "is_waiting_fix" or p_stat == "是正待ち": st.markdown(f"**{title}** <span style='background-color:#ffeaea; color:#d93025; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:bold;'>写真待ち</span>", unsafe_allow_html=True)
                             else: st.markdown(f"**{title}** <span style='background-color:#e8f0fe; color:#1a73e8; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:bold;'>確認待ち</span>", unsafe_allow_html=True)
@@ -1589,6 +1626,7 @@ def main():
                                             st.session_state.skip_render_ids.append(rec_id)
                                         st.rerun()
                             st.markdown('</div>', unsafe_allow_html=True)
+                        issue_count += 1
 
                 conf_recs = [r for r in recs if r.get('progress_status') == '是正確認中' and r.get('record_id') not in st.session_state.skip_render_ids]
                 if conf_recs:
