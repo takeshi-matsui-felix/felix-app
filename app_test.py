@@ -99,13 +99,20 @@ def db_patch_inspection(ins_id, data):
     except: return False
 
 def delete_storage_file(url):
-    """写真ファイルをStorageから直接削除する専用関数（クエリパラメータ除去対応）"""
+    """写真ファイルをStorageから直接削除する専用関数（エラー原因特定版）"""
     if not url or "supabase.co" not in url: return
     try:
         clean_url = url.split('?')[0]
         filename = clean_url.split('/')[-1]
-        requests.delete(f"{SUPABASE_URL}/storage/v1/object/photos/{filename}", headers=HEADERS)
-    except: pass
+        res = requests.delete(f"{SUPABASE_URL}/storage/v1/object/photos/{filename}", headers=HEADERS)
+        
+        # 削除結果を画面上に警告または通知として表示する
+        if res.status_code == 200:
+            st.success(f"📸 写真ファイルを削除しました: {filename}")
+        else:
+            st.error(f"⚠️ 写真の削除に失敗しました ({filename}): ステータスコード {res.status_code} / 内容: {res.text}")
+    except Exception as e:
+        st.error(f"⚠️ 写真削除通信エラー: {e}")
 
 def db_delete_record(record_id): 
     recs = _raw_db_get("inspection_records", f"select=issue_photo_url,fix_photo_url&record_id=eq.{record_id}")
