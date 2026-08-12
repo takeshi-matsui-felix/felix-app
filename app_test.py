@@ -99,20 +99,16 @@ def db_patch_inspection(ins_id, data):
     except: return False
 
 def delete_storage_file(url):
-    """写真ファイルをStorageから直接削除する専用関数（エラー原因特定版）"""
+    """写真ファイルをStorageから直接削除する専用関数（Content-Typeエラー対策版）"""
     if not url or "supabase.co" not in url: return
     try:
         clean_url = url.split('?')[0]
         filename = clean_url.split('/')[-1]
-        res = requests.delete(f"{SUPABASE_URL}/storage/v1/object/photos/{filename}", headers=HEADERS)
         
-        # 削除結果を画面上に警告または通知として表示する
-        if res.status_code == 200:
-            st.success(f"📸 写真ファイルを削除しました: {filename}")
-        else:
-            st.error(f"⚠️ 写真の削除に失敗しました ({filename}): ステータスコード {res.status_code} / 内容: {res.text}")
-    except Exception as e:
-        st.error(f"⚠️ 写真削除通信エラー: {e}")
+        # DELETE通信時にContent-TypeがあるとSupabaseが400エラーを起こすため、ヘッダーから除外して送信する
+        del_headers = {k: v for k, v in HEADERS.items() if k.lower() != 'content-type'}
+        requests.delete(f"{SUPABASE_URL}/storage/v1/object/photos/{filename}", headers=del_headers)
+    except: pass
 
 def db_delete_record(record_id): 
     recs = _raw_db_get("inspection_records", f"select=issue_photo_url,fix_photo_url&record_id=eq.{record_id}")
@@ -144,7 +140,7 @@ def db_delete_property(prop_id):
     clear_specific_cache("inspection_records")
     clear_specific_cache("inspections")
     clear_specific_cache("properties")
-
+  
 def upload_to_storage(base64_str):
     if not base64_str or not isinstance(base64_str, str): return None
     if base64_str.startswith("http://") or base64_str.startswith("https://"): return base64_str
