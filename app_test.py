@@ -1893,6 +1893,69 @@ def main():
                                     st.rerun()
                         issue_count += 1
 
+    # ----------------------------------------
+    # メニュー: 6. 安全検証ツール（管理者専用）
+    # ----------------------------------------
+    elif st.session_state.active_menu == "安全検証ツール":
+        st.header("安全検証ツール")
+        st.markdown("**🧹 ストレージデータ定期照合ツール**")
+        st.caption("DBに存在しない迷子写真を検出・削除します")
+
+        def check_orphan_photos():
+            master_key = st.secrets.get("SUPABASE_SERVICE_KEY")
+            if not master_key: return None, "マスターキー未設定"
+            admin_headers = {"apikey": master_key, "Authorization": f"Bearer {master_key}", "Content-Type": "application/json"}
+            try:
+                res_storage = requests.post(f"{SUPABASE_URL}/storage/v1/object/list/photos", headers=admin_headers, json={"prefix": "", "limit": 10000})
+                if res_storage.status_code != 200: return None, f"取得失敗({res_storage.status_code})"
+                storage_files = {item['name'] for item in res_storage.json() if isinstance(item, dict) and 'name' in item}
+                
+                used_files = set()
+                res_db = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url", headers=admin_headers)
+                if res_db.status_code == 200:
+                    for r in res_db.json():
+                        for key in ['issue_photo_url', 'fix_photo_url']:
+                            if r.get(key): used_files.add(str(r.get(key)).split('?')[0].split('/')[-1])
+                return list(storage_files - used_files), None
+            except Exception as e: return None, f"エラー: {e}"
+
+        def delete_orphan_photos_batch(orphan_files):
+            master_key = st.secrets.get("SUPABASE_SERVICE_KEY")
+            if not master_key or not orphan_files: return 0
+            admin_headers = {"apikey": master_key, "Authorization": f"Bearer {master_key}"}
+            deleted_count = 0
+            for fname in orphan_files:
+                try:
+                    if requests.delete(f"{SUPABASE_URL}/storage/v1/object/photos/{fname}", headers=admin_headers).status_code in [200, 204]:
+                        deleted_count += 1
+                except: pass
+            return deleted_count
+
+        if st.button("🔍 迷子写真を照合", use_container_width=True):
+            with st.spinner("照合中..."):
+                orphans, err = check_orphan_photos()
+                if err: st.error(err)
+                else: st.session_state.found_orphans = orphans
+
+        if "found_orphans" in st.session_state and st.session_state.found_orphans is not None:
+            orphans = st.session_state.found_orphans
+            if len(orphans) == 0: 
+                st.success("✨ 迷子写真は0枚です！ストレージは完璧にクリーンな状態です。")
+            else:
+                st.warning(f"⚠️ どこにも紐づかない迷子写真が **{len(orphans)} 枚** 検出されました。")
+                with st.expander("検出されたファイル一覧（先頭10件）"):
+                    for fn in orphans[:10]: st.write(f"- `{fn}`")
+                    if len(orphans) > 10: st.caption(f"他 {len(orphans) - 10} 件...")
+                    
+                if st.button("🔥 迷子写真を一括全削除する", type="primary", use_container_width=True):
+                    with st.spinner("削除中..."):
+                        count = delete_orphan_photos_batch(orphans)
+                        st.success(f"🎉 {count} 枚の迷子写真を削除しました！")
+                        st.session_state.found_orphans = None
+                        time.sleep(1)
+                        st.rerun()
+
+
 if __name__ == "__main__":
     try:
         main()
