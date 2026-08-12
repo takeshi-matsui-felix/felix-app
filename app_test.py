@@ -651,6 +651,9 @@ def main():
         
     # 🌟 管理者のみ、メニューの一番下に照合ツールを表示
     render_maintenance_ui()
+        
+    # 🌟 管理者のみ、メニューの一番下に照合ツールを表示
+    render_maintenance_ui()
 
     if selected_menu != st.session_state.active_menu:
         jump_to_menu(selected_menu, st.session_state.pre_selected_prop)
