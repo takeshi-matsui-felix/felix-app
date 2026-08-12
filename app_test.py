@@ -176,92 +176,6 @@ def upload_to_storage(base64_str):
         return f"{SUPABASE_URL}/storage/v1/object/public/photos/{filename}"
     except Exception: return base64_str
 
-def check_orphan_photos():
-    master_key = st.secrets.get("SUPABASE_SERVICE_KEY")
-    if not master_key: return None, "マスターキー未設定"
-    admin_headers = {"apikey": master_key, "Authorization": f"Bearer {master_key}", "Content-Type": "application/json"}
-    try:
-        # 400エラー修正（POST通信に変更）
-        res_storage = requests.post(f"{SUPABASE_URL}/storage/v1/object/list/photos", headers=admin_headers, json={"prefix": "", "limit": 10000})
-        if res_storage.status_code != 200: return None, f"取得失敗({res_storage.status_code})"
-        storage_files = {item['name'] for item in res_storage.json() if isinstance(item, dict) and 'name' in item}
-
-        used_files = set()
-        res_db = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url", headers=admin_headers)
-        if res_db.status_code == 200:
-            for r in res_db.json():
-                for key in ['issue_photo_url', 'fix_photo_url']:
-                    if r.get(key): used_files.add(str(r.get(key)).split('?')[0].split('/')[-1])
-
-        return list(storage_files - used_files), None
-    except Exception as e: return None, f"エラー: {e}"
-
-def delete_orphan_photos_batch(orphan_files):
-    master_key = st.secrets.get("SUPABASE_SERVICE_KEY")
-    if not master_key or not orphan_files: return 0
-    admin_headers = {"apikey": master_key, "Authorization": f"Bearer {master_key}"}
-    deleted_count = 0
-    for filename in orphan_files:
-        try:
-            if requests.delete(f"{SUPABASE_URL}/storage/v1/object/photos/{filename}", headers=admin_headers).status_code in [200, 204]:
-                deleted_count += 1
-        except: pass
-    return deleted_count
-
-def render_maintenance_ui():
-    """サイドバー（左側）に表示する"""
-    if st.session_state.get("role") == "admin":
-        with st.sidebar.expander("🧹 データ定期照合ツール", expanded=False):
-            st.caption("DBにない迷子写真を検出・削除します")
-            if st.button("🔍 迷子写真を照合", key="btn_check_orphans_sb", use_container_width=True):
-                with st.spinner("照合中..."):
-                    orphans, err = check_orphan_photos()
-                    if err: st.error(err)
-                    else: st.session_state.found_orphans = orphans
-            if "found_orphans" in st.session_state and st.session_state.found_orphans is not None:
-                orphans = st.session_state.found_orphans
-                if len(orphans) == 0: st.success("迷子写真：0枚")
-                else:
-                    st.warning(f"迷子写真：{len(orphans)}枚")
-                    if st.button("🔥 一括全削除", key="btn_delete_orphans_sb", type="primary", use_container_width=True):
-                        with st.spinner("削除中..."):
-                            count = delete_orphan_photos_batch(orphans)
-                            st.success(f"{count}枚削除しました")
-                            st.session_state.found_orphans = None
-                            time.sleep(1)
-                            st.rerun()
-
-# 👇 これにより、自動的にサイドバーに表示されます
-render_maintenance_ui()
-
-
-def render_maintenance_ui():
-    """上部メニュー内に表示する管理者用ツール"""
-    if st.session_state.get("role") == "admin":
-        st.markdown("<hr style='margin:10px 0;'>", unsafe_allow_html=True)
-        st.markdown("**🧹 ストレージデータ定期照合ツール**")
-        st.caption("DBに存在しない迷子写真を検出・削除します")
-        
-        if st.button("🔍 迷子写真を照合", key="btn_check_orphans_menu", use_container_width=True):
-            with st.spinner("照合中..."):
-                orphans, err = check_orphan_photos()
-                if err: st.error(err)
-                else: st.session_state.found_orphans = orphans
-                
-        if "found_orphans" in st.session_state and st.session_state.found_orphans is not None:
-            orphans = st.session_state.found_orphans
-            if len(orphans) == 0: 
-                st.success("迷子写真：0枚")
-            else:
-                st.warning(f"迷子写真：{len(orphans)}枚")
-                if st.button("🔥 一括全削除", key="btn_delete_orphans_menu", type="primary", use_container_width=True):
-                    with st.spinner("削除中..."):
-                        count = delete_orphan_photos_batch(orphans)
-                        st.success(f"{count}枚削除しました")
-                        st.session_state.found_orphans = None
-                        time.sleep(1)
-                        st.rerun()
-
 # ==========================================
 # 物件・指摘の並び替えアルゴリズム
 # ==========================================
@@ -643,19 +557,11 @@ def main():
     
     with st.expander(f"メニューを開く (現在のユーザー: {st.session_state.role})", expanded=False):
         selected_menu = st.radio("移動先を選択", menu_opts, index=menu_opts.index(st.session_state.active_menu), format_func=format_menu, label_visibility="collapsed")
-    
+        
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("ログアウト / アカウントの切り替え"):
             st.session_state.logout_triggered = True
             st.rerun()
-        
-    render_maintenance_ui()
-        
-    # 🌟 管理者のみ、メニューの一番下に照合ツールを表示
-    render_maintenance_ui()
-        
-    # 🌟 管理者のみ、メニューの一番下に照合ツールを表示
-    render_maintenance_ui()
 
     if selected_menu != st.session_state.active_menu:
         jump_to_menu(selected_menu, st.session_state.pre_selected_prop)
@@ -1889,31 +1795,31 @@ def main():
                 total_cnt = len(recs)
                 
                 if st.session_state.role == "admin":
-                        st.markdown(f"""<div class="admin-delete-box" style="background-color:#FFF0F0; padding:15px; border:2px solid #FF4B4B; border-radius:10px; margin-bottom:20px;">
-                            <h3 style="color:#FF4B4B; margin-top:0;">完了物件の保存及び削除（管理者専用）</h3>
-                            <p style="font-size:14px; color:#333;">この検査記録の保存（右上の「Print」等）が完了しましたら、システム容量を空けるためにデータを削除してください。<br><b>※一度削除した写真は元に戻せません。</b></p>
-                        </div>""", unsafe_allow_html=True)
-                        del_pass = st.text_input("削除用パスワードを入力 (5963)", type="password", key=f"del_pass_all")
-                        if st.button(f"この検査（{type_val}）のデータを完全に削除する", key=f"del_btn_all"):
-                            if del_pass == DELETE_PASSWORD:
-                                with st.spinner("データ削除中..."):
-                                    for iid in t_ids:
-                                        # 🌟 文字データを消す前に、紐づく写真（ビフォー・アフター）をマスターキーで削除
-                                        res_recs = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url&inspection_id=eq.{iid}", headers=HEADERS)
-                                        if res_recs.status_code == 200:
-                                            for r in res_recs.json():
-                                                delete_storage_file(r.get('issue_photo_url'))
-                                                delete_storage_file(r.get('fix_photo_url'))
+                    st.markdown(f"""<div class="admin-delete-box" style="background-color:#FFF0F0; padding:15px; border:2px solid #FF4B4B; border-radius:10px; margin-bottom:20px;">
+                        <h3 style="color:#FF4B4B; margin-top:0;">完了物件の保存及び削除（管理者専用）</h3>
+                        <p style="font-size:14px; color:#333;">この検査記録の保存（右上の「Print」等）が完了しましたら、システム容量を空けるためにデータを削除してください。<br><b>※一度削除した写真は元に戻せません。</b></p>
+                    </div>""", unsafe_allow_html=True)
+                    del_pass = st.text_input("削除用パスワードを入力 (5963)", type="password", key=f"del_pass_all")
+                    if st.button(f"この検査（{type_val}）のデータを完全に削除する", key=f"del_btn_all"):
+                        if del_pass == DELETE_PASSWORD:
+                            with st.spinner("データ削除中..."):
+                                for iid in t_ids:
+                                    # 🌟 文字データを消す前に、紐づく写真（ビフォー・アフター）をマスターキーで削除
+                                    res_recs = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url&inspection_id=eq.{iid}", headers=HEADERS)
+                                    if res_recs.status_code == 200:
+                                        for r in res_recs.json():
+                                            delete_storage_file(r.get('issue_photo_url'))
+                                            delete_storage_file(r.get('fix_photo_url'))
 
-                                        requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{iid}", headers=HEADERS)
-                                        requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{iid}", headers=HEADERS)
-                                        
-                                    clear_specific_cache("inspection_records")
-                                    clear_specific_cache("inspections")
+                                    requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{iid}", headers=HEADERS)
+                                    requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{iid}", headers=HEADERS)
                                     
-                                st.success("すべてのデータの削除が完了しました"); st.session_state.drill_target = None; st.session_state.cached_records = None; time.sleep(1); st.rerun()
-                            else: st.error("パスワードが違います")
-                        st.markdown("<hr class='admin-delete-box'>", unsafe_allow_html=True)
+                                clear_specific_cache("inspection_records")
+                                clear_specific_cache("inspections")
+                                
+                            st.success("すべてのデータの削除が完了しました"); st.session_state.drill_target = None; st.session_state.cached_records = None; time.sleep(1); st.rerun()
+                        else: st.error("パスワードが違います")
+                    st.markdown("<hr class='admin-delete-box'>", unsafe_allow_html=True)
 
                 st.markdown(f"""<div style="background:white; padding:0; font-family:sans-serif; width:100%;">
                     <div style="text-align:center; margin-bottom:5px; font-size:24px; font-weight:bold;">{prop_val}</div>
