@@ -99,15 +99,15 @@ def db_patch_inspection(ins_id, data):
     except: return False
 
 def delete_storage_file(url):
-    """写真ファイルをStorageから直接削除する専用関数"""
+    """写真ファイルをStorageから直接削除する専用関数（クエリパラメータ除去対応）"""
     if not url or "supabase.co" not in url: return
     try:
-        filename = url.split('/')[-1]
+        clean_url = url.split('?')[0]
+        filename = clean_url.split('/')[-1]
         requests.delete(f"{SUPABASE_URL}/storage/v1/object/photos/{filename}", headers=HEADERS)
     except: pass
 
 def db_delete_record(record_id): 
-    # 🌟 削除する前に写真URLを取得してStorageから削除
     recs = _raw_db_get("inspection_records", f"select=issue_photo_url,fix_photo_url&record_id=eq.{record_id}")
     if recs:
         delete_storage_file(recs[0].get('issue_photo_url'))
@@ -117,15 +117,23 @@ def db_delete_record(record_id):
     clear_specific_cache("inspection_records")
 
 def db_delete_property(prop_id):
-    # 🌟 物件に紐づくすべての写真を探し出してStorageから一掃する
-    recs = _raw_db_get("inspection_records", f"select=issue_photo_url,fix_photo_url&property_id=eq.{prop_id}")
-    for r in recs:
-        delete_storage_file(r.get('issue_photo_url'))
-        delete_storage_file(r.get('fix_photo_url'))
+    # 1. 物件(prop_id)に紐づくすべての検査(inspections)を取得
+    inspections = _raw_db_get("inspections", f"select=inspection_id&property_id=eq.{prop_id}")
+    
+    # 2. 各検査に紐づくすべての指摘記録(inspection_records)の写真を探して削除
+    for insp in inspections:
+        insp_id = insp.get('inspection_id')
+        if insp_id:
+            recs = _raw_db_get("inspection_records", f"select=issue_photo_url,fix_photo_url&inspection_id=eq.{insp_id}")
+            for r in recs:
+                delete_storage_file(r.get('issue_photo_url'))
+                delete_storage_file(r.get('fix_photo_url'))
         
+    # 3. データベースの文字データを削除
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?property_id=eq.{prop_id}", headers=HEADERS)
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?property_id=eq.{prop_id}", headers=HEADERS)
     requests.delete(f"{SUPABASE_URL}/rest/v1/properties?property_id=eq.{prop_id}", headers=HEADERS)
+    
     clear_specific_cache("inspection_records")
     clear_specific_cache("inspections")
     clear_specific_cache("properties")
