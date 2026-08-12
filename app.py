@@ -663,10 +663,10 @@ def main():
                 
             if st.session_state.delete_target == prop_id:
                 st.warning(f"本当に「{p_name}」を削除しますか？紐づくすべてのデータが消えます。")
-                del_pw = st.text_input("削除用パスワードを入力", type="password", key=f"pw_{key_suffix}", placeholder="2011")
+                del_pw = st.text_input("削除用パスワードを入力", type="password", key=f"pw_{key_suffix}", placeholder="5963")
                 col_y, col_n = st.columns(2)
                 if col_y.button("Yes (削除実行)", key=f"yes_{key_suffix}"):
-                    if del_pw == "2011":
+                    if del_pw == DELETE_PASSWORD:
                         db_delete_property(prop_id); st.session_state.delete_target = None; st.session_state.current_box = None; st.rerun()
                     else: st.error("パスワードが違います")
                 if col_n.button("キャンセル", key=f"no_{key_suffix}"): st.session_state.delete_target = None; st.rerun()
@@ -1753,6 +1753,11 @@ def main():
                                 for iid in t_ids:
                                     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{iid}", headers=HEADERS)
                                     requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{iid}", headers=HEADERS)
+                                    
+                                # 🌟 【追加】アプリの記憶（キャッシュ）を消去するこの2行を追加！
+                                clear_specific_cache("inspection_records")
+                                clear_specific_cache("inspections")
+                                
                             st.success("すべてのデータの削除が完了しました"); st.session_state.drill_target = None; st.session_state.cached_records = None; time.sleep(1); st.rerun()
                         else: st.error("パスワードが違います")
                     st.markdown("<hr class='admin-delete-box'>", unsafe_allow_html=True)
