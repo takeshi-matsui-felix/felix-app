@@ -642,12 +642,12 @@ def main():
     if st.session_state.active_menu not in menu_opts: st.session_state.active_menu = menu_opts[0]
     
     with st.expander(f"メニューを開く (現在のユーザー: {st.session_state.role})", expanded=False):
-    selected_menu = st.radio("移動先を選択", menu_opts, index=menu_opts.index(st.session_state.active_menu), format_func=format_menu, label_visibility="collapsed")
+        selected_menu = st.radio("移動先を選択", menu_opts, index=menu_opts.index(st.session_state.active_menu), format_func=format_menu, label_visibility="collapsed")
     
-    st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("ログアウト / アカウントの切り替え"):
-        st.session_state.logout_triggered = True
-        st.rerun()
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("ログアウト / アカウントの切り替え"):
+            st.session_state.logout_triggered = True
+            st.rerun()
         
     render_maintenance_ui()
         
