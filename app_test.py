@@ -2070,3 +2070,8 @@ if __name__ == "__main__":
     except Exception as e:
         st.error("システムエラーが発生しました。電波の良い場所でやり直してください。")
         if st.button("システム復旧"): st.session_state.clear(); st.rerun()
+    try:
+        main()
+    except Exception as e:
+        st.error("システムエラーが発生しました。電波の良い場所でやり直してください。")
+        if st.button("システム復旧"): st.session_state.clear(); st.rerun()
