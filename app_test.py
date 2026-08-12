@@ -98,11 +98,31 @@ def db_patch_inspection(ins_id, data):
         return res.status_code in [200, 204]
     except: return False
 
+def delete_storage_file(url):
+    """写真ファイルをStorageから直接削除する専用関数"""
+    if not url or "supabase.co" not in url: return
+    try:
+        filename = url.split('/')[-1]
+        requests.delete(f"{SUPABASE_URL}/storage/v1/object/photos/{filename}", headers=HEADERS)
+    except: pass
+
 def db_delete_record(record_id): 
+    # 🌟 削除する前に写真URLを取得してStorageから削除
+    recs = _raw_db_get("inspection_records", f"select=issue_photo_url,fix_photo_url&record_id=eq.{record_id}")
+    if recs:
+        delete_storage_file(recs[0].get('issue_photo_url'))
+        delete_storage_file(recs[0].get('fix_photo_url'))
+    
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
     clear_specific_cache("inspection_records")
 
 def db_delete_property(prop_id):
+    # 🌟 物件に紐づくすべての写真を探し出してStorageから一掃する
+    recs = _raw_db_get("inspection_records", f"select=issue_photo_url,fix_photo_url&property_id=eq.{prop_id}")
+    for r in recs:
+        delete_storage_file(r.get('issue_photo_url'))
+        delete_storage_file(r.get('fix_photo_url'))
+        
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?property_id=eq.{prop_id}", headers=HEADERS)
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?property_id=eq.{prop_id}", headers=HEADERS)
     requests.delete(f"{SUPABASE_URL}/rest/v1/properties?property_id=eq.{prop_id}", headers=HEADERS)
