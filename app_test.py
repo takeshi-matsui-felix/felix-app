@@ -1924,7 +1924,6 @@ def main():
                                 st.success("すべてのデータの削除が完了しました"); st.session_state.drill_target = None; st.session_state.cached_records = None; time.sleep(1); st.rerun()
                             else: st.error("パスワードが違います")
                         st.markdown("<hr class='admin-delete-box'>", unsafe_allow_html=True)
-                        render_maintenance_ui()
 
                 st.markdown(f"""<div style="background:white; padding:0; font-family:sans-serif; width:100%;">
                     <div style="text-align:center; margin-bottom:5px; font-size:24px; font-weight:bold;">{prop_val}</div>
