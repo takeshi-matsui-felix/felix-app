@@ -176,6 +176,110 @@ def upload_to_storage(base64_str):
         return f"{SUPABASE_URL}/storage/v1/object/public/photos/{filename}"
     except Exception: return base64_str
 
+def check_orphan_photos():
+    """DBとStorageを照合し、迷子写真を特定する関数"""
+    master_key = st.secrets.get("SUPABASE_SERVICE_KEY")
+    if not master_key:
+        return None, "SUPABASE_SERVICE_KEY が Secrets に設定されていません。"
+
+    admin_headers = {
+        "apikey": master_key,
+        "Authorization": f"Bearer {master_key}"
+    }
+
+    try:
+        res_storage = requests.get(f"{SUPABASE_URL}/storage/v1/object/list/photos", headers=admin_headers)
+        if res_storage.status_code != 200:
+            return None, f"Storage一覧の取得に失敗しました (Code: {res_storage.status_code})"
+        
+        storage_files = {item['name'] for item in res_storage.json() if isinstance(item, dict) and 'name' in item}
+
+        used_files = set()
+        res_db = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url", headers=admin_headers)
+        if res_db.status_code == 200:
+            for r in res_db.json():
+                for key in ['issue_photo_url', 'fix_photo_url']:
+                    url = r.get(key)
+                    if url:
+                        fname = str(url).split('?')[0].split('/')[-1]
+                        if fname: used_files.add(fname)
+                        
+        res_prop = requests.get(f"{SUPABASE_URL}/rest/v1/properties?select=photo_url,image_url", headers=admin_headers)
+        if res_prop.status_code == 200:
+            for p in res_prop.json():
+                for key in ['photo_url', 'image_url']:
+                    url = p.get(key)
+                    if url:
+                        fname = str(url).split('?')[0].split('/')[-1]
+                        if fname: used_files.add(fname)
+
+        orphan_files = list(storage_files - used_files)
+        return orphan_files, None
+
+    except Exception as e:
+        return None, f"照合中にエラーが発生しました: {e}"
+
+
+def delete_orphan_photos_batch(orphan_files):
+    """迷子写真を一括削除する関数"""
+    master_key = st.secrets.get("SUPABASE_SERVICE_KEY")
+    if not master_key or not orphan_files: return 0
+
+    admin_headers = {
+        "apikey": master_key,
+        "Authorization": f"Bearer {master_key}"
+    }
+
+    deleted_count = 0
+    for filename in orphan_files:
+        try:
+            res = requests.delete(f"{SUPABASE_URL}/storage/v1/object/photos/{filename}", headers=admin_headers)
+            if res.status_code in [200, 204]:
+                deleted_count += 1
+        except: pass
+    return deleted_count
+
+
+def render_maintenance_ui():
+    """管理者画面に表示するUIコンポーネント"""
+    st.markdown("---")
+    st.subheader("🧹 ストレージ容量・データ定期照合ツール")
+    st.caption("データベースに登録されていない保管庫（Storage）内の「迷子写真」を検出し、一括削除します。")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("🔍 迷子写真を炙り出す", key="btn_check_orphans", use_container_width=True):
+            with st.spinner("照合中..."):
+                orphans, err = check_orphan_photos()
+                if err:
+                    st.error(err)
+                else:
+                    st.session_state.found_orphans = orphans
+
+    if "found_orphans" in st.session_state and st.session_state.found_orphans is not None:
+        orphans = st.session_state.found_orphans
+        
+        if len(orphans) == 0:
+            st.success("✨ 迷子写真は0枚です！ストレージは完璧にクリーンな状態です。")
+        else:
+            st.warning(f"⚠️ どこにも紐づかない迷子写真が **{len(orphans)} 枚** 検出されました。")
+            
+            with st.expander("検出されたファイル一覧（先頭10件）"):
+                for fn in orphans[:10]:
+                    st.write(f"- `{fn}`")
+                if len(orphans) > 10:
+                    st.caption(f"他 {len(orphans) - 10} 件...")
+
+            with col2:
+                if st.button("🔥 迷子写真を一括全削除する", key="btn_delete_orphans", type="primary", use_container_width=True):
+                    with st.spinner("削除中..."):
+                        count = delete_orphan_photos_batch(orphans)
+                        st.success(f"🎉 {count} 枚の迷子写真を削除しました！")
+                        st.session_state.found_orphans = None
+                        time.sleep(1)
+                        st.rerun()
+
 # ==========================================
 # 物件・指摘の並び替えアルゴリズム
 # ==========================================
