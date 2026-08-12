@@ -177,21 +177,13 @@ def upload_to_storage(base64_str):
     except Exception: return base64_str
 
 def check_orphan_photos():
-    """DBとStorageを照合し、迷子写真を特定する関数"""
     master_key = st.secrets.get("SUPABASE_SERVICE_KEY")
-    if not master_key:
-        return None, "SUPABASE_SERVICE_KEY が Secrets に設定されていません。"
-
-    admin_headers = {
-        "apikey": master_key,
-        "Authorization": f"Bearer {master_key}"
-    }
-
+    if not master_key: return None, "マスターキー未設定"
+    admin_headers = {"apikey": master_key, "Authorization": f"Bearer {master_key}", "Content-Type": "application/json"}
     try:
-        res_storage = requests.get(f"{SUPABASE_URL}/storage/v1/object/list/photos", headers=admin_headers)
-        if res_storage.status_code != 200:
-            return None, f"Storage一覧の取得に失敗しました (Code: {res_storage.status_code})"
-        
+        # 400エラー修正（POST通信に変更）
+        res_storage = requests.post(f"{SUPABASE_URL}/storage/v1/object/list/photos", headers=admin_headers, json={"prefix": "", "limit": 10000})
+        if res_storage.status_code != 200: return None, f"取得失敗({res_storage.status_code})"
         storage_files = {item['name'] for item in res_storage.json() if isinstance(item, dict) and 'name' in item}
 
         used_files = set()
@@ -199,45 +191,48 @@ def check_orphan_photos():
         if res_db.status_code == 200:
             for r in res_db.json():
                 for key in ['issue_photo_url', 'fix_photo_url']:
-                    url = r.get(key)
-                    if url:
-                        fname = str(url).split('?')[0].split('/')[-1]
-                        if fname: used_files.add(fname)
-                        
-        res_prop = requests.get(f"{SUPABASE_URL}/rest/v1/properties?select=photo_url,image_url", headers=admin_headers)
-        if res_prop.status_code == 200:
-            for p in res_prop.json():
-                for key in ['photo_url', 'image_url']:
-                    url = p.get(key)
-                    if url:
-                        fname = str(url).split('?')[0].split('/')[-1]
-                        if fname: used_files.add(fname)
+                    if r.get(key): used_files.add(str(r.get(key)).split('?')[0].split('/')[-1])
 
-        orphan_files = list(storage_files - used_files)
-        return orphan_files, None
-
-    except Exception as e:
-        return None, f"照合中にエラーが発生しました: {e}"
-
+        return list(storage_files - used_files), None
+    except Exception as e: return None, f"エラー: {e}"
 
 def delete_orphan_photos_batch(orphan_files):
-    """迷子写真を一括削除する関数"""
     master_key = st.secrets.get("SUPABASE_SERVICE_KEY")
     if not master_key or not orphan_files: return 0
-
-    admin_headers = {
-        "apikey": master_key,
-        "Authorization": f"Bearer {master_key}"
-    }
-
+    admin_headers = {"apikey": master_key, "Authorization": f"Bearer {master_key}"}
     deleted_count = 0
     for filename in orphan_files:
         try:
-            res = requests.delete(f"{SUPABASE_URL}/storage/v1/object/photos/{filename}", headers=admin_headers)
-            if res.status_code in [200, 204]:
+            if requests.delete(f"{SUPABASE_URL}/storage/v1/object/photos/{filename}", headers=admin_headers).status_code in [200, 204]:
                 deleted_count += 1
         except: pass
     return deleted_count
+
+def render_maintenance_ui():
+    """サイドバー（左側）に表示する"""
+    if st.session_state.get("role") == "admin":
+        with st.sidebar.expander("🧹 データ定期照合ツール", expanded=False):
+            st.caption("DBにない迷子写真を検出・削除します")
+            if st.button("🔍 迷子写真を照合", key="btn_check_orphans_sb", use_container_width=True):
+                with st.spinner("照合中..."):
+                    orphans, err = check_orphan_photos()
+                    if err: st.error(err)
+                    else: st.session_state.found_orphans = orphans
+            if "found_orphans" in st.session_state and st.session_state.found_orphans is not None:
+                orphans = st.session_state.found_orphans
+                if len(orphans) == 0: st.success("迷子写真：0枚")
+                else:
+                    st.warning(f"迷子写真：{len(orphans)}枚")
+                    if st.button("🔥 一括全削除", key="btn_delete_orphans_sb", type="primary", use_container_width=True):
+                        with st.spinner("削除中..."):
+                            count = delete_orphan_photos_batch(orphans)
+                            st.success(f"{count}枚削除しました")
+                            st.session_state.found_orphans = None
+                            time.sleep(1)
+                            st.rerun()
+
+# 👇 これにより、自動的にサイドバーに表示されます
+render_maintenance_ui()
 
 
 def render_maintenance_ui():
