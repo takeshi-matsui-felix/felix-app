@@ -649,6 +649,8 @@ def main():
         st.session_state.logout_triggered = True
         st.rerun()
         
+    render_maintenance_ui()
+        
     # 🌟 管理者のみ、メニューの一番下に照合ツールを表示
     render_maintenance_ui()
         
