@@ -99,11 +99,12 @@ def db_patch_inspection(ins_id, data):
     except: return False
 
 def delete_storage_file(url):
-    """写真ファイルをStorageから直接削除する専用関数（Content-Typeエラー対策版）"""
-    if not url or "supabase.co" not in url: return
+    """写真ファイルをStorageから直接削除する専用関数（完全網羅版）"""
+    if not url: return
     try:
-        clean_url = url.split('?')[0]
+        clean_url = str(url).split('?')[0]
         filename = clean_url.split('/')[-1]
+        if not filename or filename == "None": return
         
         # DELETE通信時にContent-TypeがあるとSupabaseが400エラーを起こすため、ヘッダーから除外して送信する
         del_headers = {k: v for k, v in HEADERS.items() if k.lower() != 'content-type'}
@@ -120,15 +121,19 @@ def db_delete_record(record_id):
     clear_specific_cache("inspection_records")
 
 def db_delete_property(prop_id):
-    # 1. 物件(prop_id)に紐づくすべての検査(inspections)を取得
+    # 【ルート1】property_id に直接紐づいている指摘記録の写真を探して削除
+    recs_direct = _raw_db_get("inspection_records", f"select=issue_photo_url,fix_photo_url&property_id=eq.{prop_id}")
+    for r in recs_direct:
+        delete_storage_file(r.get('issue_photo_url'))
+        delete_storage_file(r.get('fix_photo_url'))
+
+    # 【ルート2】inspections 経由で紐づいている指摘記録の写真を探して削除
     inspections = _raw_db_get("inspections", f"select=inspection_id&property_id=eq.{prop_id}")
-    
-    # 2. 各検査に紐づくすべての指摘記録(inspection_records)の写真を探して削除
     for insp in inspections:
         insp_id = insp.get('inspection_id')
         if insp_id:
-            recs = _raw_db_get("inspection_records", f"select=issue_photo_url,fix_photo_url&inspection_id=eq.{insp_id}")
-            for r in recs:
+            recs_insp = _raw_db_get("inspection_records", f"select=issue_photo_url,fix_photo_url&inspection_id=eq.{insp_id}")
+            for r in recs_insp:
                 delete_storage_file(r.get('issue_photo_url'))
                 delete_storage_file(r.get('fix_photo_url'))
         
