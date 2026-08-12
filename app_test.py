@@ -1899,31 +1899,32 @@ def main():
                 total_cnt = len(recs)
                 
                 if st.session_state.role == "admin":
-                    st.markdown(f"""<div class="admin-delete-box" style="background-color:#FFF0F0; padding:15px; border:2px solid #FF4B4B; border-radius:10px; margin-bottom:20px;">
-                        <h3 style="color:#FF4B4B; margin-top:0;">完了物件の保存及び削除（管理者専用）</h3>
-                        <p style="font-size:14px; color:#333;">この検査記録の保存（右上の「Print」等）が完了しましたら、システム容量を空けるためにデータを削除してください。<br><b>※一度削除した写真は元に戻せません。</b></p>
-                    </div>""", unsafe_allow_html=True)
-                    del_pass = st.text_input("削除用パスワードを入力 (5963)", type="password", key=f"del_pass_all")
-                    if st.button(f"この検査（{type_val}）のデータを完全に削除する", key=f"del_btn_all"):
-                        if del_pass == DELETE_PASSWORD:
-                            with st.spinner("データ削除中..."):
-                                for iid in t_ids:
-                                    # 🌟 文字データを消す前に、紐づく写真（ビフォー・アフター）をマスターキーで削除
-                                    res_recs = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url&inspection_id=eq.{iid}", headers=HEADERS)
-                                    if res_recs.status_code == 200:
-                                        for r in res_recs.json():
-                                            delete_storage_file(r.get('issue_photo_url'))
-                                            delete_storage_file(r.get('fix_photo_url'))
+                        st.markdown(f"""<div class="admin-delete-box" style="background-color:#FFF0F0; padding:15px; border:2px solid #FF4B4B; border-radius:10px; margin-bottom:20px;">
+                            <h3 style="color:#FF4B4B; margin-top:0;">完了物件の保存及び削除（管理者専用）</h3>
+                            <p style="font-size:14px; color:#333;">この検査記録の保存（右上の「Print」等）が完了しましたら、システム容量を空けるためにデータを削除してください。<br><b>※一度削除した写真は元に戻せません。</b></p>
+                        </div>""", unsafe_allow_html=True)
+                        del_pass = st.text_input("削除用パスワードを入力 (5963)", type="password", key=f"del_pass_all")
+                        if st.button(f"この検査（{type_val}）のデータを完全に削除する", key=f"del_btn_all"):
+                            if del_pass == DELETE_PASSWORD:
+                                with st.spinner("データ削除中..."):
+                                    for iid in t_ids:
+                                        # 🌟 文字データを消す前に、紐づく写真（ビフォー・アフター）をマスターキーで削除
+                                        res_recs = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url&inspection_id=eq.{iid}", headers=HEADERS)
+                                        if res_recs.status_code == 200:
+                                            for r in res_recs.json():
+                                                delete_storage_file(r.get('issue_photo_url'))
+                                                delete_storage_file(r.get('fix_photo_url'))
 
-                                    requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{iid}", headers=HEADERS)
-                                    requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{iid}", headers=HEADERS)
+                                        requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{iid}", headers=HEADERS)
+                                        requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{iid}", headers=HEADERS)
+                                        
+                                    clear_specific_cache("inspection_records")
+                                    clear_specific_cache("inspections")
                                     
-                                clear_specific_cache("inspection_records")
-                                clear_specific_cache("inspections")
-                                
-                            st.success("すべてのデータの削除が完了しました"); st.session_state.drill_target = None; st.session_state.cached_records = None; time.sleep(1); st.rerun()
-                        else: st.error("パスワードが違います")
-                    st.markdown("<hr class='admin-delete-box'>", unsafe_allow_html=True)
+                                st.success("すべてのデータの削除が完了しました"); st.session_state.drill_target = None; st.session_state.cached_records = None; time.sleep(1); st.rerun()
+                            else: st.error("パスワードが違います")
+                        st.markdown("<hr class='admin-delete-box'>", unsafe_allow_html=True)
+                        render_maintenance_ui()
 
                 st.markdown(f"""<div style="background:white; padding:0; font-family:sans-serif; width:100%;">
                     <div style="text-align:center; margin-bottom:5px; font-size:24px; font-weight:bold;">{prop_val}</div>
