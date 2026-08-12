@@ -1999,7 +1999,6 @@ def main():
                                     st.success("完了を取り消し、ダッシュボードに復活させました！")
                                     time.sleep(1)
                                     st.rerun()
-                        
                         issue_count += 1
 
     # ----------------------------------------
@@ -2008,7 +2007,7 @@ def main():
     elif st.session_state.active_menu == "安全検証ツール":
         st.header("安全検証ツール")
         st.markdown("**🧹 ストレージデータ定期照合ツール**")
-        st.caption("DBに存在しない不要画像ファイルを検出・削除します")
+        st.caption("DBに存在しない迷子写真を検出・削除します")
 
         def check_orphan_photos():
             master_key = st.secrets.get("SUPABASE_SERVICE_KEY")
@@ -2040,7 +2039,7 @@ def main():
                 except: pass
             return deleted_count
 
-        if st.button("🔍 不要画像ファイルを照合", use_container_width=True):
+        if st.button("🔍 迷子写真を照合", use_container_width=True):
             with st.spinner("照合中..."):
                 orphans, err = check_orphan_photos()
                 if err: st.error(err)
@@ -2049,27 +2048,23 @@ def main():
         if "found_orphans" in st.session_state and st.session_state.found_orphans is not None:
             orphans = st.session_state.found_orphans
             if len(orphans) == 0: 
-                st.success("✨ 不要画像ファイルは0枚です！ストレージは完璧にクリーンな状態です。")
+                st.success("✨ 迷子写真は0枚です！ストレージは完璧にクリーンな状態です。")
             else:
-                st.warning(f"⚠️ データベースに紐づかない不要画像ファイルが **{len(orphans)} 枚** 検出されました。")
+                st.warning(f"⚠️ どこにも紐づかない迷子写真が **{len(orphans)} 枚** 検出されました。")
                 with st.expander("検出されたファイル一覧（先頭10件）"):
                     for fn in orphans[:10]: st.write(f"- `{fn}`")
                     if len(orphans) > 10: st.caption(f"他 {len(orphans) - 10} 件...")
                     
-                if st.button("🔥 不要画像ファイルを一括削除する", type="primary", use_container_width=True):
+                if st.button("🔥 迷子写真を一括全削除する", type="primary", use_container_width=True):
                     with st.spinner("削除中..."):
                         count = delete_orphan_photos_batch(orphans)
-                        st.success(f"🎉 {count} 枚の不要画像ファイルを削除しました！")
+                        st.success(f"🎉 {count} 枚の迷子写真を削除しました！")
                         st.session_state.found_orphans = None
                         time.sleep(1)
                         st.rerun()
 
+
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        st.error("システムエラーが発生しました。電波の良い場所でやり直してください。")
-        if st.button("システム復旧"): st.session_state.clear(); st.rerun()
     try:
         main()
     except Exception as e:
