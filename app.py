@@ -1804,10 +1804,16 @@ def main():
                         if del_pass == DELETE_PASSWORD:
                             with st.spinner("データ削除中..."):
                                 for iid in t_ids:
+                                    # 🌟 文字データを消す前に、紐づく写真（ビフォー・アフター）をマスターキーで削除
+                                    res_recs = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url&inspection_id=eq.{iid}", headers=HEADERS)
+                                    if res_recs.status_code == 200:
+                                        for r in res_recs.json():
+                                            delete_storage_file(r.get('issue_photo_url'))
+                                            delete_storage_file(r.get('fix_photo_url'))
+
                                     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{iid}", headers=HEADERS)
                                     requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{iid}", headers=HEADERS)
                                     
-                                # 🌟 【追加】アプリの記憶（キャッシュ）を消去するこの2行を追加！
                                 clear_specific_cache("inspection_records")
                                 clear_specific_cache("inspections")
                                 
