@@ -1753,6 +1753,11 @@ def main():
                                 for iid in t_ids:
                                     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{iid}", headers=HEADERS)
                                     requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{iid}", headers=HEADERS)
+                                    
+                                # 🌟 【追加】アプリの記憶（キャッシュ）を消去するこの2行を追加！
+                                clear_specific_cache("inspection_records")
+                                clear_specific_cache("inspections")
+                                
                             st.success("すべてのデータの削除が完了しました"); st.session_state.drill_target = None; st.session_state.cached_records = None; time.sleep(1); st.rerun()
                         else: st.error("パスワードが違います")
                     st.markdown("<hr class='admin-delete-box'>", unsafe_allow_html=True)
