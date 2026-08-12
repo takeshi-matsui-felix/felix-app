@@ -99,48 +99,65 @@ def db_patch_inspection(ins_id, data):
     except: return False
 
 def delete_storage_file(url):
-    """写真ファイルをStorageから直接削除する専用関数（完全網羅版）"""
+    """写真ファイルをStorageから直接削除する専用関数（マスターキー強制突破版）"""
     if not url: return
     try:
         clean_url = str(url).split('?')[0]
         filename = clean_url.split('/')[-1]
         if not filename or filename == "None": return
         
-        # DELETE通信時にContent-TypeがあるとSupabaseが400エラーを起こすため、ヘッダーから除外して送信する
-        del_headers = {k: v for k, v in HEADERS.items() if k.lower() != 'content-type'}
-        requests.delete(f"{SUPABASE_URL}/storage/v1/object/photos/{filename}", headers=del_headers)
+        # 🌟 Secretsからマスターキーを安全に呼び出して、Supabaseの権限ブロックを強制突破する
+        master_key = st.secrets.get("SUPABASE_SERVICE_KEY")
+        if not master_key: return  # キーが未設定の場合は安全のためスキップ
+            
+        admin_headers = {
+            "apikey": master_key,
+            "Authorization": f"Bearer {master_key}"
+        }
+        requests.delete(f"{SUPABASE_URL}/storage/v1/object/photos/{filename}", headers=admin_headers)
     except: pass
 
 def db_delete_record(record_id): 
-    recs = _raw_db_get("inspection_records", f"select=issue_photo_url,fix_photo_url&record_id=eq.{record_id}")
-    if recs:
-        delete_storage_file(recs[0].get('issue_photo_url'))
-        delete_storage_file(recs[0].get('fix_photo_url'))
-    
+    # _raw_db_get のキャッシュの罠を避けるため、直接最新のデータを取得
+    res = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url&record_id=eq.{record_id}", headers=HEADERS)
+    if res.status_code == 200:
+        for r in res.json():
+            delete_storage_file(r.get('issue_photo_url'))
+            delete_storage_file(r.get('fix_photo_url'))
+            
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
     clear_specific_cache("inspection_records")
 
 def db_delete_property(prop_id):
-    # 【ルート1】property_id に直接紐づいている指摘記録の写真を探して削除
-    recs_direct = _raw_db_get("inspection_records", f"select=issue_photo_url,fix_photo_url&property_id=eq.{prop_id}")
-    for r in recs_direct:
-        delete_storage_file(r.get('issue_photo_url'))
-        delete_storage_file(r.get('fix_photo_url'))
+    # キャッシュの罠を避けるため、直接通信（requests.get）で確実に写真URLを拾い上げる
+    
+    # 【ルート1】property_id に直接紐づく写真
+    res_direct = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url&property_id=eq.{prop_id}", headers=HEADERS)
+    if res_direct.status_code == 200:
+        for r in res_direct.json():
+            delete_storage_file(r.get('issue_photo_url'))
+            delete_storage_file(r.get('fix_photo_url'))
 
-    # 【ルート2】inspections 経由で紐づいている指摘記録の写真を探して削除
-    inspections = _raw_db_get("inspections", f"select=inspection_id&property_id=eq.{prop_id}")
-    for insp in inspections:
-        insp_id = insp.get('inspection_id')
-        if insp_id:
-            recs_insp = _raw_db_get("inspection_records", f"select=issue_photo_url,fix_photo_url&inspection_id=eq.{insp_id}")
-            for r in recs_insp:
-                delete_storage_file(r.get('issue_photo_url'))
-                delete_storage_file(r.get('fix_photo_url'))
-        
+    # 【ルート2】inspections 経由で紐づく写真
+    res_insp = requests.get(f"{SUPABASE_URL}/rest/v1/inspections?select=inspection_id&property_id=eq.{prop_id}", headers=HEADERS)
+    if res_insp.status_code == 200:
+        for insp in res_insp.json():
+            insp_id = insp.get('inspection_id')
+            if insp_id:
+                res_rec = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url&inspection_id=eq.{insp_id}", headers=HEADERS)
+                if res_rec.status_code == 200:
+                    for r in res_rec.json():
+                        delete_storage_file(r.get('issue_photo_url'))
+                        delete_storage_file(r.get('fix_photo_url'))
+                        
     # 3. データベースの文字データを削除
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?property_id=eq.{prop_id}", headers=HEADERS)
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?property_id=eq.{prop_id}", headers=HEADERS)
     requests.delete(f"{SUPABASE_URL}/rest/v1/properties?property_id=eq.{prop_id}", headers=HEADERS)
+    
+    clear_specific_cache("inspection_records")
+    clear_specific_cache("inspections")
+    clear_specific_cache("properties")
     
     clear_specific_cache("inspection_records")
     clear_specific_cache("inspections")
