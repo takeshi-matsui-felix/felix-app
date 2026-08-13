@@ -449,6 +449,12 @@ st.markdown("""
     @media print {
         .stButton, .stTextInput, .stRadio, .stSelectbox, .stCheckbox, [data-testid="stExpander"], .floating-back-btn { display: none !important; }
         .admin-delete-box, hr { display: none !important; }
+
+        /* 用紙サイズ・余白をCSS側で固定し、ブラウザの印刷ダイアログの選択に左右されず毎回同じ見た目にする */
+        @page {
+            size: A4 portrait;
+            margin: 12mm 12mm;
+        }
         
         .main .block-container { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white; }
         
@@ -462,6 +468,30 @@ st.markdown("""
             break-inside: avoid !important;
             padding-bottom: 25px !important;
         }
+
+        /* 完了分一覧の報告書のみ：高さを固定し、ブラウザの自然な改ページに任せる。
+           これにより中身の文字量・写真比率に関わらず「入るだけ入れる（基本4枚／入らなければ3枚）」が安定する */
+        .report-item-final {
+            height: 60mm;
+            overflow: hidden;
+            border-bottom: 1px dashed #ccc;
+            padding: 10px 0 !important;
+            margin-bottom: 6px !important;
+        }
+        .report-item-final .report-img {
+            height: 34mm;
+            max-height: 34mm;
+            aspect-ratio: auto;
+            object-fit: cover;
+        }
+        .report-item-final .issue-detail-text {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            margin-bottom: 6px !important;
+        }
+
         .page-break {
             page-break-before: always !important;
             break-before: page !important;
@@ -762,11 +792,15 @@ def main():
         filter_area = st.radio("一覧のエリア絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True)
         props = db_get("properties", "select=*")
         props = sort_properties_by_handover(props)
-        all_ins = db_get("inspections", "select=property_id")
+        all_ins = db_get("inspections", "select=inspection_id,property_id")
+        # 「データ件数」は検査(inspections)の存在数ではなく、実際に残っている指摘レコード数で判定する。
+        # （個別の指摘だけが全部削除され、検査という空箱だけが残るケースがあるため）
+        recs_for_count = db_get("inspection_records", "select=inspection_id")
+        ins_ids_with_data = set(r.get('inspection_id') for r in recs_for_count if isinstance(r, dict) and r.get('inspection_id'))
         prop_ins_counts = {}
         for ins in all_ins:
-            pid = ins.get('property_id')
-            if pid: prop_ins_counts[pid] = prop_ins_counts.get(pid, 0) + 1
+            pid = ins.get('property_id'); iid = ins.get('inspection_id')
+            if pid and iid in ins_ids_with_data: prop_ins_counts[pid] = prop_ins_counts.get(pid, 0) + 1
         
         for idx, p in enumerate(props):
             prop_id = p.get('property_id')
@@ -781,7 +815,8 @@ def main():
             key_suffix = f"{prop_id}_{idx}"
             
             c1, c2, c3 = st.columns([6, 2, 2])
-            if c1.button(btn_text, key=f"p_{key_suffix}"): jump_to_menu("検査実施（管理者）", prop_id)
+            area_btn_type = "primary" if p_area == "関東エリア" else "secondary"
+            if c1.button(btn_text, key=f"p_{key_suffix}", type=area_btn_type): jump_to_menu("検査実施（管理者）", prop_id)
             if c2.button("変更", key=f"e_{key_suffix}"):
                 st.session_state.edit_prop_target = prop_id; st.session_state.delete_target = None; st.rerun()
             if c3.button("削除", key=f"d_{key_suffix}"): 
@@ -1689,9 +1724,6 @@ def main():
                         rec_id = r.get('record_id')
                         if not rec_id: continue 
                         
-                        if issue_count == 4 or (issue_count > 4 and (issue_count - 4) % 4 == 0):
-                            st.markdown('<div class="page-break"></div>', unsafe_allow_html=True)
-                            
                         floor = r.get('floor_level', ''); area = r.get('area', ''); detail = r.get('issue_detail', '')
                         w = r.get('work_type', ''); p_stat = r.get('progress_status')
                         head_text = "" if type_val.startswith("【検査機関】") or floor == "一式" else f"【{floor} {w}】".strip()
@@ -1940,9 +1972,6 @@ def main():
                     for idx, r in enumerate(w_recs):
                         rec_id = r.get('record_id')
                         if not rec_id: continue
-                        
-                        if issue_count == 4 or (issue_count > 4 and (issue_count - 4) % 4 == 0):
-                            st.markdown('<div class="page-break"></div>', unsafe_allow_html=True)
                             
                         floor = r.get('floor_level', ''); area = r.get('area')
                         loc_text = "" if type_val.startswith("【検査機関】") or floor == "one" or floor == "一式" else f"【{floor} {area}】"
@@ -1962,12 +1991,12 @@ def main():
                         
                         st.markdown(f"""
                             {header_html}
-                            <div class="report-item" style="page-break-inside: avoid; break-inside: avoid; border-bottom: 1px dashed #ccc; padding: 15px 0; margin-bottom: 10px;">
+                            <div class="report-item report-item-final">
                                 <div style="display: flex; justify-content: space-between; align-items: flex-end;">
                                     <div style="font-size:14px; font-weight:bold; margin-top:5px;">No.{issue_count} {loc_text}</div>
                                     <div style="font-size:11px; color:#555; font-weight:bold;">{app_date_str}</div>
                                 </div>
-                                <div style="font-size:14px; margin-bottom:12px; line-height:1.4; margin-top:5px;"><strong>指摘内容：</strong> {detail}</div>
+                                <div class="issue-detail-text" style="font-size:14px; margin-bottom:12px; line-height:1.4; margin-top:5px;"><strong>指摘内容：</strong> {detail}</div>
                                 <table style="width:100%; table-layout:fixed; border-collapse:collapse; border:none;">
                                     <tr>
                                         <td style="width:50%; text-align:center; vertical-align:top; padding-right:5px;"><div style="font-size:12px; color:#555; margin-bottom:4px;">[ Before（指摘時） ]</div>{img_b}</td>
