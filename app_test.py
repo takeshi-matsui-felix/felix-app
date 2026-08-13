@@ -328,6 +328,7 @@ _smart_camera = components.declare_component("smart_cam_planb", path=temp_dir)
 # 3. UI設定
 # ==========================================
 st.set_page_config(page_title="Felix検査App", layout="wide", initial_sidebar_state="collapsed")
+st.caption(f"streamlit {st.__version__}")  # ← バージョン確認用（requirements.txt固定後は削除してOK）
 
 st.markdown("""
 <style>
@@ -491,7 +492,9 @@ st.markdown("""
             z-index: 999998 !important;
             background: var(--felix-card) !important;
             border-top: 1px solid var(--felix-border) !important;
-            padding: 6px 6px calc(6px + env(safe-area-inset-bottom)) 6px !important;
+            /* 右下は外部バッジ(Streamlitロゴ等)が乗ってくる可能性があるため、
+               JSで消えなかった場合の保険として常に少し余白を空けておく */
+            padding: 6px 60px calc(6px + env(safe-area-inset-bottom)) 6px !important;
             box-shadow: 0 -2px 10px rgba(0,0,0,0.10) !important;
             gap: 4px !important;
         }
@@ -698,10 +701,20 @@ def main():
     function hideOuterManageButton() {
         try {
             const topDoc = window.parent.parent.document;
-            const btn = topDoc.querySelector('[data-testid="manage-app-button"]');
-            if (!btn) return;
             const isMobile = window.parent.parent.innerWidth <= 768;
-            btn.style.setProperty('display', isMobile ? 'none' : '', 'important');
+
+            // 1) 「Manage app」ボタン（data-testid指定）
+            const candidates = Array.from(topDoc.querySelectorAll('[data-testid="manage-app-button"]'));
+
+            // 2) streamlit.io / share.streamlit.io へのリンクを持つ要素（赤いリボン等のバッジ類）
+            topDoc.querySelectorAll('a[href*="streamlit.io"]').forEach(function(a) {
+                candidates.push(a);
+            });
+
+            candidates.forEach(function(el) {
+                if (!el) return;
+                el.style.setProperty('display', isMobile ? 'none' : '', 'important');
+            });
         } catch (e) {
             // 外側のページに別ドメイン等の理由でアクセスできない場合は何もしない
         }
