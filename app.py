@@ -466,7 +466,7 @@ st.markdown("""
     }
     .floating-back-btn button p { color: white !important; margin: 0 !important; }
 
-    /* 写真グリッド：Before/Afterの高さが揃うようアスペクト比を固定 */
+    /* 写真グリッド：Before/Afterの高さが揃うようアスペクト比を固定。タップで拡大できることを示すカーソル */
     .report-img {
         width: 100%;
         aspect-ratio: 4 / 3;
@@ -474,10 +474,56 @@ st.markdown("""
         border-radius: 10px;
         display: block;
         border: 1px solid var(--felix-border);
+        cursor: zoom-in;
+    }
+
+    /* スマホ用 固定ボトムナビ（768px以下のみ。PC表示には一切影響しない） */
+    .felix-bottom-nav {
+        display: none;
+    }
+    @media (max-width: 768px) {
+        .felix-bottom-nav {
+            display: flex !important;
+            position: fixed !important;
+            bottom: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            z-index: 999998 !important;
+            background: var(--felix-card) !important;
+            border-top: 1px solid var(--felix-border) !important;
+            /* 右下は外部バッジ(Streamlitロゴ等)が乗ってくる可能性があるため、
+               JSで消えなかった場合の保険として常に少し余白を空けておく */
+            padding: 6px 6px calc(6px + env(safe-area-inset-bottom)) 6px !important;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.10) !important;
+            gap: 4px !important;
+        }
+        .felix-bottom-nav button {
+            height: 52px !important;
+            font-size: 11px !important;
+            border-radius: 10px !important;
+        }
+        .main .block-container { padding-bottom: 78px !important; }
+
+        /* Streamlit純正のヘッダー（右上「⋮」メニュー・ツールバー）・
+           ホスティング側の「Built with Streamlit」バッジ類を、スマホ幅の時だけ非表示にする。
+           PC（768px超）では従来通り表示され、印刷時の「⋮」メニューはPCでそのまま使える。 */
+        header[data-testid="stHeader"],
+        #MainMenu,
+        [data-testid="stToolbar"],
+        [data-testid="stToolbarActions"],
+        [data-testid="stDecoration"],
+        [data-testid="stStatusWidget"],
+        a[href*="streamlit.io"],
+        [class*="viewerBadge"] {
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
+        }
+        .main .block-container { padding-top: 0.6rem !important; }
     }
 
     @media print {
-        .stButton, .stTextInput, .stRadio, .stSelectbox, .stCheckbox, [data-testid="stExpander"], .floating-back-btn { display: none !important; }
+        .stButton, .stTextInput, .stRadio, .stSelectbox, .stCheckbox, [data-testid="stExpander"], .floating-back-btn, .felix-bottom-nav { display: none !important; }
         .admin-delete-box, hr { display: none !important; }
 
         /* 用紙サイズ・余白をCSS側で固定し、ブラウザの印刷ダイアログの選択に左右されず毎回同じ見た目にする */
@@ -583,6 +629,31 @@ def jump_to_menu(menu_name, prop_id=None):
     st.session_state.prev_area = None
     st.rerun()
 
+# ステータスバッジ（全画面共通デザイン）
+STATUS_BADGE_COLORS = {
+    "下書き":     ("#EDEFF3", "#5A6270"),
+    "確認待ち":   ("#E9F0FB", "#2E5FA3"),
+    "是正待ち":   ("#FDECEC", "#D64545"),
+    "写真待ち":   ("#FDECEC", "#D64545"),
+    "是正確認中": ("#FFF6E5", "#B8790A"),
+    "完了":       ("#E6F6EC", "#2E9E64"),
+}
+def status_badge(label):
+    bg, fg = STATUS_BADGE_COLORS.get(label, ("#EDEFF3", "#5A6270"))
+    return f"<span style='background-color:{bg}; color:{fg}; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:700; white-space:nowrap;'>{label}</span>"
+
+def mini_progress_bar(done, total):
+    """物件一覧などで使う、完了率を示す細いプログレスバーのHTML"""
+    if total <= 0: return ""
+    pct = int(done / total * 100)
+    bar_color = "#2E9E64" if pct == 100 else "#E8A33D"
+    return f"""<div style="display:flex; align-items:center; gap:8px; margin:-2px 2px 10px 2px;">
+        <div style="flex:1; height:6px; background:#E2E6EC; border-radius:3px; overflow:hidden;">
+            <div style="width:{pct}%; height:100%; background:{bar_color};"></div>
+        </div>
+        <span style="font-size:11px; color:#6B7482; font-weight:700; white-space:nowrap;">完了 {done}/{total}</span>
+    </div>"""
+
 # ==========================================
 # 6. メイン画面・機能
 # ==========================================
@@ -602,9 +673,62 @@ def main():
             }
         });
     }
+
+    function initLightbox() {
+        const doc = window.parent.document;
+        if (doc.getElementById('felix-lightbox')) return;
+
+        const overlay = doc.createElement('div');
+        overlay.id = 'felix-lightbox';
+        overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(10,15,25,0.92);z-index:2147483000;align-items:center;justify-content:center;cursor:zoom-out;padding:20px;box-sizing:border-box;';
+        const img = doc.createElement('img');
+        img.style.cssText = 'max-width:94vw;max-height:94vh;border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,0.5);';
+        overlay.appendChild(img);
+        overlay.addEventListener('click', function() { overlay.style.display = 'none'; });
+        doc.body.appendChild(overlay);
+
+        doc.addEventListener('click', function(e) {
+            const target = e.target.closest ? e.target.closest('.report-img') : null;
+            if (target) {
+                e.preventDefault();
+                img.src = target.src;
+                overlay.style.display = 'flex';
+            }
+        }, true);
+    }
+
+    function hideOuterManageButton() {
+        try {
+            const topDoc = window.parent.parent.document;
+            const isMobile = window.parent.parent.innerWidth <= 768;
+
+            // 1) 「Manage app」ボタン（data-testid指定）
+            const candidates = Array.from(topDoc.querySelectorAll('[data-testid="manage-app-button"]'));
+
+            // 2) streamlit.io / share.streamlit.io へのリンクを持つ要素（赤いリボン等のバッジ類）
+            topDoc.querySelectorAll('a[href*="streamlit.io"]').forEach(function(a) {
+                candidates.push(a);
+            });
+
+            candidates.forEach(function(el) {
+                if (!el) return;
+                el.style.setProperty('display', isMobile ? 'none' : '', 'important');
+            });
+        } catch (e) {
+            // 外側のページに別ドメイン等の理由でアクセスできない場合は何もしない
+        }
+    }
+
     floatBackButton();
+    initLightbox();
+    hideOuterManageButton();
     const observer = new MutationObserver(floatBackButton);
     observer.observe(window.parent.document.body, {childList: true, subtree: true});
+    try {
+        window.parent.parent.addEventListener('resize', hideOuterManageButton);
+        const outerObserver = new MutationObserver(hideOuterManageButton);
+        outerObserver.observe(window.parent.parent.document.body, {childList: true, subtree: true});
+    } catch (e) {}
     </script>
     """, height=0)
 
@@ -708,6 +832,49 @@ def main():
     if selected_menu != st.session_state.active_menu:
         jump_to_menu(selected_menu, st.session_state.pre_selected_prop)
 
+    # ---- スマホ用 固定ボトムナビ（768px以下のみ表示。PC表示は従来通り） ----
+    if st.session_state.role == "admin":
+        nav_items = [
+            ("🏠", "ホーム", "ホーム"),
+            ("📷", "検査", "検査実施（管理者）"),
+            ("✅", "確認", "検査内容確認（管理者）"),
+            ("🛠", "是正", "是正ダッシュボード（管理者用）"),
+            ("📋", "完了", "完了分一覧（共通）"),
+        ]
+    else:
+        nav_items = [
+            ("🏠", "ホーム", "ホーム"),
+            ("🛠", "是正", "是正実施（協力業者）"),
+            ("📋", "完了", "完了分一覧（共通）"),
+        ]
+
+    st.markdown('<div id="felix-bottom-nav-marker"></div>', unsafe_allow_html=True)
+    nav_cols = st.columns(len(nav_items))
+    for i, (icon, label, menu_name) in enumerate(nav_items):
+        is_active = st.session_state.active_menu == menu_name
+        if nav_cols[i].button(f"{icon} {label}", key=f"bnav_{menu_name}", type="primary" if is_active else "secondary", use_container_width=True):
+            if menu_name != st.session_state.active_menu:
+                jump_to_menu(menu_name)
+
+    components.html("""
+    <script>
+    function attachBottomNav() {
+        const doc = window.parent.document;
+        const marker = doc.getElementById('felix-bottom-nav-marker');
+        if (!marker) return;
+        const markerBlock = marker.closest('.element-container');
+        if (!markerBlock) return;
+        const navRow = markerBlock.nextElementSibling;
+        if (navRow && !navRow.classList.contains('felix-bottom-nav')) {
+            navRow.classList.add('felix-bottom-nav');
+        }
+    }
+    attachBottomNav();
+    const bnavObserver = new MutationObserver(attachBottomNav);
+    bnavObserver.observe(window.parent.document.body, {childList: true, subtree: true});
+    </script>
+    """, height=0)
+
     # ----------------------------------------
     # メニュー: 0. ホーム
     # ----------------------------------------
@@ -724,6 +891,38 @@ def main():
             st.rerun()
         else:
             role = st.session_state.role
+
+            if role == "admin":
+                wait_conf_home = len(db_get("inspection_records", "select=record_id&progress_status=eq.確認待ち"))
+                wait_fix_home = len(db_get("inspection_records", "select=record_id&progress_status=eq.是正待ち"))
+                wait_review_home = len(db_get("inspection_records", "select=record_id&progress_status=eq.是正確認中"))
+                st.markdown(f"""<div style="display:flex; gap:10px; margin-bottom:6px;">
+                    <div style="flex:1; background:var(--felix-info-bg); border-radius:12px; padding:12px; text-align:center;">
+                        <div style="font-size:22px; font-weight:900; color:var(--felix-info);">{wait_conf_home}</div>
+                        <div style="font-size:11px; color:#6B7482; font-weight:700;">確認待ち</div>
+                    </div>
+                    <div style="flex:1; background:var(--felix-danger-bg); border-radius:12px; padding:12px; text-align:center;">
+                        <div style="font-size:22px; font-weight:900; color:var(--felix-danger);">{wait_fix_home}</div>
+                        <div style="font-size:11px; color:#6B7482; font-weight:700;">是正待ち</div>
+                    </div>
+                    <div style="flex:1; background:#FFF6E5; border-radius:12px; padding:12px; text-align:center;">
+                        <div style="font-size:22px; font-weight:900; color:#B8790A;">{wait_review_home}</div>
+                        <div style="font-size:11px; color:#6B7482; font-weight:700;">是正確認中</div>
+                    </div>
+                </div>""", unsafe_allow_html=True)
+            else:
+                t_area_home = st.session_state.target_area
+                all_ins_home = db_get("inspections", "select=inspection_id,property_id")
+                all_props_home = db_get("properties", "select=property_id,area")
+                prop_area_map_home = {p.get('property_id'): p.get('area') for p in all_props_home if isinstance(p, dict)}
+                ins_in_area_home = set(i.get('inspection_id') for i in all_ins_home if isinstance(i, dict) and prop_area_map_home.get(i.get('property_id')) == t_area_home)
+                recs_wait_home = db_get("inspection_records", "select=inspection_id&progress_status=eq.是正待ち")
+                wait_fix_area_home = len([r for r in recs_wait_home if r.get('inspection_id') in ins_in_area_home])
+                st.markdown(f"""<div style="background:var(--felix-danger-bg); border-radius:12px; padding:14px; text-align:center; margin-bottom:6px;">
+                    <div style="font-size:24px; font-weight:900; color:var(--felix-danger);">{wait_fix_area_home}</div>
+                    <div style="font-size:12px; color:#6B7482; font-weight:700;">対応が必要な指摘件数（{t_area_home or "エリア未設定"}）</div>
+                </div>""", unsafe_allow_html=True)
+
             new_btn_text = "新規検査を開始する" if role == "admin" else "新規是正を開始する"
             ls_key = "felix_session" if role == "admin" else "felix_partner_session"
             
@@ -826,8 +1025,18 @@ def main():
         all_ins = db_get("inspections", "select=inspection_id,property_id")
         # 「データ件数」は検査(inspections)の存在数ではなく、実際に残っている指摘レコード数で判定する。
         # （個別の指摘だけが全部削除され、検査という空箱だけが残るケースがあるため）
-        recs_for_count = db_get("inspection_records", "select=inspection_id")
-        ins_ids_with_data = set(r.get('inspection_id') for r in recs_for_count if isinstance(r, dict) and r.get('inspection_id'))
+        recs_for_count = db_get("inspection_records", "select=inspection_id,progress_status")
+        ins_to_prop = {i.get('inspection_id'): i.get('property_id') for i in all_ins if isinstance(i, dict)}
+        ins_ids_with_data = set()
+        prop_status_counts = {}  # prop_id -> {"total": n, "done": n}
+        for r in recs_for_count:
+            if not isinstance(r, dict): continue
+            iid = r.get('inspection_id'); pid = ins_to_prop.get(iid)
+            if not pid: continue
+            ins_ids_with_data.add(iid)
+            d = prop_status_counts.setdefault(pid, {"total": 0, "done": 0})
+            d["total"] += 1
+            if r.get('progress_status') == "完了": d["done"] += 1
         prop_ins_counts = {}
         for ins in all_ins:
             pid = ins.get('property_id'); iid = ins.get('inspection_id')
@@ -852,6 +1061,10 @@ def main():
                 st.session_state.edit_prop_target = prop_id; st.session_state.delete_target = None; st.rerun()
             if c3.button("削除", key=f"d_{key_suffix}"): 
                 st.session_state.delete_target = prop_id; st.session_state.edit_prop_target = None; st.rerun()
+            
+            p_counts = prop_status_counts.get(prop_id)
+            if p_counts and p_counts["total"] > 0:
+                st.markdown(mini_progress_bar(p_counts["done"], p_counts["total"]), unsafe_allow_html=True)
             
             if st.session_state.edit_prop_target == prop_id:
                 st.warning(f"「{p_name}」の内容を変更します。過去のデータ名も連動して更新されます。")
@@ -1764,8 +1977,8 @@ def main():
                         with c_box:
                             st.markdown('<div class="record-box report-item">', unsafe_allow_html=True)
                             
-                            if p_stat == "is_waiting_fix" or p_stat == "是正待ち": st.markdown(f"**{title}** <span style='background-color:#ffeaea; color:#d93025; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:bold;'>写真待ち</span>", unsafe_allow_html=True)
-                            else: st.markdown(f"**{title}** <span style='background-color:#e8f0fe; color:#1a73e8; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:bold;'>確認待ち</span>", unsafe_allow_html=True)
+                            if p_stat == "is_waiting_fix" or p_stat == "是正待ち": st.markdown(f"**{title}** {status_badge('写真待ち')}", unsafe_allow_html=True)
+                            else: st.markdown(f"**{title}** {status_badge('確認待ち')}", unsafe_allow_html=True)
                             
                             if r.get('reject_reason'): st.error(f"否認理由: {r.get('reject_reason')}")
                             
