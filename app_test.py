@@ -695,10 +695,28 @@ def main():
         }, true);
     }
 
+    function hideOuterManageButton() {
+        try {
+            const topDoc = window.parent.parent.document;
+            const btn = topDoc.querySelector('[data-testid="manage-app-button"]');
+            if (!btn) return;
+            const isMobile = window.parent.parent.innerWidth <= 768;
+            btn.style.setProperty('display', isMobile ? 'none' : '', 'important');
+        } catch (e) {
+            // 外側のページに別ドメイン等の理由でアクセスできない場合は何もしない
+        }
+    }
+
     floatBackButton();
     initLightbox();
+    hideOuterManageButton();
     const observer = new MutationObserver(floatBackButton);
     observer.observe(window.parent.document.body, {childList: true, subtree: true});
+    try {
+        window.parent.parent.addEventListener('resize', hideOuterManageButton);
+        const outerObserver = new MutationObserver(hideOuterManageButton);
+        outerObserver.observe(window.parent.parent.document.body, {childList: true, subtree: true});
+    } catch (e) {}
     </script>
     """, height=0)
 
