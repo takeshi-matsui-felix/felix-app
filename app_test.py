@@ -376,8 +376,18 @@ st.markdown("""
         color: white;
         box-shadow: 0 2px 6px rgba(22,50,79,0.18);
         transition: transform 0.05s ease, opacity 0.15s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
     }
-    div.stButton > button p { color: white !important; }
+    div.stButton > button p {
+        color: white !important;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+    }
     div.stButton > button:hover { opacity: 0.88; }
     div.stButton > button:active { transform: scale(0.98); }
     div.stButton > button[kind="primary"] { background-color: var(--felix-accent); }
@@ -389,6 +399,15 @@ st.markdown("""
         font-weight: 600 !important;
         padding: 0 6px !important;
         border-radius: 8px !important;
+    }
+
+    /* スマホでも横並びの列（物件バー＋変更＋削除など）が縦積みにならないよう固定 */
+    [data-testid="stHorizontalBlock"] {
+        flex-wrap: nowrap !important;
+        gap: 6px !important;
+    }
+    [data-testid="stHorizontalBlock"] > div {
+        min-width: 0 !important;
     }
 
     footer {visibility: hidden;}
@@ -409,6 +428,17 @@ st.markdown("""
         border-radius: 12px !important;
         background: var(--felix-card);
         box-shadow: 0 1px 2px rgba(20,30,50,0.05);
+    }
+    /* expanderの見出しが長文で折り返さないよう1行省略表示に */
+    [data-testid="stExpander"] summary {
+        overflow: hidden;
+    }
+    [data-testid="stExpander"] summary p {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+        max-width: 100%;
     }
 
     /* バッジ */
@@ -482,7 +512,8 @@ st.markdown("""
             height: 34mm;
             max-height: 34mm;
             aspect-ratio: auto;
-            object-fit: cover;
+            object-fit: contain;
+            background: #F3F5F8;
         }
         .report-item-final .issue-detail-text {
             display: -webkit-box;
@@ -808,10 +839,10 @@ def main():
             p_area = p.get('area', '未設定')
             if filter_area != "すべて表示" and p_area != filter_area: continue
             p_name = p.get('property_name', '不明'); p_hdate = p.get('handover_date')
-            hdate_disp = f" (引渡し: {p_hdate})" if p_hdate else " (引渡し日: 未設定)"
+            hdate_disp = f"引渡{p_hdate}" if p_hdate else "引渡未定"
             ins_count = prop_ins_counts.get(prop_id, 0)
-            count_disp = f"（データ: {ins_count}件）" if ins_count > 0 else "（データなし）"
-            btn_text = f"[{p_area}] {p_name}{hdate_disp} {count_disp} 検査へ"
+            count_disp = f"{ins_count}件" if ins_count > 0 else "データなし"
+            btn_text = f"{p_name}｜{hdate_disp}｜{count_disp}"
             key_suffix = f"{prop_id}_{idx}"
             
             c1, c2, c3 = st.columns([6, 2, 2])
@@ -1987,7 +2018,7 @@ def main():
                         
                         header_html = ""
                         if idx == 0:
-                            header_html = f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px;'>■ 工種: {w_name}</div>"
+                            header_html = f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px; page-break-after: avoid; break-after: avoid; page-break-inside: avoid; break-inside: avoid;'>■ 工種: {w_name}</div>"
                         
                         st.markdown(f"""
                             {header_html}
