@@ -155,14 +155,6 @@ def db_delete_property(prop_id):
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?property_id=eq.{prop_id}", headers=HEADERS)
     requests.delete(f"{SUPABASE_URL}/rest/v1/properties?property_id=eq.{prop_id}", headers=HEADERS)
     
-    clear_specific_cache("inspection_records")
-    clear_specific_cache("inspections")
-    clear_specific_cache("properties")
-    
-    clear_specific_cache("inspection_records")
-    clear_specific_cache("inspections")
-    clear_specific_cache("properties")
-  
 def upload_to_storage(base64_str):
     if not base64_str or not isinstance(base64_str, str): return None
     if base64_str.startswith("http://") or base64_str.startswith("https://"): return base64_str
@@ -171,7 +163,18 @@ def upload_to_storage(base64_str):
         file_data = base64.b64decode(encoded)
         filename = f"{uuid.uuid4()}.jpg"
         url = f"{SUPABASE_URL}/storage/v1/object/photos/{filename}"
-        res = requests.post(url, headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "image/jpeg"}, data=file_data)
+        # 写真は一度アップロードしたら中身が変わらない（差し替え時は必ず新しいファイル名になる）ため、
+        # 長期キャッシュを許可してブラウザ・CDN側の再ダウンロード（＝Supabase通信量）を削減する
+        res = requests.post(
+            url,
+            headers={
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "Content-Type": "image/jpeg",
+                "Cache-Control": "public, max-age=31536000, immutable"
+            },
+            data=file_data
+        )
         if res.status_code not in [200, 201]: return base64_str
         return f"{SUPABASE_URL}/storage/v1/object/public/photos/{filename}"
     except Exception: return base64_str
@@ -328,17 +331,90 @@ st.set_page_config(page_title="Felix検査App", layout="wide", initial_sidebar_s
 
 st.markdown("""
 <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap');
+
+    :root {
+        --felix-navy: #16324F;
+        --felix-navy-dark: #0E2338;
+        --felix-navy-light: #2C4F78;
+        --felix-accent: #E8A33D;
+        --felix-danger: #D64545;
+        --felix-danger-bg: #FDECEC;
+        --felix-success: #2E9E64;
+        --felix-success-bg: #E6F6EC;
+        --felix-info: #2E5FA3;
+        --felix-info-bg: #E9F0FB;
+        --felix-bg: #F3F5F8;
+        --felix-card: #FFFFFF;
+        --felix-border: #E2E6EC;
+        --felix-text: #1F2530;
+        --felix-text-sub: #6B7482;
+    }
+
+    html, body, [class*="css"], .stMarkdown, .stTextInput input, .stTextArea textarea, .stSelectbox, .stRadio label {
+        font-family: 'Noto Sans JP', 'Hiragino Kaku Gothic ProN', sans-serif !important;
+    }
+
+    [data-testid="stAppViewContainer"] { background-color: var(--felix-bg); }
+    .main .block-container { padding-top: 1.4rem; padding-bottom: 3rem; }
+
     [data-testid="collapsedControl"] { display: none !important; }
     [data-testid="stSidebar"] { display: none !important; }
 
-    div.stButton > button { border-radius: 6px; height: 50px; font-weight: bold; width: 100%; margin-bottom: 5px; }
+    h1, h2, h3 { color: var(--felix-navy); font-weight: 700; letter-spacing: 0.2px; }
+    h4, h5, h6 { color: var(--felix-navy-dark); font-weight: 700; }
+
+    /* ボタン */
+    div.stButton > button {
+        border-radius: 10px;
+        height: 48px;
+        font-weight: 700;
+        width: 100%;
+        margin-bottom: 6px;
+        border: none;
+        background-color: var(--felix-navy);
+        color: white;
+        box-shadow: 0 2px 6px rgba(22,50,79,0.18);
+        transition: transform 0.05s ease, opacity 0.15s ease;
+    }
+    div.stButton > button p { color: white !important; }
+    div.stButton > button:hover { opacity: 0.88; }
+    div.stButton > button:active { transform: scale(0.98); }
+    div.stButton > button[kind="primary"] { background-color: var(--felix-accent); }
+    div.stButton > button[kind="primary"] p { color: #2B2200 !important; }
+
+    div[data-testid="column"] button {
+        height: 36px !important;
+        font-size: 12px !important;
+        font-weight: 600 !important;
+        padding: 0 6px !important;
+        border-radius: 8px !important;
+    }
+
     footer {visibility: hidden;}
     [data-testid="stStatusWidget"] { display: none; }
-    .record-box { border-bottom: 2px solid #EEEEEE; padding-bottom: 20px; margin-bottom: 20px; }
-    .badge-wrap { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: bold; margin-left: 5px; color: #d93025; }
-    
-    div[data-testid="column"] button { height: 35px !important; font-size: 12px !important; font-weight: normal !important; padding: 0 !important; }
 
+    /* カード */
+    .record-box {
+        background: var(--felix-card);
+        border: 1px solid var(--felix-border);
+        border-radius: 14px;
+        padding: 18px;
+        margin-bottom: 16px;
+        box-shadow: 0 1px 3px rgba(20,30,50,0.06);
+    }
+
+    [data-testid="stExpander"] {
+        border: 1px solid var(--felix-border) !important;
+        border-radius: 12px !important;
+        background: var(--felix-card);
+        box-shadow: 0 1px 2px rgba(20,30,50,0.05);
+    }
+
+    /* バッジ */
+    .badge-wrap { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; margin-left: 5px; color: var(--felix-danger); }
+
+    /* フローティング戻るボタン */
     .floating-back-btn {
         position: fixed !important;
         top: 15px !important;
@@ -347,33 +423,37 @@ st.markdown("""
         width: auto !important;
     }
     .floating-back-btn button {
-        background-color: #34495e !important;
+        background-color: var(--felix-navy-dark) !important;
         color: white !important;
         border-radius: 30px !important;
-        padding: 5px 20px !important;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;
+        padding: 5px 22px !important;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.28) !important;
         border: 2px solid white !important;
         font-size: 14px !important;
-        font-weight: bold !important;
+        font-weight: 700 !important;
         height: auto !important;
-        min-height: 40px !important;
+        min-height: 42px !important;
     }
     .floating-back-btn button p { color: white !important; margin: 0 !important; }
 
+    /* 写真グリッド：Before/Afterの高さが揃うようアスペクト比を固定 */
     .report-img {
         width: 100%;
-        max-height: 250px;
-        object-fit: contain;
-        border-radius: 4px;
+        aspect-ratio: 4 / 3;
+        object-fit: cover;
+        border-radius: 10px;
+        display: block;
+        border: 1px solid var(--felix-border);
     }
 
     @media print {
         .stButton, .stTextInput, .stRadio, .stSelectbox, .stCheckbox, [data-testid="stExpander"], .floating-back-btn { display: none !important; }
         .admin-delete-box, hr { display: none !important; }
         
-        .main .block-container { padding: 0 !important; margin: 0 !important; max-width: 100% !important; }
+        .main .block-container { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white; }
         
         .report-img {
+            aspect-ratio: auto;
             max-height: 400px !important;
         }
 
@@ -479,14 +559,15 @@ def main():
         <html>
         <head>
         <style>
-            body { font-family: 'Helvetica Neue', Arial, sans-serif; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f8f9fa; }
-            .btn { display: block; width: 100%; max-width: 320px; padding: 18px; margin: 12px 0; font-size: 16px; font-weight: bold; color: white; border: none; border-radius: 8px; cursor: pointer; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: opacity 0.2s; }
-            .btn:active { opacity: 0.8; }
-            .btn-admin { background-color: #2C3E50; }
-            .btn-partner-tokai { background-color: #27AE60; }
-            .btn-partner-kanto { background-color: #2980B9; }
-            h2 { color: #333; margin-bottom: 20px; font-size: 20px; text-align: center; }
-            p { color: #666; font-size: 13px; text-align: center; margin-bottom: 30px; }
+            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap');
+            body { font-family: 'Noto Sans JP', 'Helvetica Neue', Arial, sans-serif; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #F3F5F8; }
+            .btn { display: block; width: 100%; max-width: 320px; padding: 18px; margin: 12px 0; font-size: 16px; font-weight: 700; color: white; border: none; border-radius: 10px; cursor: pointer; text-align: center; box-shadow: 0 3px 8px rgba(22,50,79,0.18); transition: opacity 0.2s, transform 0.05s; }
+            .btn:active { opacity: 0.85; transform: scale(0.98); }
+            .btn-admin { background-color: #16324F; }
+            .btn-partner-tokai { background-color: #2C4F78; }
+            .btn-partner-kanto { background-color: #E8A33D; color: #2B2200; }
+            h2 { color: #16324F; margin-bottom: 8px; font-size: 21px; text-align: center; font-weight: 900; }
+            p { color: #6B7482; font-size: 13px; text-align: center; margin-bottom: 30px; }
         </style>
         </head>
         <body>
@@ -573,9 +654,9 @@ def main():
         if not st.session_state.splash_done:
             st.markdown("""
             <style>
-            .splash { display: flex; justify-content: center; align-items: center; height: 100vh; font-size: 16px; color: #555; position: fixed; top: 0; left: 0; width: 100vw; background: white; z-index: 999999; letter-spacing: 2px; font-family: sans-serif; }
+            .splash { display: flex; justify-content: center; align-items: center; height: 100vh; font-size: 15px; color: #6B7482; position: fixed; top: 0; left: 0; width: 100vw; background: #F3F5F8; z-index: 999999; letter-spacing: 3px; font-family: 'Noto Sans JP', sans-serif; font-weight: 700; }
             </style>
-            <div class="splash">FELIX Inspection System...</div>
+            <div class="splash">FELIX Inspection System ...</div>
             """, unsafe_allow_html=True)
             time.sleep(1.5)
             st.session_state.splash_done = True
@@ -590,9 +671,9 @@ def main():
             <html>
             <head>
             <style>
-                body {{ margin:0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; background: transparent; }}
-                .menu-item {{ font-size: 16px; color: #333; cursor: pointer; margin: 24px 0; text-align: center; transition: color 0.2s; user-select: none; }}
-                .menu-item:hover {{ color: #888; }}
+                body {{ margin:0; font-family: 'Noto Sans JP', sans-serif; display: flex; flex-direction: column; height: 100vh; background: transparent; }}
+                .menu-item {{ font-size: 16px; font-weight: 700; color: #16324F; cursor: pointer; margin: 24px 0; text-align: center; transition: color 0.2s; user-select: none; }}
+                .menu-item:hover {{ color: #E8A33D; }}
                 .container {{ position: absolute; top: 38.2%; left: 50%; transform: translate(-50%, -50%); width: 100%; }}
             </style>
             </head>
@@ -604,7 +685,15 @@ def main():
             <script>
                 function sendVal(action) {{
                     let val = {{ action: action }};
-                    if(action === 'resume') {{ val.data = JSON.parse(localStorage.getItem('{ls_key}')); }}
+                    if(action === 'resume') {{
+                        val.data = JSON.parse(localStorage.getItem('{ls_key}'));
+                        if('{role}' === 'admin' && val.data && val.data.id) {{
+                            try {{
+                                const pendRaw = localStorage.getItem('felix_pending_' + val.data.id);
+                                if(pendRaw) {{ val.pending = JSON.parse(pendRaw); }}
+                            }} catch(e) {{}}
+                        }}
+                    }}
                     window.parent.postMessage({{isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}}, "*");
                 }}
                 const saved = localStorage.getItem('{ls_key}');
@@ -644,6 +733,9 @@ def main():
                         st.session_state.active_menu = "検査実施（管理者）"
                         st.session_state.current_box = {"id": d.get('id', str(uuid.uuid4())), "prop_id": d.get('prop_id'), "name": d.get('name'), "type": d.get('type'), "inspector": d.get('inspector')}
                         st.session_state.prev_floor = d.get('prev_floor'); st.session_state.prev_area = d.get('prev_area')
+                        restored_pending = res.get('pending')
+                        if isinstance(restored_pending, list) and restored_pending:
+                            st.session_state.pending_records = restored_pending
                     else:
                         st.session_state.active_menu = "是正実施（協力業者）"
                         st.session_state.drill_target = {"prop": d.get('prop'), "type": d.get('type')}
@@ -792,7 +884,11 @@ def main():
             cb_data = cb.copy()
             cb_data['prev_floor'] = st.session_state.prev_floor; cb_data['prev_area'] = st.session_state.prev_area
             json_str = json.dumps(cb_data, ensure_ascii=False)
-            components.html(f"<script>localStorage.setItem('felix_session', JSON.stringify({json_str}));</script>", height=0)
+            pending_json_str = json.dumps(st.session_state.pending_records, ensure_ascii=False)
+            components.html(f"""<script>
+                localStorage.setItem('felix_session', JSON.stringify({json_str}));
+                localStorage.setItem('felix_pending_{c_id}', JSON.stringify({pending_json_str}));
+            </script>""", height=0)
             
             if st.session_state.get("edit_saved_records"):
                 st.markdown("#### 今回の検査で記録した指摘データ")
@@ -1011,6 +1107,10 @@ def main():
                             if err_count == 0:
                                 clear_specific_cache("inspection_records")
                                 st.success("すべてのデータを正常に保存しました！")
+                                components.html(f"""<script>
+                                    localStorage.removeItem('felix_pending_{c_id}');
+                                    localStorage.removeItem('felix_session');
+                                </script>""", height=0)
                                 st.session_state.pending_records = []
                                 st.session_state.current_box = None
                                 st.session_state.issue_saved = False
