@@ -155,14 +155,6 @@ def db_delete_property(prop_id):
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?property_id=eq.{prop_id}", headers=HEADERS)
     requests.delete(f"{SUPABASE_URL}/rest/v1/properties?property_id=eq.{prop_id}", headers=HEADERS)
     
-    clear_specific_cache("inspection_records")
-    clear_specific_cache("inspections")
-    clear_specific_cache("properties")
-    
-    clear_specific_cache("inspection_records")
-    clear_specific_cache("inspections")
-    clear_specific_cache("properties")
-  
 def upload_to_storage(base64_str):
     if not base64_str or not isinstance(base64_str, str): return None
     if base64_str.startswith("http://") or base64_str.startswith("https://"): return base64_str
@@ -171,7 +163,18 @@ def upload_to_storage(base64_str):
         file_data = base64.b64decode(encoded)
         filename = f"{uuid.uuid4()}.jpg"
         url = f"{SUPABASE_URL}/storage/v1/object/photos/{filename}"
-        res = requests.post(url, headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "image/jpeg"}, data=file_data)
+        # 写真は一度アップロードしたら中身が変わらない（差し替え時は必ず新しいファイル名になる）ため、
+        # 長期キャッシュを許可してブラウザ・CDN側の再ダウンロード（＝Supabase通信量）を削減する
+        res = requests.post(
+            url,
+            headers={
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "Content-Type": "image/jpeg",
+                "Cache-Control": "public, max-age=31536000, immutable"
+            },
+            data=file_data
+        )
         if res.status_code not in [200, 201]: return base64_str
         return f"{SUPABASE_URL}/storage/v1/object/public/photos/{filename}"
     except Exception: return base64_str
@@ -328,17 +331,120 @@ st.set_page_config(page_title="Felix検査App", layout="wide", initial_sidebar_s
 
 st.markdown("""
 <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap');
+
+    :root {
+        --felix-navy: #16324F;
+        --felix-navy-dark: #0E2338;
+        --felix-navy-light: #2C4F78;
+        --felix-accent: #E8A33D;
+        --felix-danger: #D64545;
+        --felix-danger-bg: #FDECEC;
+        --felix-success: #2E9E64;
+        --felix-success-bg: #E6F6EC;
+        --felix-info: #2E5FA3;
+        --felix-info-bg: #E9F0FB;
+        --felix-bg: #F3F5F8;
+        --felix-card: #FFFFFF;
+        --felix-border: #E2E6EC;
+        --felix-text: #1F2530;
+        --felix-text-sub: #6B7482;
+    }
+
+    html, body, [class*="css"], .stMarkdown, .stTextInput input, .stTextArea textarea, .stSelectbox, .stRadio label {
+        font-family: 'Noto Sans JP', 'Hiragino Kaku Gothic ProN', sans-serif !important;
+    }
+
+    [data-testid="stAppViewContainer"] { background-color: var(--felix-bg); }
+    .main .block-container { padding-top: 1.4rem; padding-bottom: 3rem; }
+
     [data-testid="collapsedControl"] { display: none !important; }
     [data-testid="stSidebar"] { display: none !important; }
 
-    div.stButton > button { border-radius: 6px; height: 50px; font-weight: bold; width: 100%; margin-bottom: 5px; }
+    h1, h2, h3 { color: var(--felix-navy); font-weight: 700; letter-spacing: 0.2px; }
+    h4, h5, h6 { color: var(--felix-navy-dark); font-weight: 700; }
+
+    /* ボタン */
+    div.stButton > button {
+        border-radius: 10px;
+        height: 48px;
+        font-weight: 700;
+        width: 100%;
+        margin-bottom: 6px;
+        border: none;
+        background-color: var(--felix-navy);
+        color: white;
+        box-shadow: 0 2px 6px rgba(22,50,79,0.18);
+        transition: transform 0.05s ease, opacity 0.15s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+    }
+    div.stButton > button p {
+        color: white !important;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+    }
+    div.stButton > button:hover { opacity: 0.88; }
+    div.stButton > button:active { transform: scale(0.98); }
+    div.stButton > button[kind="primary"] { background-color: var(--felix-accent); }
+    div.stButton > button[kind="primary"] p { color: #2B2200 !important; }
+
+    div[data-testid="column"] button {
+        height: 36px !important;
+        font-size: 12px !important;
+        font-weight: 600 !important;
+        padding: 0 6px !important;
+        border-radius: 8px !important;
+    }
+
+    /* スマホでも横並びの列（物件バー＋変更＋削除など）が縦積みにならないよう固定 */
+    [data-testid="stHorizontalBlock"] {
+        flex-wrap: nowrap !important;
+        gap: 6px !important;
+    }
+    [data-testid="stHorizontalBlock"] > div {
+        min-width: 0 !important;
+    }
+
     footer {visibility: hidden;}
     [data-testid="stStatusWidget"] { display: none; }
-    .record-box { border-bottom: 2px solid #EEEEEE; padding-bottom: 20px; margin-bottom: 20px; }
-    .badge-wrap { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: bold; margin-left: 5px; color: #d93025; }
-    
-    div[data-testid="column"] button { height: 35px !important; font-size: 12px !important; font-weight: normal !important; padding: 0 !important; }
 
+    /* カード */
+    .record-box {
+        background: var(--felix-card);
+        border: 1px solid var(--felix-border);
+        border-radius: 14px;
+        padding: 18px;
+        margin-bottom: 16px;
+        box-shadow: 0 1px 3px rgba(20,30,50,0.06);
+    }
+
+    [data-testid="stExpander"] {
+        border: 1px solid var(--felix-border) !important;
+        border-radius: 12px !important;
+        background: var(--felix-card);
+        box-shadow: 0 1px 2px rgba(20,30,50,0.05);
+    }
+    /* expanderの見出しが長文で折り返さないよう1行省略表示に */
+    [data-testid="stExpander"] summary {
+        overflow: hidden;
+    }
+    [data-testid="stExpander"] summary p {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+        max-width: 100%;
+    }
+
+    /* バッジ */
+    .badge-wrap { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; margin-left: 5px; color: var(--felix-danger); }
+
+    /* フローティング戻るボタン */
     .floating-back-btn {
         position: fixed !important;
         top: 15px !important;
@@ -347,33 +453,43 @@ st.markdown("""
         width: auto !important;
     }
     .floating-back-btn button {
-        background-color: #34495e !important;
+        background-color: var(--felix-navy-dark) !important;
         color: white !important;
         border-radius: 30px !important;
-        padding: 5px 20px !important;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;
+        padding: 5px 22px !important;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.28) !important;
         border: 2px solid white !important;
         font-size: 14px !important;
-        font-weight: bold !important;
+        font-weight: 700 !important;
         height: auto !important;
-        min-height: 40px !important;
+        min-height: 42px !important;
     }
     .floating-back-btn button p { color: white !important; margin: 0 !important; }
 
+    /* 写真グリッド：Before/Afterの高さが揃うようアスペクト比を固定 */
     .report-img {
         width: 100%;
-        max-height: 250px;
-        object-fit: contain;
-        border-radius: 4px;
+        aspect-ratio: 4 / 3;
+        object-fit: cover;
+        border-radius: 10px;
+        display: block;
+        border: 1px solid var(--felix-border);
     }
 
     @media print {
         .stButton, .stTextInput, .stRadio, .stSelectbox, .stCheckbox, [data-testid="stExpander"], .floating-back-btn { display: none !important; }
         .admin-delete-box, hr { display: none !important; }
+
+        /* 用紙サイズ・余白をCSS側で固定し、ブラウザの印刷ダイアログの選択に左右されず毎回同じ見た目にする */
+        @page {
+            size: A4 portrait;
+            margin: 12mm 12mm;
+        }
         
-        .main .block-container { padding: 0 !important; margin: 0 !important; max-width: 100% !important; }
+        .main .block-container { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white; }
         
         .report-img {
+            aspect-ratio: auto;
             max-height: 400px !important;
         }
 
@@ -382,6 +498,31 @@ st.markdown("""
             break-inside: avoid !important;
             padding-bottom: 25px !important;
         }
+
+        /* 完了分一覧の報告書のみ：高さを固定し、ブラウザの自然な改ページに任せる。
+           これにより中身の文字量・写真比率に関わらず「入るだけ入れる（基本4枚／入らなければ3枚）」が安定する */
+        .report-item-final {
+            height: 60mm;
+            overflow: hidden;
+            border-bottom: 1px dashed #ccc;
+            padding: 10px 0 !important;
+            margin-bottom: 6px !important;
+        }
+        .report-item-final .report-img {
+            height: 34mm;
+            max-height: 34mm;
+            aspect-ratio: auto;
+            object-fit: contain;
+            background: #F3F5F8;
+        }
+        .report-item-final .issue-detail-text {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            margin-bottom: 6px !important;
+        }
+
         .page-break {
             page-break-before: always !important;
             break-before: page !important;
@@ -479,14 +620,15 @@ def main():
         <html>
         <head>
         <style>
-            body { font-family: 'Helvetica Neue', Arial, sans-serif; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f8f9fa; }
-            .btn { display: block; width: 100%; max-width: 320px; padding: 18px; margin: 12px 0; font-size: 16px; font-weight: bold; color: white; border: none; border-radius: 8px; cursor: pointer; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: opacity 0.2s; }
-            .btn:active { opacity: 0.8; }
-            .btn-admin { background-color: #2C3E50; }
-            .btn-partner-tokai { background-color: #27AE60; }
-            .btn-partner-kanto { background-color: #2980B9; }
-            h2 { color: #333; margin-bottom: 20px; font-size: 20px; text-align: center; }
-            p { color: #666; font-size: 13px; text-align: center; margin-bottom: 30px; }
+            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap');
+            body { font-family: 'Noto Sans JP', 'Helvetica Neue', Arial, sans-serif; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #F3F5F8; }
+            .btn { display: block; width: 100%; max-width: 320px; padding: 18px; margin: 12px 0; font-size: 16px; font-weight: 700; color: white; border: none; border-radius: 10px; cursor: pointer; text-align: center; box-shadow: 0 3px 8px rgba(22,50,79,0.18); transition: opacity 0.2s, transform 0.05s; }
+            .btn:active { opacity: 0.85; transform: scale(0.98); }
+            .btn-admin { background-color: #16324F; }
+            .btn-partner-tokai { background-color: #2C4F78; }
+            .btn-partner-kanto { background-color: #E8A33D; color: #2B2200; }
+            h2 { color: #16324F; margin-bottom: 8px; font-size: 21px; text-align: center; font-weight: 900; }
+            p { color: #6B7482; font-size: 13px; text-align: center; margin-bottom: 30px; }
         </style>
         </head>
         <body>
@@ -573,9 +715,9 @@ def main():
         if not st.session_state.splash_done:
             st.markdown("""
             <style>
-            .splash { display: flex; justify-content: center; align-items: center; height: 100vh; font-size: 16px; color: #555; position: fixed; top: 0; left: 0; width: 100vw; background: white; z-index: 999999; letter-spacing: 2px; font-family: sans-serif; }
+            .splash { display: flex; justify-content: center; align-items: center; height: 100vh; font-size: 15px; color: #6B7482; position: fixed; top: 0; left: 0; width: 100vw; background: #F3F5F8; z-index: 999999; letter-spacing: 3px; font-family: 'Noto Sans JP', sans-serif; font-weight: 700; }
             </style>
-            <div class="splash">FELIX Inspection System...</div>
+            <div class="splash">FELIX Inspection System ...</div>
             """, unsafe_allow_html=True)
             time.sleep(1.5)
             st.session_state.splash_done = True
@@ -590,9 +732,9 @@ def main():
             <html>
             <head>
             <style>
-                body {{ margin:0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; background: transparent; }}
-                .menu-item {{ font-size: 16px; color: #333; cursor: pointer; margin: 24px 0; text-align: center; transition: color 0.2s; user-select: none; }}
-                .menu-item:hover {{ color: #888; }}
+                body {{ margin:0; font-family: 'Noto Sans JP', sans-serif; display: flex; flex-direction: column; height: 100vh; background: transparent; }}
+                .menu-item {{ font-size: 16px; font-weight: 700; color: #16324F; cursor: pointer; margin: 24px 0; text-align: center; transition: color 0.2s; user-select: none; }}
+                .menu-item:hover {{ color: #E8A33D; }}
                 .container {{ position: absolute; top: 38.2%; left: 50%; transform: translate(-50%, -50%); width: 100%; }}
             </style>
             </head>
@@ -604,7 +746,15 @@ def main():
             <script>
                 function sendVal(action) {{
                     let val = {{ action: action }};
-                    if(action === 'resume') {{ val.data = JSON.parse(localStorage.getItem('{ls_key}')); }}
+                    if(action === 'resume') {{
+                        val.data = JSON.parse(localStorage.getItem('{ls_key}'));
+                        if('{role}' === 'admin' && val.data && val.data.id) {{
+                            try {{
+                                const pendRaw = localStorage.getItem('felix_pending_' + val.data.id);
+                                if(pendRaw) {{ val.pending = JSON.parse(pendRaw); }}
+                            }} catch(e) {{}}
+                        }}
+                    }}
                     window.parent.postMessage({{isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}}, "*");
                 }}
                 const saved = localStorage.getItem('{ls_key}');
@@ -644,6 +794,9 @@ def main():
                         st.session_state.active_menu = "検査実施（管理者）"
                         st.session_state.current_box = {"id": d.get('id', str(uuid.uuid4())), "prop_id": d.get('prop_id'), "name": d.get('name'), "type": d.get('type'), "inspector": d.get('inspector')}
                         st.session_state.prev_floor = d.get('prev_floor'); st.session_state.prev_area = d.get('prev_area')
+                        restored_pending = res.get('pending')
+                        if isinstance(restored_pending, list) and restored_pending:
+                            st.session_state.pending_records = restored_pending
                     else:
                         st.session_state.active_menu = "是正実施（協力業者）"
                         st.session_state.drill_target = {"prop": d.get('prop'), "type": d.get('type')}
@@ -670,11 +823,15 @@ def main():
         filter_area = st.radio("一覧のエリア絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True)
         props = db_get("properties", "select=*")
         props = sort_properties_by_handover(props)
-        all_ins = db_get("inspections", "select=property_id")
+        all_ins = db_get("inspections", "select=inspection_id,property_id")
+        # 「データ件数」は検査(inspections)の存在数ではなく、実際に残っている指摘レコード数で判定する。
+        # （個別の指摘だけが全部削除され、検査という空箱だけが残るケースがあるため）
+        recs_for_count = db_get("inspection_records", "select=inspection_id")
+        ins_ids_with_data = set(r.get('inspection_id') for r in recs_for_count if isinstance(r, dict) and r.get('inspection_id'))
         prop_ins_counts = {}
         for ins in all_ins:
-            pid = ins.get('property_id')
-            if pid: prop_ins_counts[pid] = prop_ins_counts.get(pid, 0) + 1
+            pid = ins.get('property_id'); iid = ins.get('inspection_id')
+            if pid and iid in ins_ids_with_data: prop_ins_counts[pid] = prop_ins_counts.get(pid, 0) + 1
         
         for idx, p in enumerate(props):
             prop_id = p.get('property_id')
@@ -682,14 +839,15 @@ def main():
             p_area = p.get('area', '未設定')
             if filter_area != "すべて表示" and p_area != filter_area: continue
             p_name = p.get('property_name', '不明'); p_hdate = p.get('handover_date')
-            hdate_disp = f" (引渡し: {p_hdate})" if p_hdate else " (引渡し日: 未設定)"
+            hdate_disp = f"引渡{p_hdate}" if p_hdate else "引渡未定"
             ins_count = prop_ins_counts.get(prop_id, 0)
-            count_disp = f"（データ: {ins_count}件）" if ins_count > 0 else "（データなし）"
-            btn_text = f"[{p_area}] {p_name}{hdate_disp} {count_disp} 検査へ"
+            count_disp = f"{ins_count}件" if ins_count > 0 else "データなし"
+            btn_text = f"{p_name}｜{hdate_disp}｜{count_disp}"
             key_suffix = f"{prop_id}_{idx}"
             
             c1, c2, c3 = st.columns([6, 2, 2])
-            if c1.button(btn_text, key=f"p_{key_suffix}"): jump_to_menu("検査実施（管理者）", prop_id)
+            area_btn_type = "primary" if p_area == "関東エリア" else "secondary"
+            if c1.button(btn_text, key=f"p_{key_suffix}", type=area_btn_type): jump_to_menu("検査実施（管理者）", prop_id)
             if c2.button("変更", key=f"e_{key_suffix}"):
                 st.session_state.edit_prop_target = prop_id; st.session_state.delete_target = None; st.rerun()
             if c3.button("削除", key=f"d_{key_suffix}"): 
@@ -792,7 +950,11 @@ def main():
             cb_data = cb.copy()
             cb_data['prev_floor'] = st.session_state.prev_floor; cb_data['prev_area'] = st.session_state.prev_area
             json_str = json.dumps(cb_data, ensure_ascii=False)
-            components.html(f"<script>localStorage.setItem('felix_session', JSON.stringify({json_str}));</script>", height=0)
+            pending_json_str = json.dumps(st.session_state.pending_records, ensure_ascii=False)
+            components.html(f"""<script>
+                localStorage.setItem('felix_session', JSON.stringify({json_str}));
+                localStorage.setItem('felix_pending_{c_id}', JSON.stringify({pending_json_str}));
+            </script>""", height=0)
             
             if st.session_state.get("edit_saved_records"):
                 st.markdown("#### 今回の検査で記録した指摘データ")
@@ -1011,6 +1173,10 @@ def main():
                             if err_count == 0:
                                 clear_specific_cache("inspection_records")
                                 st.success("すべてのデータを正常に保存しました！")
+                                components.html(f"""<script>
+                                    localStorage.removeItem('felix_pending_{c_id}');
+                                    localStorage.removeItem('felix_session');
+                                </script>""", height=0)
                                 st.session_state.pending_records = []
                                 st.session_state.current_box = None
                                 st.session_state.issue_saved = False
@@ -1589,9 +1755,6 @@ def main():
                         rec_id = r.get('record_id')
                         if not rec_id: continue 
                         
-                        if issue_count == 4 or (issue_count > 4 and (issue_count - 4) % 4 == 0):
-                            st.markdown('<div class="page-break"></div>', unsafe_allow_html=True)
-                            
                         floor = r.get('floor_level', ''); area = r.get('area', ''); detail = r.get('issue_detail', '')
                         w = r.get('work_type', ''); p_stat = r.get('progress_status')
                         head_text = "" if type_val.startswith("【検査機関】") or floor == "一式" else f"【{floor} {w}】".strip()
@@ -1840,9 +2003,6 @@ def main():
                     for idx, r in enumerate(w_recs):
                         rec_id = r.get('record_id')
                         if not rec_id: continue
-                        
-                        if issue_count == 4 or (issue_count > 4 and (issue_count - 4) % 4 == 0):
-                            st.markdown('<div class="page-break"></div>', unsafe_allow_html=True)
                             
                         floor = r.get('floor_level', ''); area = r.get('area')
                         loc_text = "" if type_val.startswith("【検査機関】") or floor == "one" or floor == "一式" else f"【{floor} {area}】"
@@ -1858,16 +2018,16 @@ def main():
                         
                         header_html = ""
                         if idx == 0:
-                            header_html = f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px;'>■ 工種: {w_name}</div>"
+                            header_html = f"<div style='margin-top:20px; margin-bottom:10px; border-bottom:1px solid #000; font-size:16px; font-weight:bold; padding-bottom:5px; page-break-after: avoid; break-after: avoid; page-break-inside: avoid; break-inside: avoid;'>■ 工種: {w_name}</div>"
                         
                         st.markdown(f"""
                             {header_html}
-                            <div class="report-item" style="page-break-inside: avoid; break-inside: avoid; border-bottom: 1px dashed #ccc; padding: 15px 0; margin-bottom: 10px;">
+                            <div class="report-item report-item-final">
                                 <div style="display: flex; justify-content: space-between; align-items: flex-end;">
                                     <div style="font-size:14px; font-weight:bold; margin-top:5px;">No.{issue_count} {loc_text}</div>
                                     <div style="font-size:11px; color:#555; font-weight:bold;">{app_date_str}</div>
                                 </div>
-                                <div style="font-size:14px; margin-bottom:12px; line-height:1.4; margin-top:5px;"><strong>指摘内容：</strong> {detail}</div>
+                                <div class="issue-detail-text" style="font-size:14px; margin-bottom:12px; line-height:1.4; margin-top:5px;"><strong>指摘内容：</strong> {detail}</div>
                                 <table style="width:100%; table-layout:fixed; border-collapse:collapse; border:none;">
                                     <tr>
                                         <td style="width:50%; text-align:center; vertical-align:top; padding-right:5px;"><div style="font-size:12px; color:#555; margin-bottom:4px;">[ Before（指摘時） ]</div>{img_b}</td>
