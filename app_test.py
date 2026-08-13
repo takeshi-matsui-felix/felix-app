@@ -501,6 +501,23 @@ st.markdown("""
             border-radius: 10px !important;
         }
         .main .block-container { padding-bottom: 78px !important; }
+
+        /* Streamlit純正のヘッダー（右上「⋮」メニュー・ツールバー）・
+           ホスティング側の「Built with Streamlit」バッジ類を、スマホ幅の時だけ非表示にする。
+           PC（768px超）では従来通り表示され、印刷時の「⋮」メニューはPCでそのまま使える。 */
+        header[data-testid="stHeader"],
+        #MainMenu,
+        [data-testid="stToolbar"],
+        [data-testid="stToolbarActions"],
+        [data-testid="stDecoration"],
+        [data-testid="stStatusWidget"],
+        a[href*="streamlit.io"],
+        [class*="viewerBadge"] {
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
+        }
+        .main .block-container { padding-top: 0.6rem !important; }
     }
 
     @media print {
