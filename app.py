@@ -154,7 +154,64 @@ def db_delete_property(prop_id):
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?property_id=eq.{prop_id}", headers=HEADERS)
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?property_id=eq.{prop_id}", headers=HEADERS)
     requests.delete(f"{SUPABASE_URL}/rest/v1/properties?property_id=eq.{prop_id}", headers=HEADERS)
-    
+    clear_specific_cache("inspection_records")
+    clear_specific_cache("inspections")
+    clear_specific_cache("properties")
+
+def db_delete_inspection_hard(inspection_id):
+    """検査を写真ごと完全削除する（ゴミ箱からの「完全に削除する」専用）"""
+    res_rec = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url&inspection_id=eq.{inspection_id}", headers=HEADERS)
+    if res_rec.status_code == 200:
+        for r in res_rec.json():
+            delete_storage_file(r.get('issue_photo_url'))
+            delete_storage_file(r.get('fix_photo_url'))
+    requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{inspection_id}", headers=HEADERS)
+    requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{inspection_id}", headers=HEADERS)
+    clear_specific_cache("inspection_records")
+    clear_specific_cache("inspections")
+
+# ---- ゴミ箱（論理削除）関連 ----
+def soft_delete_property(prop_id):
+    return _patch_by_key("properties", "property_id", prop_id, {"is_deleted": True})
+
+def restore_property(prop_id):
+    return _patch_by_key("properties", "property_id", prop_id, {"is_deleted": False})
+
+def soft_delete_inspection(inspection_id):
+    return _patch_by_key("inspections", "inspection_id", inspection_id, {"is_deleted": True})
+
+def restore_inspection(inspection_id):
+    return _patch_by_key("inspections", "inspection_id", inspection_id, {"is_deleted": False})
+
+def _patch_by_key(table, key_col, key_val, data):
+    try:
+        res = requests.patch(f"{SUPABASE_URL}/rest/v1/{table}?{key_col}=eq.{key_val}", headers=HEADERS, json=data)
+        clear_specific_cache(table)
+        return res.status_code in [200, 204]
+    except Exception:
+        return False
+
+def get_active_inspections_for_property(prop_id):
+    """その物件に紐づく「完了分一覧からまだ削除されていない（＝PDF保存確認の前段階の）」検査の一覧
+    （残件数つき）を返す。完了済みかどうかは問わない（完了分一覧の削除ボタンで明示的に消すまでは残す）。
+    ただし1件もレコードのない空の検査（作成されただけで使われなかったもの）はブロック対象に含めない。"""
+    ins = _raw_db_get("inspections", f"property_id=eq.{prop_id}&is_deleted=eq.false&select=inspection_id,inspection_type")
+    if not ins: return []
+    ids = [str(i.get('inspection_id')) for i in ins if i.get('inspection_id')]
+    if not ids: return []
+    recs = _raw_db_get("inspection_records", f"inspection_id=in.({','.join(ids)})&select=inspection_id")
+    count_map = {}
+    for r in recs:
+        iid = r.get('inspection_id')
+        count_map[iid] = count_map.get(iid, 0) + 1
+    result = []
+    for i in ins:
+        iid = i.get('inspection_id')
+        cnt = count_map.get(iid, 0)
+        if cnt > 0:
+            result.append({"type": i.get('inspection_type'), "count": cnt})
+    return result
+
 def upload_to_storage(base64_str):
     if not base64_str or not isinstance(base64_str, str): return None
     if base64_str.startswith("http://") or base64_str.startswith("https://"): return base64_str
@@ -912,8 +969,8 @@ def main():
                 </div>""", unsafe_allow_html=True)
             else:
                 t_area_home = st.session_state.target_area
-                all_ins_home = db_get("inspections", "select=inspection_id,property_id")
-                all_props_home = db_get("properties", "select=property_id,area")
+                all_ins_home = db_get("inspections", "select=inspection_id,property_id&is_deleted=eq.false")
+                all_props_home = db_get("properties", "select=property_id,area&is_deleted=eq.false")
                 prop_area_map_home = {p.get('property_id'): p.get('area') for p in all_props_home if isinstance(p, dict)}
                 ins_in_area_home = set(i.get('inspection_id') for i in all_ins_home if isinstance(i, dict) and prop_area_map_home.get(i.get('property_id')) == t_area_home)
                 recs_wait_home = db_get("inspection_records", "select=inspection_id&progress_status=eq.是正待ち")
@@ -1020,9 +1077,9 @@ def main():
         st.markdown("---")
         st.subheader("登録済み物件一覧")
         filter_area = st.radio("一覧のエリア絞り込み", ["すべて表示", "東海エリア", "関東エリア"], horizontal=True)
-        props = db_get("properties", "select=*")
+        props = db_get("properties", "select=*&is_deleted=eq.false")
         props = sort_properties_by_handover(props)
-        all_ins = db_get("inspections", "select=inspection_id,property_id")
+        all_ins = db_get("inspections", "select=inspection_id,property_id&is_deleted=eq.false")
         # 「データ件数」は検査(inspections)の存在数ではなく、実際に残っている指摘レコード数で判定する。
         # （個別の指摘だけが全部削除され、検査という空箱だけが残るケースがあるため）
         recs_for_count = db_get("inspection_records", "select=inspection_id,progress_status")
@@ -1086,14 +1143,20 @@ def main():
                 st.markdown("---")
                 
             if st.session_state.delete_target == prop_id:
-                st.warning(f"本当に「{p_name}」を削除しますか？紐づくすべてのデータが消えます。")
-                del_pw = st.text_input("削除用パスワードを入力", type="password", key=f"pw_{key_suffix}", placeholder="5963")
-                col_y, col_n = st.columns(2)
-                if col_y.button("Yes (削除実行)", key=f"yes_{key_suffix}"):
-                    if del_pw == DELETE_PASSWORD:
-                        db_delete_property(prop_id); st.session_state.delete_target = None; st.session_state.current_box = None; st.rerun()
-                    else: st.error("パスワードが違います")
-                if col_n.button("キャンセル", key=f"no_{key_suffix}"): st.session_state.delete_target = None; st.rerun()
+                active_ins = get_active_inspections_for_property(prop_id)
+                if active_ins:
+                    lines = "\n".join([f"・{a['type']}（{a['count']}件）" for a in active_ins])
+                    st.error(f"「{p_name}」はまだ削除できません。以下の検査データが、完了分一覧からまだ削除（PDF保存確認済み）されていません：\n\n{lines}\n\n各部署で内容を確認・PDF保存の上、完了分一覧の「ゴミ箱に移動する」から削除された後に、物件自体を削除できるようになります。")
+                    if st.button("閉じる", key=f"blocked_close_{key_suffix}"): st.session_state.delete_target = None; st.rerun()
+                else:
+                    st.warning(f"「{p_name}」をゴミ箱に移動します。データは完全には消えず、後から復元できます（管理者の「安全検証ツール」から）。")
+                    del_pw = st.text_input("削除用パスワードを入力", type="password", key=f"pw_{key_suffix}", placeholder="5963")
+                    col_y, col_n = st.columns(2)
+                    if col_y.button("Yes (ゴミ箱へ移動)", key=f"yes_{key_suffix}"):
+                        if del_pw == DELETE_PASSWORD:
+                            soft_delete_property(prop_id); st.session_state.delete_target = None; st.session_state.current_box = None; st.rerun()
+                        else: st.error("パスワードが違います")
+                    if col_n.button("キャンセル", key=f"no_{key_suffix}"): st.session_state.delete_target = None; st.rerun()
                 st.markdown("---")
 
     # ----------------------------------------
@@ -1102,7 +1165,7 @@ def main():
     elif st.session_state.active_menu == "検査実施（管理者）":
         if not st.session_state.current_box:
             st.header("検査開始")
-            props = db_get("properties", "select=*")
+            props = db_get("properties", "select=*&is_deleted=eq.false")
             props = sort_properties_by_handover(props)
             if st.session_state.pre_selected_prop is None:
                 if props: st.session_state.pre_selected_prop = props[0].get("property_id")
@@ -1414,8 +1477,8 @@ def main():
         search_verify = st.text_input("物件名で検索（一部入力でも可）", key="search_verify")
         
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status&progress_status=eq.確認待ち")
-        all_ins = db_get("inspections", "select=*")
-        all_props = db_get("properties", "select=*")
+        all_ins = db_get("inspections", "select=*&is_deleted=eq.false")
+        all_props = db_get("properties", "select=*&is_deleted=eq.false")
         all_props = sort_properties_by_handover(all_props)
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
         prop_hdate_map = {p.get('property_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
@@ -1600,8 +1663,8 @@ def main():
         search_fix = st.text_input("物件名で検索（一部入力でも可）", key="search_fix")
 
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status")
-        all_ins = db_get("inspections", "select=*")
-        all_props = db_get("properties", "select=*")
+        all_ins = db_get("inspections", "select=*&is_deleted=eq.false")
+        all_props = db_get("properties", "select=*&is_deleted=eq.false")
         all_props = sort_properties_by_handover(all_props)
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
         prop_hdate_map = {p.get('property_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
@@ -1756,8 +1819,8 @@ def main():
         search_dash = st.text_input("物件名で検索（一部入力でも可）", key="search_dash_admin")
 
         all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status,area,floor_level,work_type,issue_detail&progress_status=in.(是正待ち,是正確認中)")
-        all_ins = db_get("inspections", "select=*")
-        all_props = db_get("properties", "select=*")
+        all_ins = db_get("inspections", "select=*&is_deleted=eq.false")
+        all_props = db_get("properties", "select=*&is_deleted=eq.false")
         all_props = sort_properties_by_handover(all_props)
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
         prop_hdate_map = {p.get('property_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
@@ -2104,8 +2167,8 @@ def main():
             search_done = st.text_input("物件名で検索（一部入力でも可）", key="search_done_list")
 
             all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status&progress_status=eq.完了")
-            all_ins = db_get("inspections", "select=*")
-            all_props = db_get("properties", "select=*")
+            all_ins = db_get("inspections", "select=*&is_deleted=eq.false")
+            all_props = db_get("properties", "select=*&is_deleted=eq.false")
             all_props = sort_properties_by_handover(all_props)
             prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
             prop_hdate_map = {p.get('property_id'): p.get('handover_date') for p in all_props if isinstance(p, dict)}
@@ -2152,7 +2215,7 @@ def main():
                 st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
             
             target_ins = None; t_ids = []
-            all_ins = db_get("inspections", "select=*")
+            all_ins = db_get("inspections", "select=*&is_deleted=eq.false")
             for i in all_ins:
                 if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val:
                     t_ids.append(str(i.get('inspection_id')))
@@ -2172,28 +2235,16 @@ def main():
                 
                 if st.session_state.role == "admin":
                     st.markdown(f"""<div class="admin-delete-box" style="background-color:#FFF0F0; padding:15px; border:2px solid #FF4B4B; border-radius:10px; margin-bottom:20px;">
-                        <h3 style="color:#FF4B4B; margin-top:0;">完了物件の保存及び削除（管理者専用）</h3>
-                        <p style="font-size:14px; color:#333;">この検査記録の保存（右上の「Print」等）が完了しましたら、システム容量を空けるためにデータを削除してください。<br><b>※一度削除した写真は元に戻せません。</b></p>
+                        <h3 style="color:#FF4B4B; margin-top:0;">完了物件の削除（管理者専用）</h3>
+                        <p style="font-size:14px; color:#333;">この検査記録の保存（右上の「Print」等）が完了しましたら、一覧を整理するためにここから削除できます。<br><b>※削除してもデータは完全には消えず、後から「安全検証ツール」画面で復元できます。</b></p>
                     </div>""", unsafe_allow_html=True)
                     del_pass = st.text_input("削除用パスワードを入力 (5963)", type="password", key=f"del_pass_all")
-                    if st.button(f"この検査（{type_val}）のデータを完全に削除する", key=f"del_btn_all"):
+                    if st.button(f"この検査（{type_val}）をゴミ箱に移動する", key=f"del_btn_all"):
                         if del_pass == DELETE_PASSWORD:
-                            with st.spinner("データ削除中..."):
+                            with st.spinner("処理中..."):
                                 for iid in t_ids:
-                                    # 🌟 文字データを消す前に、紐づく写真（ビフォー・アフター）をマスターキーで削除
-                                    res_recs = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url&inspection_id=eq.{iid}", headers=HEADERS)
-                                    if res_recs.status_code == 200:
-                                        for r in res_recs.json():
-                                            delete_storage_file(r.get('issue_photo_url'))
-                                            delete_storage_file(r.get('fix_photo_url'))
-
-                                    requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{iid}", headers=HEADERS)
-                                    requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{iid}", headers=HEADERS)
-                                    
-                                clear_specific_cache("inspection_records")
-                                clear_specific_cache("inspections")
-                                
-                            st.success("すべてのデータの削除が完了しました"); st.session_state.drill_target = None; st.session_state.cached_records = None; time.sleep(1); st.rerun()
+                                    soft_delete_inspection(iid)
+                            st.success("ゴミ箱に移動しました（復元は「安全検証ツール」から可能です）"); st.session_state.drill_target = None; st.session_state.cached_records = None; time.sleep(1); st.rerun()
                         else: st.error("パスワードが違います")
                     st.markdown("<hr class='admin-delete-box'>", unsafe_allow_html=True)
 
@@ -2271,6 +2322,51 @@ def main():
     # ----------------------------------------
     elif st.session_state.active_menu == "安全検証ツール":
         st.header("安全検証ツール")
+
+        st.markdown("**🗑️ ゴミ箱**")
+        st.caption("物件登録画面・完了分一覧から削除されたデータをここから復元、または完全に削除できます")
+
+        deleted_props = _raw_db_get("properties", "is_deleted=eq.true&select=*")
+        deleted_props = sort_properties_by_handover(deleted_props)
+        if not deleted_props:
+            st.info("削除済みの物件はありません。")
+        else:
+            for dp in deleted_props:
+                dp_id = dp.get('property_id')
+                if not dp_id: continue
+                dp_name = dp.get('property_name', '不明'); dp_area = dp.get('area', '未設定')
+                with st.container():
+                    st.markdown(f"**[{dp_area}] {dp_name}**")
+                    c1, c2 = st.columns(2)
+                    if c1.button("↩️ 復元する", key=f"restore_prop_{dp_id}"):
+                        restore_property(dp_id); st.rerun()
+                    if c2.button("🔥 完全に削除する（写真含む・元に戻せません）", key=f"purge_prop_{dp_id}"):
+                        with st.spinner("完全削除中..."):
+                            db_delete_property(dp_id)
+                        st.success("完全に削除しました"); time.sleep(1); st.rerun()
+                    st.markdown("---")
+
+        st.markdown("**🗑️ ゴミ箱（検査単位）**")
+        deleted_ins = _raw_db_get("inspections", "is_deleted=eq.true&select=*")
+        if not deleted_ins:
+            st.info("削除済みの検査はありません。")
+        else:
+            for di in deleted_ins:
+                di_id = di.get('inspection_id')
+                if not di_id: continue
+                di_name = di.get('property_name', '不明'); di_type = di.get('inspection_type', '不明')
+                with st.container():
+                    st.markdown(f"**{di_name} / {di_type}**")
+                    c1, c2 = st.columns(2)
+                    if c1.button("↩️ 復元する", key=f"restore_ins_{di_id}"):
+                        restore_inspection(di_id); st.rerun()
+                    if c2.button("🔥 完全に削除する（写真含む・元に戻せません）", key=f"purge_ins_{di_id}"):
+                        with st.spinner("完全削除中..."):
+                            db_delete_inspection_hard(di_id)
+                        st.success("完全に削除しました"); time.sleep(1); st.rerun()
+                    st.markdown("---")
+
+        st.markdown("---")
         st.markdown("**🧹 ストレージデータ定期照合ツール**")
         st.caption("DBに存在しない物件削除済み写真を検出・削除します")
 
