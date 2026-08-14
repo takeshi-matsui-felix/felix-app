@@ -192,20 +192,24 @@ def _patch_by_key(table, key_col, key_val, data):
         return False
 
 def get_active_inspections_for_property(prop_id):
-    """その物件に紐づく「まだゴミ箱に入っていない」検査の一覧（工種別の残件数つき）を返す"""
+    """その物件に紐づく「完了していない指摘が1件以上残っている」検査の一覧（残件数つき）を返す。
+    0件の空の検査や、全指摘が完了済みの検査はブロック対象に含めない。"""
     ins = _raw_db_get("inspections", f"property_id=eq.{prop_id}&is_deleted=eq.false&select=inspection_id,inspection_type")
     if not ins: return []
     ids = [str(i.get('inspection_id')) for i in ins if i.get('inspection_id')]
     if not ids: return []
     recs = _raw_db_get("inspection_records", f"inspection_id=in.({','.join(ids)})&select=inspection_id,progress_status")
-    count_map = {}
+    unresolved_count = {}
     for r in recs:
+        if r.get('progress_status') == "完了": continue
         iid = r.get('inspection_id')
-        count_map[iid] = count_map.get(iid, 0) + 1
+        unresolved_count[iid] = unresolved_count.get(iid, 0) + 1
     result = []
     for i in ins:
         iid = i.get('inspection_id')
-        result.append({"type": i.get('inspection_type'), "count": count_map.get(iid, 0)})
+        cnt = unresolved_count.get(iid, 0)
+        if cnt > 0:
+            result.append({"type": i.get('inspection_type'), "count": cnt})
     return result
 
 def upload_to_storage(base64_str):
