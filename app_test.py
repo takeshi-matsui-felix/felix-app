@@ -192,22 +192,22 @@ def _patch_by_key(table, key_col, key_val, data):
         return False
 
 def get_active_inspections_for_property(prop_id):
-    """その物件に紐づく「完了していない指摘が1件以上残っている」検査の一覧（残件数つき）を返す。
-    0件の空の検査や、全指摘が完了済みの検査はブロック対象に含めない。"""
+    """その物件に紐づく「完了分一覧からまだ削除されていない（＝PDF保存確認の前段階の）」検査の一覧
+    （残件数つき）を返す。完了済みかどうかは問わない（完了分一覧の削除ボタンで明示的に消すまでは残す）。
+    ただし1件もレコードのない空の検査（作成されただけで使われなかったもの）はブロック対象に含めない。"""
     ins = _raw_db_get("inspections", f"property_id=eq.{prop_id}&is_deleted=eq.false&select=inspection_id,inspection_type")
     if not ins: return []
     ids = [str(i.get('inspection_id')) for i in ins if i.get('inspection_id')]
     if not ids: return []
-    recs = _raw_db_get("inspection_records", f"inspection_id=in.({','.join(ids)})&select=inspection_id,progress_status")
-    unresolved_count = {}
+    recs = _raw_db_get("inspection_records", f"inspection_id=in.({','.join(ids)})&select=inspection_id")
+    count_map = {}
     for r in recs:
-        if r.get('progress_status') == "完了": continue
         iid = r.get('inspection_id')
-        unresolved_count[iid] = unresolved_count.get(iid, 0) + 1
+        count_map[iid] = count_map.get(iid, 0) + 1
     result = []
     for i in ins:
         iid = i.get('inspection_id')
-        cnt = unresolved_count.get(iid, 0)
+        cnt = count_map.get(iid, 0)
         if cnt > 0:
             result.append({"type": i.get('inspection_type'), "count": cnt})
     return result
@@ -1146,7 +1146,7 @@ def main():
                 active_ins = get_active_inspections_for_property(prop_id)
                 if active_ins:
                     lines = "\n".join([f"・{a['type']}（{a['count']}件）" for a in active_ins])
-                    st.error(f"「{p_name}」はまだ削除できません。以下の未完了の検査が残っています：\n\n{lines}\n\nすべての検査が「完了」となり、完了分一覧から削除された後に、物件自体を削除できるようになります。")
+                    st.error(f"「{p_name}」はまだ削除できません。以下の検査データが、完了分一覧からまだ削除（PDF保存確認済み）されていません：\n\n{lines}\n\n各部署で内容を確認・PDF保存の上、完了分一覧の「ゴミ箱に移動する」から削除された後に、物件自体を削除できるようになります。")
                     if st.button("閉じる", key=f"blocked_close_{key_suffix}"): st.session_state.delete_target = None; st.rerun()
                 else:
                     st.warning(f"「{p_name}」をゴミ箱に移動します。データは完全には消えず、後から復元できます（管理者の「安全検証ツール」から）。")
