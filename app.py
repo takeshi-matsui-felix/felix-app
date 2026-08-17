@@ -492,6 +492,18 @@ st.markdown("""
         min-width: 0 !important;
     }
 
+    /* 是正ダッシュボードの検査バーだけは例外：PCは横並び、スマホでは縦積みにする */
+    @media (max-width: 768px) {
+        .felix-mobile-stack {
+            flex-wrap: wrap !important;
+        }
+        .felix-mobile-stack > div[data-testid="column"] {
+            width: 100% !important;
+            flex: 1 1 100% !important;
+            min-width: 100% !important;
+        }
+    }
+
     footer {visibility: hidden;}
     [data-testid="stStatusWidget"] { display: none; }
 
@@ -951,8 +963,21 @@ def main():
             navRow.classList.add('felix-bottom-nav');
         }
     }
+    function markCorrRows() {
+        const doc = window.parent.document;
+        const markers = doc.querySelectorAll('.felix-corr-marker');
+        markers.forEach(function(m) {
+            const block = m.closest('.element-container');
+            if (!block) return;
+            const row = block.nextElementSibling;
+            if (row && !row.classList.contains('felix-mobile-stack')) {
+                row.classList.add('felix-mobile-stack');
+            }
+        });
+    }
     attachBottomNav();
-    const bnavObserver = new MutationObserver(attachBottomNav);
+    markCorrRows();
+    const bnavObserver = new MutationObserver(function() { attachBottomNav(); markCorrRows(); });
     bnavObserver.observe(window.parent.document.body, {childList: true, subtree: true});
     </script>
     """, height=0)
@@ -1955,9 +1980,11 @@ def main():
                                 t_ins_id = target_ins_list[0].get('inspection_id') if target_ins_list else None
                                 current_delay_reason = target_ins_list[0].get('delay_reason', '') if target_ins_list else ''
                                 
-                                if st.button(t_name, key=f"d_{p_idx}_{t_idx}", use_container_width=True):
+                                st.markdown('<div class="felix-corr-marker"></div>', unsafe_allow_html=True)
+                                t_cols = st.columns([3, 4, 3])
+                                if t_cols[0].button(t_name, key=f"d_{p_idx}_{t_idx}", use_container_width=True):
                                     st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
-                                st.markdown(f"<div class='badge-wrap' style='margin: -4px 0 8px 4px;'><span style='color:#E74C3C; font-size: 12px;'>{badge_text}</span></div>", unsafe_allow_html=True)
+                                t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#E74C3C; font-size: 13px;'>{badge_text}</span></div>", unsafe_allow_html=True)
                                 
                                 if t_ins_id:
                                     reason_key = f"delay_{t_ins_id}"
@@ -1974,7 +2001,7 @@ def main():
                                         return _update
                                     
                                     cb_func = make_update_reason_cb(t_ins_id, reason_key)
-                                    st.text_input("遅延理由", key=reason_key, on_change=cb_func, label_visibility="collapsed", placeholder="遅延理由を入力してEnter")
+                                    t_cols[2].text_input("遅延理由", key=reason_key, on_change=cb_func, label_visibility="collapsed", placeholder="遅延理由を入力してEnter")
                     
                     with col_ex2:
                         with st.popover("✉️"):
