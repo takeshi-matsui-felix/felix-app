@@ -391,6 +391,7 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap');
 
     :root {
+        color-scheme: light !important;
         --felix-navy: #16324F;
         --felix-navy-dark: #0E2338;
         --felix-navy-light: #2C4F78;
@@ -410,6 +411,30 @@ st.markdown("""
 
     html, body, [class*="css"], .stMarkdown, .stTextInput input, .stTextArea textarea, .stSelectbox, .stRadio label {
         font-family: 'Noto Sans JP', 'Hiragino Kaku Gothic ProN', sans-serif !important;
+    }
+
+    /* 入力欄・検索窓・セレクトボックス：常にはっきり見えるよう固定の配色にする */
+    .stTextInput input,
+    .stTextArea textarea,
+    .stNumberInput input,
+    .stDateInput input,
+    .stSelectbox > div > div,
+    div[data-baseweb="select"] > div {
+        background-color: var(--felix-card) !important;
+        color: var(--felix-text) !important;
+        border: 1.5px solid var(--felix-border) !important;
+        border-radius: 10px !important;
+    }
+    .stTextInput input::placeholder, .stTextArea textarea::placeholder {
+        color: var(--felix-text-sub) !important;
+        opacity: 1 !important;
+    }
+    .stTextInput input:focus, .stTextArea textarea:focus {
+        border-color: var(--felix-navy) !important;
+        box-shadow: 0 0 0 2px rgba(22,50,79,0.15) !important;
+    }
+    label, .stTextInput label, .stSelectbox label, .stRadio label, .stCheckbox label {
+        color: var(--felix-text) !important;
     }
 
     [data-testid="stAppViewContainer"] { background-color: var(--felix-bg); }
@@ -1930,10 +1955,9 @@ def main():
                                 t_ins_id = target_ins_list[0].get('inspection_id') if target_ins_list else None
                                 current_delay_reason = target_ins_list[0].get('delay_reason', '') if target_ins_list else ''
                                 
-                                t_cols = st.columns([3, 4, 3])
-                                if t_cols[0].button(t_name, key=f"d_{p_idx}_{t_idx}", use_container_width=True):
+                                if st.button(t_name, key=f"d_{p_idx}_{t_idx}", use_container_width=True):
                                     st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
-                                t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#E74C3C; font-size: 13px;'>{badge_text}</span></div>", unsafe_allow_html=True)
+                                st.markdown(f"<div class='badge-wrap' style='margin: -4px 0 8px 4px;'><span style='color:#E74C3C; font-size: 12px;'>{badge_text}</span></div>", unsafe_allow_html=True)
                                 
                                 if t_ins_id:
                                     reason_key = f"delay_{t_ins_id}"
@@ -1950,7 +1974,7 @@ def main():
                                         return _update
                                     
                                     cb_func = make_update_reason_cb(t_ins_id, reason_key)
-                                    t_cols[2].text_input("遅延理由", key=reason_key, on_change=cb_func, label_visibility="collapsed", placeholder="遅延理由を入力してEnter")
+                                    st.text_input("遅延理由", key=reason_key, on_change=cb_func, label_visibility="collapsed", placeholder="遅延理由を入力してEnter")
                     
                     with col_ex2:
                         with st.popover("✉️"):
