@@ -492,19 +492,6 @@ st.markdown("""
         min-width: 0 !important;
     }
 
-    /* 是正ダッシュボード・是正実施の検査バーだけは例外：PCは横並び、スマホでは縦積みにする
-       （st.container(key="corr_row_...")が自動付与するクラスを直接ターゲット） */
-    @media (max-width: 768px) {
-        div[class*="st-key-corr_row_"] [data-testid="stHorizontalBlock"] {
-            flex-wrap: wrap !important;
-        }
-        div[class*="st-key-corr_row_"] [data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-            width: 100% !important;
-            flex: 1 1 100% !important;
-            min-width: 100% !important;
-        }
-    }
-
     footer {visibility: hidden;}
     [data-testid="stStatusWidget"] { display: none; }
 
@@ -1757,11 +1744,9 @@ def main():
                         for t_idx, t_name in enumerate(sorted(valid_types)):
                             c_data = tree_counts[p_name][t_name]
                             badge_text = f"全 {c_data['total']} 件 [ 完了：{c_data['done']}件 ／ 未完了：{c_data['unres']}件 ] ※うち是正報告待ち {c_data['wait_fix']}件"
-                            with st.container(key=f"corr_row_partner_{p_idx}_{t_idx}"):
-                                t_cols = st.columns([3, 7])
-                                if t_cols[0].button(t_name, key=f"f_{p_idx}_{t_idx}", use_container_width=True):
-                                    st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
-                                t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#555;'>{badge_text}</span></div>", unsafe_allow_html=True)
+                            if st.button(t_name, key=f"f_{p_idx}_{t_idx}", use_container_width=False):
+                                st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
+                            st.markdown(f"<div class='badge-wrap' style='margin: -6px 0 12px 2px;'><span style='color:#555;'>{badge_text}</span></div>", unsafe_allow_html=True)
             if not has_visible_items: st.info("該当する対応必要項目はありません。")
         
         if prop_val and type_val:
@@ -1969,28 +1954,27 @@ def main():
                                 t_ins_id = target_ins_list[0].get('inspection_id') if target_ins_list else None
                                 current_delay_reason = target_ins_list[0].get('delay_reason', '') if target_ins_list else ''
                                 
-                                with st.container(key=f"corr_row_{p_idx}_{t_idx}"):
-                                    t_cols = st.columns([3, 4, 3])
-                                    if t_cols[0].button(t_name, key=f"d_{p_idx}_{t_idx}", use_container_width=True):
-                                        st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
-                                    t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#E74C3C; font-size: 13px;'>{badge_text}</span></div>", unsafe_allow_html=True)
-                                    
-                                    if t_ins_id:
-                                        reason_key = f"delay_{t_ins_id}"
-                                        if reason_key not in st.session_state:
-                                            st.session_state[reason_key] = current_delay_reason
+                                if st.button(t_name, key=f"d_{p_idx}_{t_idx}", use_container_width=False):
+                                    st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
+                                st.markdown(f"<div class='badge-wrap' style='margin: -6px 0 6px 2px;'><span style='color:#E74C3C; font-size: 13px;'>{badge_text}</span></div>", unsafe_allow_html=True)
+                                
+                                if t_ins_id:
+                                    reason_key = f"delay_{t_ins_id}"
+                                    if reason_key not in st.session_state:
+                                        st.session_state[reason_key] = current_delay_reason
 
-                                        def make_update_reason_cb(ins_id, key):
-                                            def _update():
-                                                ok = db_patch_inspection(ins_id, {"delay_reason": st.session_state[key]})
-                                                if ok:
-                                                    st.toast("遅延理由を保存しました")
-                                                else:
-                                                    st.error("保存失敗: Supabaseの権限(RLS)設定によりブロックされました。")
-                                            return _update
-                                        
-                                        cb_func = make_update_reason_cb(t_ins_id, reason_key)
-                                        t_cols[2].text_input("遅延理由", key=reason_key, on_change=cb_func, label_visibility="collapsed", placeholder="遅延理由を入力してEnter")
+                                    def make_update_reason_cb(ins_id, key):
+                                        def _update():
+                                            ok = db_patch_inspection(ins_id, {"delay_reason": st.session_state[key]})
+                                            if ok:
+                                                st.toast("遅延理由を保存しました")
+                                            else:
+                                                st.error("保存失敗: Supabaseの権限(RLS)設定によりブロックされました。")
+                                        return _update
+                                    
+                                    cb_func = make_update_reason_cb(t_ins_id, reason_key)
+                                    st.text_input("遅延理由", key=reason_key, on_change=cb_func, label_visibility="collapsed", placeholder="遅延理由を入力してEnter")
+                                st.markdown("<div style='margin-bottom:10px;'></div>", unsafe_allow_html=True)
                     
                     with col_ex2:
                         with st.popover("✉️"):
