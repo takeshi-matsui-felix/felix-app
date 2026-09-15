@@ -1842,8 +1842,8 @@ def main():
         t_area = sel_area if sel_area != "すべて表示" else None
         search_dash = st.text_input("物件名で検索（一部入力でも可）", key="search_dash_admin")
 
-        all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status,area,floor_level,work_type,issue_detail&progress_status=in.(是正待ち,是正確認中)")
-        all_ins = db_get("inspections", "select=*&is_deleted=eq.false")
+        all_recs_for_tree = _raw_db_get("inspection_records", "select=inspection_id,progress_status,area,floor_level,work_type,issue_detail&progress_status=in.(是正待ち,是正確認中)")
+        all_ins = _raw_db_get("inspections", "select=*&is_deleted=eq.false")
         all_props = db_get("properties", "select=*&is_deleted=eq.false")
         all_props = sort_properties_by_handover(all_props)
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
@@ -1951,8 +1951,16 @@ def main():
                                 badge_text = f"是正写真待ち：{c_data['wait_fix']}件 ／ 管理者確認待ち：{c_data['wait_conf']}件"
                                 
                                 target_ins_list = [i for i in p_inspections if i.get('inspection_type') == t_name]
-                                t_ins_id = target_ins_list[0].get('inspection_id') if target_ins_list else None
-                                current_delay_reason = target_ins_list[0].get('delay_reason', '') if target_ins_list else ''
+                                # 同じ物件・同じ工種で検査が複数回行われている場合（再検査等）、
+                                # どれが選ばれるかで表示が変わってしまわないよう、
+                                # 既に遅延理由が入っているものを優先して表示する
+                                target_ins_list_sorted = sorted(
+                                    target_ins_list,
+                                    key=lambda i: (0 if (i.get('delay_reason') or '').strip() else 1, str(i.get('inspection_id')))
+                                )
+                                t_ins_id = target_ins_list_sorted[0].get('inspection_id') if target_ins_list_sorted else None
+                                current_delay_reason = target_ins_list_sorted[0].get('delay_reason', '') if target_ins_list_sorted else ''
+                                all_target_ins_ids = [i.get('inspection_id') for i in target_ins_list if i.get('inspection_id')]
                                 
                                 if st.button(t_name, key=f"d_{p_idx}_{t_idx}", use_container_width=False):
                                     st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
@@ -1963,16 +1971,19 @@ def main():
                                     if reason_key not in st.session_state:
                                         st.session_state[reason_key] = current_delay_reason
 
-                                    def make_update_reason_cb(ins_id, key):
+                                    def make_update_reason_cb(ins_ids, key):
                                         def _update():
-                                            ok = db_patch_inspection(ins_id, {"delay_reason": st.session_state[key]})
-                                            if ok:
+                                            ok_all = True
+                                            for iid in ins_ids:
+                                                ok = db_patch_inspection(iid, {"delay_reason": st.session_state[key]})
+                                                if not ok: ok_all = False
+                                            if ok_all:
                                                 st.toast("遅延理由を保存しました")
                                             else:
                                                 st.error("保存失敗: Supabaseの権限(RLS)設定によりブロックされました。")
                                         return _update
                                     
-                                    cb_func = make_update_reason_cb(t_ins_id, reason_key)
+                                    cb_func = make_update_reason_cb(all_target_ins_ids, reason_key)
                                     st.text_input("遅延理由", key=reason_key, on_change=cb_func, label_visibility="collapsed", placeholder="遅延理由を入力してEnter")
                                 st.markdown("<div style='margin-bottom:10px;'></div>", unsafe_allow_html=True)
                     
