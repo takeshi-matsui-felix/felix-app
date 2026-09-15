@@ -492,18 +492,6 @@ st.markdown("""
         min-width: 0 !important;
     }
 
-    /* 是正ダッシュボードの検査バーだけは例外：PCは横並び、スマホでは縦積みにする */
-    @media (max-width: 768px) {
-        .felix-mobile-stack {
-            flex-wrap: wrap !important;
-        }
-        .felix-mobile-stack > div[data-testid="column"] {
-            width: 100% !important;
-            flex: 1 1 100% !important;
-            min-width: 100% !important;
-        }
-    }
-
     footer {visibility: hidden;}
     [data-testid="stStatusWidget"] { display: none; }
 
@@ -963,21 +951,8 @@ def main():
             navRow.classList.add('felix-bottom-nav');
         }
     }
-    function markCorrRows() {
-        const doc = window.parent.document;
-        const markers = doc.querySelectorAll('.felix-corr-marker');
-        markers.forEach(function(m) {
-            const block = m.closest('.element-container');
-            if (!block) return;
-            const row = block.nextElementSibling;
-            if (row && !row.classList.contains('felix-mobile-stack')) {
-                row.classList.add('felix-mobile-stack');
-            }
-        });
-    }
     attachBottomNav();
-    markCorrRows();
-    const bnavObserver = new MutationObserver(function() { attachBottomNav(); markCorrRows(); });
+    const bnavObserver = new MutationObserver(attachBottomNav);
     bnavObserver.observe(window.parent.document.body, {childList: true, subtree: true});
     </script>
     """, height=0)
@@ -1769,10 +1744,9 @@ def main():
                         for t_idx, t_name in enumerate(sorted(valid_types)):
                             c_data = tree_counts[p_name][t_name]
                             badge_text = f"全 {c_data['total']} 件 [ 完了：{c_data['done']}件 ／ 未完了：{c_data['unres']}件 ] ※うち是正報告待ち {c_data['wait_fix']}件"
-                            t_cols = st.columns([3, 7])
-                            if t_cols[0].button(t_name, key=f"f_{p_idx}_{t_idx}", use_container_width=True):
+                            if st.button(t_name, key=f"f_{p_idx}_{t_idx}", use_container_width=False):
                                 st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
-                            t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#555;'>{badge_text}</span></div>", unsafe_allow_html=True)
+                            st.markdown(f"<div class='badge-wrap' style='margin: -6px 0 12px 2px;'><span style='color:#555;'>{badge_text}</span></div>", unsafe_allow_html=True)
             if not has_visible_items: st.info("該当する対応必要項目はありません。")
         
         if prop_val and type_val:
@@ -1868,8 +1842,8 @@ def main():
         t_area = sel_area if sel_area != "すべて表示" else None
         search_dash = st.text_input("物件名で検索（一部入力でも可）", key="search_dash_admin")
 
-        all_recs_for_tree = db_get("inspection_records", "select=inspection_id,progress_status,area,floor_level,work_type,issue_detail&progress_status=in.(是正待ち,是正確認中)")
-        all_ins = db_get("inspections", "select=*&is_deleted=eq.false")
+        all_recs_for_tree = _raw_db_get("inspection_records", "select=inspection_id,progress_status,area,floor_level,work_type,issue_detail&progress_status=in.(是正待ち,是正確認中)")
+        all_ins = _raw_db_get("inspections", "select=*&is_deleted=eq.false")
         all_props = db_get("properties", "select=*&is_deleted=eq.false")
         all_props = sort_properties_by_handover(all_props)
         prop_area_map = {p.get('property_id'): p.get('area') for p in all_props if isinstance(p, dict)}
@@ -1977,31 +1951,41 @@ def main():
                                 badge_text = f"是正写真待ち：{c_data['wait_fix']}件 ／ 管理者確認待ち：{c_data['wait_conf']}件"
                                 
                                 target_ins_list = [i for i in p_inspections if i.get('inspection_type') == t_name]
-                                t_ins_id = target_ins_list[0].get('inspection_id') if target_ins_list else None
-                                current_delay_reason = target_ins_list[0].get('delay_reason', '') if target_ins_list else ''
+                                # 同じ物件・同じ工種で検査が複数回行われている場合（再検査等）、
+                                # どれが選ばれるかで表示が変わってしまわないよう、
+                                # 既に遅延理由が入っているものを優先して表示する
+                                target_ins_list_sorted = sorted(
+                                    target_ins_list,
+                                    key=lambda i: (0 if (i.get('delay_reason') or '').strip() else 1, str(i.get('inspection_id')))
+                                )
+                                t_ins_id = target_ins_list_sorted[0].get('inspection_id') if target_ins_list_sorted else None
+                                current_delay_reason = target_ins_list_sorted[0].get('delay_reason', '') if target_ins_list_sorted else ''
+                                all_target_ins_ids = [i.get('inspection_id') for i in target_ins_list if i.get('inspection_id')]
                                 
-                                st.markdown('<div class="felix-corr-marker"></div>', unsafe_allow_html=True)
-                                t_cols = st.columns([3, 4, 3])
-                                if t_cols[0].button(t_name, key=f"d_{p_idx}_{t_idx}", use_container_width=True):
+                                if st.button(t_name, key=f"d_{p_idx}_{t_idx}", use_container_width=False):
                                     st.session_state.drill_target = {"prop": p_name, "type": t_name}; st.session_state.cached_records = None; st.rerun()
-                                t_cols[1].markdown(f"<div class='badge-wrap' style='margin-top:15px;'><span style='color:#E74C3C; font-size: 13px;'>{badge_text}</span></div>", unsafe_allow_html=True)
+                                st.markdown(f"<div class='badge-wrap' style='margin: -6px 0 6px 2px;'><span style='color:#E74C3C; font-size: 13px;'>{badge_text}</span></div>", unsafe_allow_html=True)
                                 
                                 if t_ins_id:
                                     reason_key = f"delay_{t_ins_id}"
                                     if reason_key not in st.session_state:
                                         st.session_state[reason_key] = current_delay_reason
 
-                                    def make_update_reason_cb(ins_id, key):
+                                    def make_update_reason_cb(ins_ids, key):
                                         def _update():
-                                            ok = db_patch_inspection(ins_id, {"delay_reason": st.session_state[key]})
-                                            if ok:
+                                            ok_all = True
+                                            for iid in ins_ids:
+                                                ok = db_patch_inspection(iid, {"delay_reason": st.session_state[key]})
+                                                if not ok: ok_all = False
+                                            if ok_all:
                                                 st.toast("遅延理由を保存しました")
                                             else:
                                                 st.error("保存失敗: Supabaseの権限(RLS)設定によりブロックされました。")
                                         return _update
                                     
-                                    cb_func = make_update_reason_cb(t_ins_id, reason_key)
-                                    t_cols[2].text_input("遅延理由", key=reason_key, on_change=cb_func, label_visibility="collapsed", placeholder="遅延理由を入力してEnter")
+                                    cb_func = make_update_reason_cb(all_target_ins_ids, reason_key)
+                                    st.text_input("遅延理由", key=reason_key, on_change=cb_func, label_visibility="collapsed", placeholder="遅延理由を入力してEnter")
+                                st.markdown("<div style='margin-bottom:10px;'></div>", unsafe_allow_html=True)
                     
                     with col_ex2:
                         with st.popover("✉️"):
