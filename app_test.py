@@ -2317,6 +2317,16 @@ def main():
                 
                 recs = sort_records(recs)
                 total_cnt = len(recs)
+
+                # ---- ページネーション（写真データの読み込み量を抑えるため、初期表示は20件まで） ----
+                if "done_list_show_count" not in st.session_state:
+                    st.session_state.done_list_show_count = {}
+                show_count = st.session_state.done_list_show_count.get(target_id_str, 20)
+                is_partial = show_count < total_cnt
+                visible_recs = recs[:show_count]
+
+                if is_partial:
+                    st.warning(f"通信量節約のため、現在 {len(visible_recs)}／{total_cnt}件のみ表示しています。**印刷する場合は、下（または上）の「全件表示する」を押してから行ってください。**表示されている範囲だけが印刷されます。")
                 
                 if st.session_state.role == "admin":
                     st.markdown(f"""<div class="admin-delete-box" style="background-color:#FFF0F0; padding:15px; border:2px solid #FF4B4B; border-radius:10px; margin-bottom:20px;">
@@ -2333,6 +2343,16 @@ def main():
                         else: st.error("パスワードが違います")
                     st.markdown("<hr class='admin-delete-box'>", unsafe_allow_html=True)
 
+                if is_partial:
+                    c_more, c_all = st.columns(2)
+                    if c_more.button(f"もっと見る（次の20件）", key=f"more_{target_id_str}", use_container_width=True):
+                        st.session_state.done_list_show_count[target_id_str] = show_count + 20
+                        st.rerun()
+                    if c_all.button("🖨️ 全件表示する（印刷前におすすめ）", key=f"showall_{target_id_str}", type="primary", use_container_width=True):
+                        st.session_state.done_list_show_count[target_id_str] = total_cnt
+                        st.rerun()
+                    st.markdown("---")
+
                 st.markdown(f"""<div style="background:white; padding:0; font-family:sans-serif; width:100%;">
                     <div style="text-align:center; margin-bottom:5px; font-size:24px; font-weight:bold;">{prop_val}</div>
                     <div style="text-align:center; margin-top:0; font-size:20px; font-weight:bold;">{type_val} 報告書</div>
@@ -2341,7 +2361,7 @@ def main():
                     </div></div>""", unsafe_allow_html=True)
                 
                 w_groups = {}
-                for r in recs:
+                for r in visible_recs:
                     if not isinstance(r, dict): continue
                     w = r.get('work_type') or 'その他'
                     if w not in w_groups: w_groups[w] = []
@@ -2401,6 +2421,16 @@ def main():
                                     time.sleep(1)
                                     st.rerun()
                         issue_count += 1
+
+                if is_partial:
+                    st.markdown("---")
+                    c_more2, c_all2 = st.columns(2)
+                    if c_more2.button(f"もっと見る（次の20件）", key=f"more_bottom_{target_id_str}", use_container_width=True):
+                        st.session_state.done_list_show_count[target_id_str] = show_count + 20
+                        st.rerun()
+                    if c_all2.button("🖨️ 全件表示する（印刷前におすすめ）", key=f"showall_bottom_{target_id_str}", type="primary", use_container_width=True):
+                        st.session_state.done_list_show_count[target_id_str] = total_cnt
+                        st.rerun()
 
     # ----------------------------------------
     # メニュー: 6. 安全検証ツール（管理者専用）
