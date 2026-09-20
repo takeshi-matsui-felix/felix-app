@@ -10,6 +10,7 @@ import tempfile
 import threading
 import json
 import time
+from PIL import Image
 
 # 外部辞書ファイルの読み込み
 from new_dictionary import ISSUE_TEMPLATES
@@ -119,11 +120,13 @@ def delete_storage_file(url):
 
 def db_delete_record(record_id): 
     # _raw_db_get のキャッシュの罠を避けるため、直接最新のデータを取得
-    res = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url&record_id=eq.{record_id}", headers=HEADERS)
+    res = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url,issue_photo_thumb_url,fix_photo_thumb_url&record_id=eq.{record_id}", headers=HEADERS)
     if res.status_code == 200:
         for r in res.json():
             delete_storage_file(r.get('issue_photo_url'))
             delete_storage_file(r.get('fix_photo_url'))
+            delete_storage_file(r.get('issue_photo_thumb_url'))
+            delete_storage_file(r.get('fix_photo_thumb_url'))
             
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
     clear_specific_cache("inspection_records")
@@ -132,11 +135,13 @@ def db_delete_property(prop_id):
     # キャッシュの罠を避けるため、直接通信（requests.get）で確実に写真URLを拾い上げる
     
     # 【ルート1】property_id に直接紐づく写真
-    res_direct = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url&property_id=eq.{prop_id}", headers=HEADERS)
+    res_direct = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url,issue_photo_thumb_url,fix_photo_thumb_url&property_id=eq.{prop_id}", headers=HEADERS)
     if res_direct.status_code == 200:
         for r in res_direct.json():
             delete_storage_file(r.get('issue_photo_url'))
             delete_storage_file(r.get('fix_photo_url'))
+            delete_storage_file(r.get('issue_photo_thumb_url'))
+            delete_storage_file(r.get('fix_photo_thumb_url'))
 
     # 【ルート2】inspections 経由で紐づく写真
     res_insp = requests.get(f"{SUPABASE_URL}/rest/v1/inspections?select=inspection_id&property_id=eq.{prop_id}", headers=HEADERS)
@@ -144,11 +149,13 @@ def db_delete_property(prop_id):
         for insp in res_insp.json():
             insp_id = insp.get('inspection_id')
             if insp_id:
-                res_rec = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url&inspection_id=eq.{insp_id}", headers=HEADERS)
+                res_rec = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url,issue_photo_thumb_url,fix_photo_thumb_url&inspection_id=eq.{insp_id}", headers=HEADERS)
                 if res_rec.status_code == 200:
                     for r in res_rec.json():
                         delete_storage_file(r.get('issue_photo_url'))
                         delete_storage_file(r.get('fix_photo_url'))
+                        delete_storage_file(r.get('issue_photo_thumb_url'))
+                        delete_storage_file(r.get('fix_photo_thumb_url'))
                         
     # 3. データベースの文字データを削除
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?property_id=eq.{prop_id}", headers=HEADERS)
@@ -160,11 +167,13 @@ def db_delete_property(prop_id):
 
 def db_delete_inspection_hard(inspection_id):
     """検査を写真ごと完全削除する（ゴミ箱からの「完全に削除する」専用）"""
-    res_rec = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url&inspection_id=eq.{inspection_id}", headers=HEADERS)
+    res_rec = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url,issue_photo_thumb_url,fix_photo_thumb_url&inspection_id=eq.{inspection_id}", headers=HEADERS)
     if res_rec.status_code == 200:
         for r in res_rec.json():
             delete_storage_file(r.get('issue_photo_url'))
             delete_storage_file(r.get('fix_photo_url'))
+            delete_storage_file(r.get('issue_photo_thumb_url'))
+            delete_storage_file(r.get('fix_photo_thumb_url'))
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{inspection_id}", headers=HEADERS)
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{inspection_id}", headers=HEADERS)
     clear_specific_cache("inspection_records")
@@ -212,29 +221,59 @@ def get_active_inspections_for_property(prop_id):
             result.append({"type": i.get('inspection_type'), "count": cnt})
     return result
 
-def upload_to_storage(base64_str):
-    if not base64_str or not isinstance(base64_str, str): return None
-    if base64_str.startswith("http://") or base64_str.startswith("https://"): return base64_str
+def _upload_bytes_to_storage(file_data, filename):
+    """バイト列をそのままStorageにアップロードし、公開URLを返す（失敗時はNone）"""
     try:
-        encoded = base64_str.split(",", 1)[1] if "," in base64_str else base64_str
-        file_data = base64.b64decode(encoded)
-        filename = f"{uuid.uuid4()}.jpg"
         url = f"{SUPABASE_URL}/storage/v1/object/photos/{filename}"
-        # 写真は一度アップロードしたら中身が変わらない（差し替え時は必ず新しいファイル名になる）ため、
-        # 長期キャッシュを許可してブラウザ・CDN側の再ダウンロード（＝Supabase通信量）を削減する
         res = requests.post(
             url,
             headers={
                 "apikey": SUPABASE_KEY,
                 "Authorization": f"Bearer {SUPABASE_KEY}",
                 "Content-Type": "image/jpeg",
+                # 写真は一度アップロードしたら中身が変わらない（差し替え時は必ず新しいファイル名になる）ため、
+                # 長期キャッシュを許可してブラウザ・CDN側の再ダウンロード（＝Supabase通信量）を削減する
                 "Cache-Control": "public, max-age=31536000, immutable"
             },
             data=file_data
         )
-        if res.status_code not in [200, 201]: return base64_str
+        if res.status_code not in [200, 201]: return None
         return f"{SUPABASE_URL}/storage/v1/object/public/photos/{filename}"
-    except Exception: return base64_str
+    except Exception:
+        return None
+
+def upload_to_storage(base64_str):
+    """フルサイズ写真をアップロードする（従来互換）。フルサイズURLのみ返す。"""
+    full_url, _ = upload_to_storage_with_thumb(base64_str)
+    return full_url
+
+def upload_to_storage_with_thumb(base64_str):
+    """フルサイズ写真と、一覧・確認系画面で使う軽量サムネイル（長辺400px・quality50）を
+    両方アップロードし、(フルサイズURL, サムネイルURL) を返す。
+    サムネイル生成に失敗した場合はフルサイズURLをそのままサムネイルURLとしても返す（見た目は崩れない）。"""
+    if not base64_str or not isinstance(base64_str, str): return None, None
+    if base64_str.startswith("http://") or base64_str.startswith("https://"): return base64_str, base64_str
+    try:
+        encoded = base64_str.split(",", 1)[1] if "," in base64_str else base64_str
+        file_data = base64.b64decode(encoded)
+        filename = f"{uuid.uuid4()}.jpg"
+        full_url = _upload_bytes_to_storage(file_data, filename)
+        if not full_url: return base64_str, base64_str
+
+        thumb_url = full_url
+        try:
+            img = Image.open(io.BytesIO(file_data)).convert("RGB")
+            img.thumbnail((400, 400))
+            thumb_buf = io.BytesIO()
+            img.save(thumb_buf, format="JPEG", quality=50)
+            uploaded_thumb = _upload_bytes_to_storage(thumb_buf.getvalue(), f"{uuid.uuid4()}_thumb.jpg")
+            if uploaded_thumb: thumb_url = uploaded_thumb
+        except Exception:
+            pass  # サムネイル生成に失敗してもフルサイズURLで代用するので致命的ではない
+
+        return full_url, thumb_url
+    except Exception:
+        return base64_str, base64_str
 
 # ==========================================
 # 物件・指摘の並び替えアルゴリズム
@@ -773,7 +812,7 @@ def main():
             const target = e.target.closest ? e.target.closest('.report-img') : null;
             if (target) {
                 e.preventDefault();
-                img.src = target.src;
+                img.src = target.getAttribute('data-full') || target.src;
                 overlay.style.display = 'flex';
             }
         }, true);
@@ -899,7 +938,7 @@ def main():
     if st.session_state.role == "admin":
         menu_opts = ["ホーム", "物件登録（管理者）", "検査実施（管理者）", "検査内容確認（管理者）", "是正ダッシュボード（管理者用）", "完了分一覧（共通）", "安全検証ツール"]
     else:
-        menu_opts = ["ホーム", "是正実施（協力業者）", "完了分一覧（共通）"]
+        menu_opts = ["ホーム", "是正実施（協力業者）"]
         
     if st.session_state.active_menu not in menu_opts: st.session_state.active_menu = menu_opts[0]
     
@@ -927,7 +966,6 @@ def main():
         nav_items = [
             ("🏠", "ホーム", "ホーム"),
             ("🛠", "是正", "是正実施（協力業者）"),
-            ("📋", "完了", "完了分一覧（共通）"),
         ]
 
     st.markdown('<div id="felix-bottom-nav-marker"></div>', unsafe_allow_html=True)
@@ -1302,7 +1340,8 @@ def main():
                             st.markdown(f"**{title}**")
                             if r.get('issue_photo_url'): 
                                 photo_url = r.get('issue_photo_url')
-                                st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" class="report-img"></a>', unsafe_allow_html=True)
+                                photo_thumb = r.get('issue_photo_thumb_url') or photo_url
+                                st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_thumb}" data-full="{photo_url}" class="report-img"></a>', unsafe_allow_html=True)
                                 
                             with st.expander("内容を修正・差し替え・削除"):
                                 new_f = floor; new_a = area; sel_temp = None; default_w = ""
@@ -1355,8 +1394,10 @@ def main():
                                     with st.spinner("保存中..."):
                                         up_data = {"floor_level": new_f, "area": new_a, "work_type": new_w, "issue_detail": final_desc, "line_notified": True}
                                         if new_photo:
-                                            url = upload_to_storage(new_photo)
-                                            if url and url != new_photo: up_data["issue_photo_url"] = url
+                                            url, thumb_url = upload_to_storage_with_thumb(new_photo)
+                                            if url and url != new_photo:
+                                                up_data["issue_photo_url"] = url
+                                                up_data["issue_photo_thumb_url"] = thumb_url
                                         db_patch("inspection_records", rec_id, up_data)
                                     st.rerun()
                                 if c_del.button("この指摘を削除", key=f"ed_del_{rec_id}"): 
@@ -1455,7 +1496,7 @@ def main():
                         with st.spinner(f"全 {len(st.session_state.pending_records)} 件のデータを送信中...（このまま画面を閉じないでください）"):
                             err_count = 0
                             for rec in st.session_state.pending_records:
-                                url = upload_to_storage(rec["photo_b64"])
+                                url, thumb_url = upload_to_storage_with_thumb(rec["photo_b64"])
                                 if not url or url == rec["photo_b64"]:
                                     err_count += 1
                                     continue
@@ -1465,7 +1506,7 @@ def main():
                                     "record_id": str(uuid.uuid4()), "inspection_id": c_id, "property_id": c_prop_id, 
                                     "floor_level": rec["floor_level"], "area": rec["area"], "work_type": rec["work_type"], 
                                     "issue_detail": rec["issue_detail"], "progress_status": initial_status, "line_notified": True,
-                                    "issue_photo_url": url
+                                    "issue_photo_url": url, "issue_photo_thumb_url": thumb_url
                                 }
                                 res = requests.post(f"{SUPABASE_URL}/rest/v1/inspection_records", headers=HEADERS, json=db_rec)
                                 if res.status_code not in [200, 201, 204]:
@@ -1634,7 +1675,8 @@ def main():
                         
                         if r.get('issue_photo_url'): 
                             photo_url = r.get('issue_photo_url')
-                            st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" class="report-img"></a>', unsafe_allow_html=True)
+                            photo_thumb = r.get('issue_photo_thumb_url') or photo_url
+                            st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_thumb}" data-full="{photo_url}" class="report-img"></a>', unsafe_allow_html=True)
                         
                         with st.expander("指摘内容・写真を直前修正する"):
                             f_idx = FLOOR_OPTS[1:].index(floor) if floor in FLOOR_OPTS[1:] else 0
@@ -1656,8 +1698,10 @@ def main():
                                 with st.spinner("保存中..."):
                                     up_data = {"floor_level": new_f, "area": new_a, "issue_detail": new_d.strip(), "work_type": new_w, "line_notified": True}
                                     if new_p:
-                                        url = upload_to_storage(new_p)
-                                        if url and url != new_p: up_data["issue_photo_url"] = url
+                                        url, thumb_url = upload_to_storage_with_thumb(new_p)
+                                        if url and url != new_p:
+                                            up_data["issue_photo_url"] = url
+                                            up_data["issue_photo_thumb_url"] = thumb_url
                                     db_patch("inspection_records", rec_id, up_data)
                                     st.session_state.cached_records = None
                                 st.rerun()
@@ -1808,7 +1852,8 @@ def main():
                                 st.markdown("**【指摘箇所（Before）】**")
                                 if r.get('issue_photo_url'): 
                                     photo_url = r.get('issue_photo_url')
-                                    st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_url}" class="report-img"></a>', unsafe_allow_html=True)
+                                    photo_thumb = r.get('issue_photo_thumb_url') or photo_url
+                                    st.markdown(f'<a href="{photo_url}" target="_blank"><img src="{photo_thumb}" data-full="{photo_url}" class="report-img"></a>', unsafe_allow_html=True)
                                 else: st.write("写真なし")
                                     
                             with c2:
@@ -1822,9 +1867,9 @@ def main():
                                 if st.button("完了報告", key=f"s_{rec_id}", type="primary"):
                                     if up: 
                                         with st.spinner("送信中..."):
-                                            fix_url = upload_to_storage(up)
+                                            fix_url, fix_thumb_url = upload_to_storage_with_thumb(up)
                                             if fix_url and fix_url != up:
-                                                db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "fix_photo_url": fix_url, "line_notified": True})
+                                                db_patch("inspection_records", rec_id, {"progress_status": "是正確認中", "fix_photo_url": fix_url, "fix_photo_thumb_url": fix_thumb_url, "line_notified": True})
                                                 st.session_state.cached_records = [item for item in st.session_state.cached_records if item.get('record_id') != rec_id]
                                                 st.session_state.skip_render_ids.append(rec_id)
                                         st.rerun()
@@ -2094,8 +2139,10 @@ def main():
                                     with st.spinner("保存中..."):
                                         up_data = {"work_type": new_w, "issue_detail": new_detail, "line_notified": True}
                                         if new_photo:
-                                            url = upload_to_storage(new_photo)
-                                            if url and url != new_photo: up_data["issue_photo_url"] = url
+                                            url, thumb_url = upload_to_storage_with_thumb(new_photo)
+                                            if url and url != new_photo:
+                                                up_data["issue_photo_url"] = url
+                                                up_data["issue_photo_thumb_url"] = thumb_url
                                         db_patch("inspection_records", rec_id, up_data)
                                         st.session_state.cached_records = None
                                     st.rerun()
@@ -2103,9 +2150,11 @@ def main():
 
                             c1, c2 = st.columns(2)
                             i_photo = r.get('issue_photo_url'); f_photo = r.get('fix_photo_url')
+                            i_photo_thumb = r.get('issue_photo_thumb_url') or i_photo
+                            f_photo_thumb = r.get('fix_photo_thumb_url') or f_photo
                             with c1:
                                 st.markdown("**【指摘箇所（Before）】**")
-                                if i_photo: st.markdown(f'<a href="{i_photo}" target="_blank"><img src="{i_photo}" class="report-img"></a>', unsafe_allow_html=True)
+                                if i_photo: st.markdown(f'<a href="{i_photo}" target="_blank"><img src="{i_photo_thumb}" data-full="{i_photo}" class="report-img"></a>', unsafe_allow_html=True)
                                 else: st.write("写真なし")
                             with c2:
                                 if p_stat == "是正待ち":
@@ -2117,11 +2166,12 @@ def main():
                                     if st.button("写真を保存して完了にする", key=f"s_{rec_id}", type="primary"):
                                         if up: 
                                             with st.spinner("送信中..."):
-                                                fix_url = upload_to_storage(up)
+                                                fix_url, fix_thumb_url = upload_to_storage_with_thumb(up)
                                                 if fix_url and fix_url != up:
                                                     db_patch("inspection_records", rec_id, {
                                                         "progress_status": "完了", 
                                                         "fix_photo_url": fix_url, 
+                                                        "fix_photo_thumb_url": fix_thumb_url,
                                                         "line_notified": True,
                                                         "approved_date": str(datetime.date.today())
                                                     })
@@ -2132,7 +2182,7 @@ def main():
                                     if up: st.image(up, width=250)
                                 elif p_stat == "是正確認中":
                                     st.markdown("**【是正写真（After）】**")
-                                    if f_photo: st.markdown(f'<a href="{f_photo}" target="_blank"><img src="{f_photo}" class="report-img"></a>', unsafe_allow_html=True)
+                                    if f_photo: st.markdown(f'<a href="{f_photo}" target="_blank"><img src="{f_photo_thumb}" data-full="{f_photo}" class="report-img"></a>', unsafe_allow_html=True)
                                     ca, cb = st.columns(2)
                                     if ca.button("承認（完了へ）", key=f"ok_{rec_id}", type="primary"): 
                                         with st.spinner("処理中..."):
@@ -2415,10 +2465,10 @@ def main():
                 storage_files = {item['name'] for item in res_storage.json() if isinstance(item, dict) and 'name' in item}
                 
                 used_files = set()
-                res_db = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url", headers=admin_headers)
+                res_db = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url,issue_photo_thumb_url,fix_photo_thumb_url", headers=admin_headers)
                 if res_db.status_code == 200:
                     for r in res_db.json():
-                        for key in ['issue_photo_url', 'fix_photo_url']:
+                        for key in ['issue_photo_url', 'fix_photo_url', 'issue_photo_thumb_url', 'fix_photo_thumb_url']:
                             if r.get(key): used_files.add(str(r.get(key)).split('?')[0].split('/')[-1])
                 return list(storage_files - used_files), None
             except Exception as e: return None, f"エラー: {e}"
