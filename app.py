@@ -100,23 +100,26 @@ def db_patch_inspection(ins_id, data):
     except: return False
 
 def delete_storage_file(url):
-    """写真ファイルをStorageから直接削除する専用関数（マスターキー強制突破版）"""
-    if not url: return
+    """写真ファイルをStorageから直接削除する専用関数（マスターキー強制突破版）。
+    戻り値: 削除に成功したらTrue、失敗したらFalse、そもそも対象URLが無い場合はNone（集計対象外）。"""
+    if not url: return None
     try:
         clean_url = str(url).split('?')[0]
         filename = clean_url.split('/')[-1]
-        if not filename or filename == "None": return
-        
+        if not filename or filename == "None": return None
+
         # 🌟 Secretsからマスターキーを安全に呼び出して、Supabaseの権限ブロックを強制突破する
         master_key = st.secrets.get("SUPABASE_SERVICE_KEY")
-        if not master_key: return  # キーが未設定の場合は安全のためスキップ
-            
+        if not master_key: return False  # キーが未設定の場合は安全のためスキップ（失敗扱い）
+
         admin_headers = {
             "apikey": master_key,
             "Authorization": f"Bearer {master_key}"
         }
-        requests.delete(f"{SUPABASE_URL}/storage/v1/object/photos/{filename}", headers=admin_headers)
-    except: pass
+        res = requests.delete(f"{SUPABASE_URL}/storage/v1/object/photos/{filename}", headers=admin_headers)
+        return res.status_code in [200, 204]
+    except Exception:
+        return False
 
 def db_delete_record(record_id): 
     # _raw_db_get のキャッシュの罠を避けるため、直接最新のデータを取得
@@ -131,17 +134,24 @@ def db_delete_record(record_id):
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?record_id=eq.{record_id}", headers=HEADERS)
     clear_specific_cache("inspection_records")
 
+def _tally_delete(total, success, result):
+    """delete_storage_fileの戻り値を(試行数, 成功数)に積み上げる共通ヘルパー"""
+    if result is not None:
+        total += 1
+        if result: success += 1
+    return total, success
+
 def db_delete_property(prop_id):
+    """物件を写真ごと完全削除する。戻り値: (写真削除を試みた枚数, 成功した枚数)"""
+    total, success = 0, 0
     # キャッシュの罠を避けるため、直接通信（requests.get）で確実に写真URLを拾い上げる
-    
+
     # 【ルート1】property_id に直接紐づく写真
     res_direct = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url,issue_photo_thumb_url,fix_photo_thumb_url&property_id=eq.{prop_id}", headers=HEADERS)
     if res_direct.status_code == 200:
         for r in res_direct.json():
-            delete_storage_file(r.get('issue_photo_url'))
-            delete_storage_file(r.get('fix_photo_url'))
-            delete_storage_file(r.get('issue_photo_thumb_url'))
-            delete_storage_file(r.get('fix_photo_thumb_url'))
+            for key in ['issue_photo_url', 'fix_photo_url', 'issue_photo_thumb_url', 'fix_photo_thumb_url']:
+                total, success = _tally_delete(total, success, delete_storage_file(r.get(key)))
 
     # 【ルート2】inspections 経由で紐づく写真
     res_insp = requests.get(f"{SUPABASE_URL}/rest/v1/inspections?select=inspection_id&property_id=eq.{prop_id}", headers=HEADERS)
@@ -152,11 +162,9 @@ def db_delete_property(prop_id):
                 res_rec = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url,issue_photo_thumb_url,fix_photo_thumb_url&inspection_id=eq.{insp_id}", headers=HEADERS)
                 if res_rec.status_code == 200:
                     for r in res_rec.json():
-                        delete_storage_file(r.get('issue_photo_url'))
-                        delete_storage_file(r.get('fix_photo_url'))
-                        delete_storage_file(r.get('issue_photo_thumb_url'))
-                        delete_storage_file(r.get('fix_photo_thumb_url'))
-                        
+                        for key in ['issue_photo_url', 'fix_photo_url', 'issue_photo_thumb_url', 'fix_photo_thumb_url']:
+                            total, success = _tally_delete(total, success, delete_storage_file(r.get(key)))
+
     # 3. データベースの文字データを削除
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?property_id=eq.{prop_id}", headers=HEADERS)
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?property_id=eq.{prop_id}", headers=HEADERS)
@@ -164,20 +172,22 @@ def db_delete_property(prop_id):
     clear_specific_cache("inspection_records")
     clear_specific_cache("inspections")
     clear_specific_cache("properties")
+    return total, success
 
 def db_delete_inspection_hard(inspection_id):
-    """検査を写真ごと完全削除する（ゴミ箱からの「完全に削除する」専用）"""
+    """検査を写真ごと完全削除する（ゴミ箱からの「完全に削除する」専用）。
+    戻り値: (写真削除を試みた枚数, 成功した枚数)"""
+    total, success = 0, 0
     res_rec = requests.get(f"{SUPABASE_URL}/rest/v1/inspection_records?select=issue_photo_url,fix_photo_url,issue_photo_thumb_url,fix_photo_thumb_url&inspection_id=eq.{inspection_id}", headers=HEADERS)
     if res_rec.status_code == 200:
         for r in res_rec.json():
-            delete_storage_file(r.get('issue_photo_url'))
-            delete_storage_file(r.get('fix_photo_url'))
-            delete_storage_file(r.get('issue_photo_thumb_url'))
-            delete_storage_file(r.get('fix_photo_thumb_url'))
+            for key in ['issue_photo_url', 'fix_photo_url', 'issue_photo_thumb_url', 'fix_photo_thumb_url']:
+                total, success = _tally_delete(total, success, delete_storage_file(r.get(key)))
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspection_records?inspection_id=eq.{inspection_id}", headers=HEADERS)
     requests.delete(f"{SUPABASE_URL}/rest/v1/inspections?inspection_id=eq.{inspection_id}", headers=HEADERS)
     clear_specific_cache("inspection_records")
     clear_specific_cache("inspections")
+    return total, success
 
 # ---- ゴミ箱（論理削除）関連 ----
 def soft_delete_property(prop_id):
@@ -199,6 +209,30 @@ def _patch_by_key(table, key_col, key_val, data):
         return res.status_code in [200, 204]
     except Exception:
         return False
+
+def get_photo_counts_by_property(prop_ids):
+    """ゴミ箱（物件単位）一覧用：複数物件の写真枚数を1回の通信でまとめて取得し、{property_id: 枚数} を返す"""
+    ids = [str(p) for p in prop_ids if p]
+    if not ids: return {}
+    recs = _raw_db_get("inspection_records", f"property_id=in.({','.join(ids)})&select=property_id,issue_photo_url,fix_photo_url")
+    counts = {}
+    for r in recs:
+        pid = r.get('property_id')
+        n = sum(1 for k in ('issue_photo_url', 'fix_photo_url') if r.get(k))
+        counts[pid] = counts.get(pid, 0) + n
+    return counts
+
+def get_photo_counts_by_inspection(ins_ids):
+    """ゴミ箱（検査単位）一覧用：複数検査の写真枚数を1回の通信でまとめて取得し、{inspection_id: 枚数} を返す"""
+    ids = [str(i) for i in ins_ids if i]
+    if not ids: return {}
+    recs = _raw_db_get("inspection_records", f"inspection_id=in.({','.join(ids)})&select=inspection_id,issue_photo_url,fix_photo_url")
+    counts = {}
+    for r in recs:
+        iid = r.get('inspection_id')
+        n = sum(1 for k in ('issue_photo_url', 'fix_photo_url') if r.get(k))
+        counts[iid] = counts.get(iid, 0) + n
+    return counts
 
 def get_active_inspections_for_property(prop_id):
     """その物件に紐づく「完了分一覧からまだ削除されていない（＝PDF保存確認の前段階の）」検査の一覧
@@ -2441,45 +2475,95 @@ def main():
         st.markdown("**🗑️ ゴミ箱**")
         st.caption("物件登録画面・完了分一覧から削除されたデータをここから復元、または完全に削除できます")
 
+        def _purge_result_msg(total, success):
+            if total == 0 or success == total:
+                st.success(f"完全に削除しました（写真{success}/{total}枚）")
+            else:
+                st.warning(f"データは削除しましたが、写真の一部が削除できませんでした（写真{success}/{total}枚成功）。下の「ストレージデータ定期照合ツール」で後ほど再確認・再削除できます。")
+
         deleted_props = _raw_db_get("properties", "is_deleted=eq.true&select=*")
         deleted_props = sort_properties_by_handover(deleted_props)
         if not deleted_props:
             st.info("削除済みの物件はありません。")
         else:
+            prop_photo_counts = get_photo_counts_by_property([dp.get('property_id') for dp in deleted_props])
+            if "trash_selected_props" not in st.session_state: st.session_state.trash_selected_props = set()
+
             for dp in deleted_props:
                 dp_id = dp.get('property_id')
                 if not dp_id: continue
                 dp_name = dp.get('property_name', '不明'); dp_area = dp.get('area', '未設定')
+                photo_n = prop_photo_counts.get(dp_id, 0)
                 with st.container():
-                    st.markdown(f"**[{dp_area}] {dp_name}**")
+                    cb_col, info_col = st.columns([0.06, 0.94])
+                    checked = cb_col.checkbox("選択", key=f"sel_prop_{dp_id}", value=(dp_id in st.session_state.trash_selected_props), label_visibility="collapsed")
+                    if checked: st.session_state.trash_selected_props.add(dp_id)
+                    else: st.session_state.trash_selected_props.discard(dp_id)
+                    info_col.markdown(f"**[{dp_area}] {dp_name}**　　📷 写真{photo_n}枚")
                     c1, c2 = st.columns(2)
                     if c1.button("↩️ 復元する", key=f"restore_prop_{dp_id}"):
                         restore_property(dp_id); st.rerun()
                     if c2.button("🔥 完全に削除する（写真含む・元に戻せません）", key=f"purge_prop_{dp_id}"):
                         with st.spinner("完全削除中..."):
-                            db_delete_property(dp_id)
-                        st.success("完全に削除しました"); time.sleep(1); st.rerun()
+                            total, success = db_delete_property(dp_id)
+                        _purge_result_msg(total, success)
+                        time.sleep(1); st.rerun()
                     st.markdown("---")
 
+            if st.session_state.trash_selected_props:
+                n_sel = len(st.session_state.trash_selected_props)
+                if st.button(f"🔥 選択した{n_sel}件の物件をまとめて完全に削除する", type="primary", use_container_width=True, key="bulk_purge_props"):
+                    with st.spinner(f"{n_sel}件を一括完全削除中..."):
+                        total_all, success_all = 0, 0
+                        for pid in list(st.session_state.trash_selected_props):
+                            t, s = db_delete_property(pid)
+                            total_all += t; success_all += s
+                    st.session_state.trash_selected_props = set()
+                    _purge_result_msg(total_all, success_all)
+                    time.sleep(1); st.rerun()
+
         st.markdown("**🗑️ ゴミ箱（検査単位）**")
+        st.caption("同じ物件の検査がまとまって見えるよう、物件名順に並び替えています")
         deleted_ins = _raw_db_get("inspections", "is_deleted=eq.true&select=*")
+        deleted_ins = sorted(deleted_ins, key=lambda d: (d.get('property_name') or '', d.get('inspection_type') or ''))
         if not deleted_ins:
             st.info("削除済みの検査はありません。")
         else:
+            ins_photo_counts = get_photo_counts_by_inspection([di.get('inspection_id') for di in deleted_ins])
+            if "trash_selected_ins" not in st.session_state: st.session_state.trash_selected_ins = set()
+
             for di in deleted_ins:
                 di_id = di.get('inspection_id')
                 if not di_id: continue
                 di_name = di.get('property_name', '不明'); di_type = di.get('inspection_type', '不明')
+                photo_n = ins_photo_counts.get(di_id, 0)
                 with st.container():
-                    st.markdown(f"**{di_name} / {di_type}**")
+                    cb_col, info_col = st.columns([0.06, 0.94])
+                    checked = cb_col.checkbox("選択", key=f"sel_ins_{di_id}", value=(di_id in st.session_state.trash_selected_ins), label_visibility="collapsed")
+                    if checked: st.session_state.trash_selected_ins.add(di_id)
+                    else: st.session_state.trash_selected_ins.discard(di_id)
+                    info_col.markdown(f"**{di_name} / {di_type}**　　📷 写真{photo_n}枚")
                     c1, c2 = st.columns(2)
                     if c1.button("↩️ 復元する", key=f"restore_ins_{di_id}"):
                         restore_inspection(di_id); st.rerun()
                     if c2.button("🔥 完全に削除する（写真含む・元に戻せません）", key=f"purge_ins_{di_id}"):
                         with st.spinner("完全削除中..."):
-                            db_delete_inspection_hard(di_id)
-                        st.success("完全に削除しました"); time.sleep(1); st.rerun()
+                            total, success = db_delete_inspection_hard(di_id)
+                        _purge_result_msg(total, success)
+                        time.sleep(1); st.rerun()
                     st.markdown("---")
+
+            if st.session_state.trash_selected_ins:
+                n_sel = len(st.session_state.trash_selected_ins)
+                if st.button(f"🔥 選択した{n_sel}件の検査をまとめて完全に削除する", type="primary", use_container_width=True, key="bulk_purge_ins"):
+                    with st.spinner(f"{n_sel}件を一括完全削除中..."):
+                        total_all, success_all = 0, 0
+                        for iid in list(st.session_state.trash_selected_ins):
+                            t, s = db_delete_inspection_hard(iid)
+                            total_all += t; success_all += s
+                    st.session_state.trash_selected_ins = set()
+                    _purge_result_msg(total_all, success_all)
+                    time.sleep(1); st.rerun()
 
         st.markdown("---")
         st.markdown("**🧹 ストレージデータ定期照合ツール**")
