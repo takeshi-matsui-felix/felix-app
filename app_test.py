@@ -769,6 +769,9 @@ if "target_area" not in st.session_state: st.session_state.target_area = None
 def jump_to_menu(menu_name, prop_id=None):
     st.session_state.active_menu = menu_name
     st.session_state.pre_selected_prop = prop_id
+    # 利用者が自分でメニューを移動した場合は、ホームでの「前回の是正画面への自動復帰」を行わない
+    st.session_state.suppress_auto_resume = True
+    st.query_params.clear()
     st.session_state.drill_target = None
     st.session_state.current_box = None
     st.session_state.delete_target = None
@@ -888,8 +891,9 @@ def main():
     """, height=0)
 
     if st.session_state.logout_triggered:
-        components.html("<script>localStorage.removeItem('felix_user_auth');</script>", height=0)
+        components.html("<script>localStorage.removeItem('felix_user_auth'); localStorage.removeItem('felix_partner_session');</script>", height=0)
         time.sleep(0.5)
+        st.query_params.clear()
         st.session_state.clear()
         st.rerun()
 
@@ -956,6 +960,16 @@ def main():
             st.session_state.target_area = auth_res.get("area")
             st.session_state.active_menu = "ホーム"
             st.session_state.splash_done = False
+            # URLに現在地（p=物件名 / t=検査名）が残っていれば、協力業者は再読み込み後にホームを経由せず
+            # その是正画面へ直接復帰する（タイムアウト後の再読み込みで元の画面に戻れるようにするため）
+            _qp_prop = st.query_params.get("p")
+            _qp_type = st.query_params.get("t")
+            if st.session_state.role == "partner" and _qp_prop and _qp_type:
+                st.session_state.active_menu = "是正実施（協力業者）"
+                st.session_state.drill_target = {"prop": _qp_prop, "type": _qp_type}
+                st.session_state.splash_done = True
+            elif _qp_prop or _qp_type:
+                st.query_params.clear()
             st.rerun()
         st.stop()
 
@@ -1088,18 +1102,20 @@ def main():
                 body {{ margin:0; font-family: 'Noto Sans JP', sans-serif; display: flex; flex-direction: column; height: 100vh; background: transparent; }}
                 .menu-item {{ font-size: 16px; font-weight: 700; color: #16324F; cursor: pointer; margin: 24px 0; text-align: center; transition: color 0.2s; user-select: none; }}
                 .menu-item:hover {{ color: #E8A33D; }}
+                .resume-btn {{ background: #16324F; color: #FFFFFF; border-radius: 10px; padding: 14px 16px; margin: 24px auto; max-width: 320px; font-size: 14px; box-shadow: 0 3px 8px rgba(22,50,79,0.18); }}
+                .resume-btn:hover {{ color: #FFFFFF; opacity: 0.88; }}
                 .container {{ position: absolute; top: 38.2%; left: 50%; transform: translate(-50%, -50%); width: 100%; }}
             </style>
             </head>
             <body>
             <div class="container">
                 <div class="menu-item" onclick="sendVal('new')">{new_btn_text}</div>
-                <div class="menu-item" id="resume-btn" style="display:none;" onclick="sendVal('resume')"></div>
+                <div class="menu-item resume-btn" id="resume-btn" style="display:none;" onclick="sendVal('resume')"></div>
             </div>
             <script>
                 function sendVal(action) {{
                     let val = {{ action: action }};
-                    if(action === 'resume') {{
+                    if(action === 'resume' || action === 'auto') {{
                         val.data = JSON.parse(localStorage.getItem('{ls_key}'));
                         if('{role}' === 'admin' && val.data && val.data.id) {{
                             try {{
@@ -1110,13 +1126,18 @@ def main():
                     }}
                     window.parent.postMessage({{isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val}}, "*");
                 }}
+                let autoResume = false;
                 const saved = localStorage.getItem('{ls_key}');
                 if(saved) {{
                     try {{
                         const data = JSON.parse(saved);
                         let text = '';
-                        if('{role}' === 'admin' && data.name && data.type) {{ text = '前回の続きから再開する（' + data.name + ' / ' + data.type + '）'; }} 
-                        else if ('{role}' === 'partner' && data.prop && data.type) {{ text = '前回の続きから再開する（' + data.prop + ' / ' + data.type + '）'; }}
+                        if('{role}' === 'admin' && data.name && data.type) {{ text = '前回の続きから再開する（' + data.name + ' / ' + data.type + '）'; }}
+                        else if ('{role}' === 'partner' && data.prop && data.type) {{
+                            // 協力業者：最後に是正画面を操作してから12時間以内の記録だけを「前回の続き」として扱う
+                            const fresh = data.ts && (Date.now() - data.ts) < 12 * 3600 * 1000;
+                            if(fresh) {{ text = '前回の続きから再開する（' + data.prop + ' / ' + data.type + '）'; autoResume = true; }}
+                        }}
                         if(text) {{
                             const btn = document.getElementById('resume-btn');
                             btn.style.display = 'block'; btn.innerText = text;
@@ -1126,6 +1147,8 @@ def main():
                 window.onload = function() {{
                     window.parent.postMessage({{isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1}}, "*");
                     window.parent.postMessage({{isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: 500}}, "*");
+                    // 協力業者は、タイムアウト後の再読み込みで開いた時にタップなしで前回の是正画面へ自動復帰する
+                    if(autoResume) {{ sendVal('auto'); }}
                 }};
             </script>
             </body>
@@ -1141,7 +1164,9 @@ def main():
                 if res.get('action') == 'new':
                     st.session_state.active_menu = "検査実施（管理者）" if role == "admin" else "是正実施（協力業者）"
                     st.session_state.current_box = None; st.session_state.drill_target = None; st.rerun()
-                elif res.get('action') == 'resume' and res.get('data'):
+                elif res.get('action') == 'auto' and (role != "partner" or st.session_state.get('suppress_auto_resume')):
+                    pass  # 自動復帰は協力業者の新しい接続時のみ。自分でホームへ移動した場合は手動の「前回の続き」ボタンを使う
+                elif res.get('action') in ('resume', 'auto') and res.get('data'):
                     d = res['data']
                     if role == "admin":
                         st.session_state.active_menu = "検査実施（管理者）"
@@ -1794,6 +1819,7 @@ def main():
                 elif p_stat == "是正待ち": tree_counts[p][t]["wait_fix"] += 1; tree_counts[p][t]["unres"] += 1
                 else: tree_counts[p][t]["unres"] += 1
 
+        tree_names_all = set(tree.keys())  # 検索絞り込み前の物件名一覧（URL・前回の続きから復帰した物件が、このエリアのものか確認する用）
         if search_fix: tree = {k: v for k, v in tree.items() if search_fix in k}
                 
         sorted_tree_keys = []
@@ -1808,13 +1834,22 @@ def main():
         if not isinstance(sel, dict): sel = {}
         prop_val = sel.get('prop', ''); type_val = sel.get('type', '')
         target_id_str = f"fix_{prop_val}_{type_val}" if prop_val else None
-        
+
+        if prop_val and type_val and prop_val not in tree_names_all:
+            # 復帰先の物件がこのエリアに無い（削除済み・別エリア等）場合は、一覧に戻して選び直してもらう
+            st.session_state.drill_target = None
+            st.warning("前回の是正画面が見つかりませんでした。下の一覧から選び直してください。")
+            prop_val = ''; type_val = ''; target_id_str = None
+
         if not (prop_val and type_val):
+            # 一覧画面に居る間は「前回の続き」情報（URL・端末内の記録）を持たない
+            st.query_params.clear()
+            components.html("<script>localStorage.removeItem('felix_partner_session');</script>", height=0)
             has_visible_items = False
             for p_idx, p_name in enumerate(sorted_tree_keys):
                 v_data = tree[p_name]; p_id = v_data.get("prop_id"); p_hdate = prop_hdate_map.get(p_id)
                 h_disp = f" (引渡し: {p_hdate})" if p_hdate else " (引渡し未設定)"
-                
+
                 valid_types = [t for t in v_data["types"] if tree_counts.get(p_name, {}).get(t, {}).get("wait_fix", 0) > 0]
                 if valid_types:
                     has_visible_items = True
@@ -1831,9 +1866,16 @@ def main():
             if st.button("⬅ 戻る", key="back_from_fix"): 
                 st.session_state.drill_target = None; st.session_state.skip_render_ids = []; st.session_state.cached_records = None; st.rerun()
 
+            # 現在地をURLに残す（タイムアウト後に再読み込みしても、同じ是正画面へ直接戻れる）
+            if st.query_params.get("p") != prop_val or st.query_params.get("t") != type_val:
+                st.query_params["p"] = prop_val
+                st.query_params["t"] = type_val
+
+            # 端末内にも現在地と最終操作時刻を保存（URLなしでアプリを開き直した時の自動復帰用）。
+            # time.time()をコメントに入れているのは、再実行のたびにスクリプトを実行し直して最終操作時刻を更新するため
             cb_data = {"prop": prop_val, "type": type_val}
             json_str = json.dumps(cb_data, ensure_ascii=False)
-            components.html(f"<script>localStorage.setItem(\"felix_partner_session\", JSON.stringify({json_str}));</script>", height=0)
+            components.html(f"<script>/* {time.time()} */ localStorage.setItem(\"felix_partner_session\", JSON.stringify(Object.assign({json_str}, {{ts: Date.now()}})));</script>", height=0)
 
             t_ids = [str(i.get('inspection_id')) for i in all_ins if isinstance(i, dict) and i.get('property_name') == prop_val and i.get('inspection_type') == type_val and i.get('inspection_id')]
             if t_ids:
@@ -1845,7 +1887,12 @@ def main():
                 cnt_data = db_get("inspection_records", f"select=record_id&inspection_id=in.({','.join(t_ids)})")
                 total_cnt = len(cnt_data); wait_cnt = len(recs)
                 st.info(f"進捗： 指摘総数 {total_cnt}件 ／ 残り（是正報告待ち） {wait_cnt}件")
-                
+                if total_cnt > 0 and wait_cnt == 0:
+                    # 全件報告済みなら「前回の続き」は不要。通信失敗で0件に見えているだけの場合に消さないよう、指摘総数が取れている時だけ消す
+                    st.success("この検査の是正はすべて報告済みです。「⬅ 戻る」で一覧に戻れます。")
+                    st.query_params.clear()
+                    components.html("<script>setTimeout(function(){ localStorage.removeItem('felix_partner_session'); }, 1500);</script>", height=0)
+
                 if recs and type_val in SHANAI_KENSA_TYPES:
                     floors_in_recs = sorted(list(set([r.get('floor_level', 'one') for r in recs if r.get('floor_level')])))
                     sel_floor = st.selectbox("部屋（階層）で絞り込み", ["すべて表示"] + floors_in_recs, key="filter_partner_fix_floor")
